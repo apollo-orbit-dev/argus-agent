@@ -1,0 +1,93 @@
+"""File workspace: path-safety + read/write/list/delete + SSRF-guarded download."""
+import asyncio
+import types
+
+from engine.tools.files import (DeleteFileTool, DownloadFileTool, FileWorkspace,
+                                 ListFilesTool, ReadFileTool, WriteFileTool, safe_name)
+
+
+def test_safe_name_blocks_traversal():
+    assert safe_name("../../etc/passwd") == "passwd"
+    assert safe_name("/abs/path/report.md") == "report.md"
+    assert safe_name("a/b/c.txt") == "c.txt"
+    assert safe_name("  ..  ") == ""
+
+
+def test_workspace_roundtrip(tmp_path):
+    ws = FileWorkspace(str(tmp_path / "ws"))
+    ws.write_text("notes.md", "hello world")
+    assert ws.exists("notes.md")
+    assert ws.read_text("notes.md") == "hello world"
+    files = ws.list()
+    assert len(files) == 1 and files[0]["name"] == "notes.md"
+    assert ws.delete("notes.md") is True
+    assert ws.list() == []
+
+
+def test_write_read_traversal_safe(tmp_path):
+    ws = FileWorkspace(str(tmp_path / "ws"))
+    wt = WriteFileTool(ws)
+    out = asyncio.run(wt.run(wt.Params(name="../evil.txt", content="x")))
+    assert "evil.txt" in out
+    # it was written as a flat basename inside the workspace, not outside
+    assert ws.exists("evil.txt")
+    assert not (tmp_path / "evil.txt").exists()
+
+
+def test_tools_read_list_delete(tmp_path):
+    ws = FileWorkspace(str(tmp_path / "ws"))
+    ws.write_text("a.txt", "AAA")
+    assert "AAA" in asyncio.run(ReadFileTool(ws).run(ReadFileTool.Params(name="a.txt")))
+    assert "a.txt" in asyncio.run(ListFilesTool(ws).run(ListFilesTool.Params()))
+    assert "no file" in asyncio.run(ReadFileTool(ws).run(ReadFileTool.Params(name="missing"))).lower()
+    assert "deleted" in asyncio.run(DeleteFileTool(ws).run(DeleteFileTool.Params(name="a.txt")))
+
+
+# ---- download_file (SSRF-guarded) ----
+
+async def test_download_infers_extension_from_content_type(tmp_path, monkeypatch):
+    ws = FileWorkspace(str(tmp_path / "ws"))
+
+    async def fake_fetch(url, **kw):
+        return types.SimpleNamespace(status_code=200,
+                                     headers={"content-type": "application/pdf"},
+                                     content=b"%PDF-1.4 fake pdf bytes")
+    monkeypatch.setattr("engine.tools.net_guard.safe_fetch", fake_fetch)
+    t = DownloadFileTool(ws)
+    out = await t.run(t.Params(url="https://example.com/report"))    # no extension in URL
+    assert "saved" in out.lower()
+    assert ws.exists("report.pdf")                                   # .pdf inferred from content-type
+
+
+async def test_download_uses_url_basename(tmp_path, monkeypatch):
+    ws = FileWorkspace(str(tmp_path / "ws"))
+
+    async def fake_fetch(url, **kw):
+        return types.SimpleNamespace(status_code=200, headers={"content-type": "text/csv"},
+                                     content=b"a,b\n1,2\n")
+    monkeypatch.setattr("engine.tools.net_guard.safe_fetch", fake_fetch)
+    out = await DownloadFileTool(ws).run(DownloadFileTool.Params(url="https://x.com/data/nums.csv"))
+    assert ws.exists("nums.csv") and "saved" in out.lower()
+
+
+async def test_download_blocks_internal_url(tmp_path, monkeypatch):
+    ws = FileWorkspace(str(tmp_path / "ws"))
+    from engine.tools.net_guard import BlockedURLError
+
+    async def blocked(url, **kw):
+        raise BlockedURLError(f"blocked non-public URL: {url}")
+    monkeypatch.setattr("engine.tools.net_guard.safe_fetch", blocked)
+    out = await DownloadFileTool(ws).run(
+        DownloadFileTool.Params(url="http://169.254.169.254/latest/meta-data/"))
+    assert "blocked" in out.lower() or "only public" in out.lower()
+    assert ws.list() == []                                           # nothing saved
+
+
+async def test_download_http_error(tmp_path, monkeypatch):
+    ws = FileWorkspace(str(tmp_path / "ws"))
+
+    async def fake_fetch(url, **kw):
+        return types.SimpleNamespace(status_code=404, headers={}, content=b"nope")
+    monkeypatch.setattr("engine.tools.net_guard.safe_fetch", fake_fetch)
+    out = await DownloadFileTool(ws).run(DownloadFileTool.Params(url="https://x.com/missing.pdf"))
+    assert "404" in out and ws.list() == []

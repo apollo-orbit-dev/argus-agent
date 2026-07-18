@@ -1,0 +1,77 @@
+# ============================================================================
+# SECRETS & CREDENTIALS — never commit these
+# ============================================================================
+.env
+.env.local
+# model connections + API keys
+model_presets.json
+# approved-code hashes
+trusted_tools.json
+dep_approvals.json
+
+# ============================================================================
+# RUNTIME STATE & USER DATA — per-install, not source
+# ============================================================================
+# memory.db, tables.db, knowledge.db, datastore.db, ...
+*.db
+memory/*.db
+scheduled_jobs.json
+watches.json
+custom_commands.yaml
+# user-authored routines
+routines/
+# agent-created tools / skills
+created_tools/
+created_skills/
+# agent file workspace + built web pages
+workspace/
+artifacts/
+
+# Persona / prompt overrides (ship the defaults in code, not the user's edits)
+SOUL.md
+SOUL.md.bak
+system_prompt.txt
+system_prompt.md
+
+# ============================================================================
+# DEV / PERSONAL — not part of the shippable product (kept local, out of the public repo)
+# ============================================================================
+# personal deploy + research/probe/eval scripts
+scripts/
+docs/RUNBOOK.md
+docs/routines-spec.md
+docs/feature-backlog.md
+docs/findings-stresstest.md
+docs/findings-toolcreation.md
+docs/findings.md
+docs/probe-battery.md
+docs/plan-approval-gated-deps.md
+docs/plan-trusted-tool-tier.md
+docs/skill-candidates.md
+
+# ============================================================================
+# LOGS & TEMP
+# ============================================================================
+*.log
+nohup.out
+.argus.pid
+.DS_Store
+Thumbs.db
+
+# ============================================================================
+# PYTHON
+# ============================================================================
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# ============================================================================
+# NODE (only the Playwright QA harness uses this; not shipped)
+# ============================================================================
+node_modules/
