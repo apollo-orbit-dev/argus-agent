@@ -25,6 +25,9 @@
   <symbol id="ic-memory" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
     <rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>
   </symbol>
+  <symbol id="ic-rules" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M9 6h12M9 12h12M9 18h12"/><path d="M3 6l1.5 1.5L7 4.5M3 12l1.5 1.5L7 10.5M3 18l1.5 1.5L7 16.5"/>
+  </symbol>
   <symbol id="ic-developer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
     <path d="M8 5 2 12l6 7M16 5l6 7-6 7M13 3l-2 18"/>
   </symbol>
@@ -88,6 +91,7 @@
       <button class="rail-item" data-page="automation"><svg><use href="#ic-automation"/></svg><span class="rail-label">Automation</span></button>
       <button class="rail-item" data-page="data"><svg><use href="#ic-data"/></svg><span class="rail-label">Data</span></button>
       <button class="rail-item" data-page="memory"><svg><use href="#ic-memory"/></svg><span class="rail-label">Memory</span></button>
+      <button class="rail-item" data-page="rules"><svg><use href="#ic-rules"/></svg><span class="rail-label">Rules</span></button>
       <button class="rail-item" data-page="developer"><svg><use href="#ic-developer"/></svg><span class="rail-label">Developer</span></button>
       <button class="rail-item" data-page="logs"><svg><use href="#ic-logs"/></svg><span class="rail-label">Logs</span></button>
       <button class="rail-item" data-page="reliability"><svg><use href="#ic-reliability"/></svg><span class="rail-label">Reliability</span></button>
@@ -331,6 +335,23 @@
             <button class="btn btn-sm" id="memRefreshBtn">Refresh</button>
           </div>
           <div id="memoryList"><div class="empty">loading…</div></div>
+        </div>
+      </section>
+
+      <!-- ================= RULES ================= -->
+      <section class="page" id="page-rules">
+        <div class="page-head">
+          <span class="page-title">Rules</span>
+          <span class="page-sub">Standing behavioral instructions Argus follows in every session.</span>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><span class="card-title">Standing rules<span class="count-badge" id="rulesCount"></span></span></div>
+          <div class="row-inline" style="margin-bottom:14px;">
+            <input type="text" id="ruleInput" placeholder="e.g. Always confirm before deleting files" style="flex:1;">
+            <button class="btn btn-sm" id="ruleAddBtn">+ Add</button>
+          </div>
+          <div id="rulesList"><div class="empty">loading…</div></div>
         </div>
       </section>
 
