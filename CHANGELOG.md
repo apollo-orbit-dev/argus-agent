@@ -11,10 +11,12 @@ All notable changes to this project are documented here.
   blocks for a configurable window (`APPROVAL_WINDOW_SECONDS`, default 60): decide in time and the
   same turn resumes seamlessly; miss the window and it becomes a pending item you can approve later
   (which resumes the work). Prompts appear as inline **Approve / Deny** buttons in the dashboard live
-  trace or as Telegram inline buttons, on whichever channel started the turn. v1 gates **dependency
-  installs** (Approve once / Deny) and **SOUL edits** (Approve once / Always allow / Deny). Gated by
-  `ENABLE_INTERACTIVE_APPROVALS` (on by default); off restores the previous record-and-continue
-  behavior exactly.
+  trace or as Telegram inline buttons, on whichever channel started the turn. **Every tool** has an
+  Allow / Ask / Deny toggle on the Developer page — most default Allow and run exactly as before,
+  while the sensitive ones (dependency installs, SOUL edits, `exec_python`, `forget`, `delete_row`)
+  default Ask. Enforcement is a single check in the loop before any tool runs: Allow runs it, Deny
+  refuses it (and Argus adapts), Ask pauses for your decision. Gated by `ENABLE_INTERACTIVE_APPROVALS`
+  (on by default); off restores the previous record-and-continue behavior exactly.
 
 ### Added
 - **Standing behavioral rules** — a durable, owner-managed set of "how to behave" directives
