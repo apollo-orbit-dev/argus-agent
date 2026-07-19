@@ -75,3 +75,41 @@ def test_pending_map_bounded():
     for i in range(5):
         c.record(_ev("tool_call", {"tool": "t"}, step=i, ts=float(i)))
     assert len(c._pending) <= 2                                # never leaks
+
+
+# ---- error-shaped tool_result (ok=True but the content is an error) counts as a FAILURE ----
+from engine.reliability.collector import _looks_like_error
+
+
+def test_error_shaped_ok_result_counts_as_failure():
+    st = _FakeStore(); c = ReliabilityCollector(st)
+    c.record(_ev("tool_result", {"tool": "hf_model_info", "ok": True,
+                                 "result": "Error fetching model info: Redirect response '307'"}))
+    assert st.rows[0]["ok"] is False                              # ran, but returned an error string
+    assert "Error fetching" in st.rows[0]["detail"]
+
+
+def test_create_tool_looks_wrong_counts_as_failure():
+    st = _FakeStore(); c = ReliabilityCollector(st)
+    c.record(_ev("tool_result", {"tool": "create_tool", "ok": True,
+                                 "result": "create_tool: 'x' was created, but its test run looks WRONG: ..."}))
+    assert st.rows[0]["ok"] is False
+
+
+def test_no_data_and_cannot_still_count_as_success():
+    st = _FakeStore(); c = ReliabilityCollector(st)
+    c.record(_ev("tool_result", {"tool": "ask_data", "ok": True, "result": "CANNOT"}))
+    c.record(_ev("tool_result", {"tool": "weather", "ok": True, "result": "No data found for that date."}))
+    assert st.rows[0]["ok"] is True and st.rows[1]["ok"] is True   # honest empties, not failures
+
+
+def test_looks_like_error_heuristic():
+    assert _looks_like_error("Error: boom")
+    assert _looks_like_error("Error fetching X")
+    assert _looks_like_error("unit_convert error: unknown from_unit")
+    assert _looks_like_error("Traceback (most recent call last): ...")
+    assert _looks_like_error("... its test run looks WRONG")
+    assert not _looks_like_error("Sunny, 72F")
+    assert not _looks_like_error("No results found")
+    assert not _looks_like_error("CANNOT")
+    assert not _looks_like_error("")

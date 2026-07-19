@@ -6,6 +6,26 @@ from __future__ import annotations
 
 from engine.events import StepEvent
 
+# A tool_result with ok=True still counts as a FAILURE when its text is error-shaped: many tools
+# (created tools especially) CATCH their own exception and RETURN an error string instead of raising,
+# so `ok` only means "didn't crash," not "worked." Without this, a tool that returns
+# "Error fetching model info: 307 redirect" every call would score 100%. Honest no-data / CANNOT
+# sentinels are deliberately NOT flagged here — those are successful (empty) outcomes, not failures.
+_ERROR_MARKERS = (
+    " error:", "traceback (most recent call last)", "looks wrong",
+    "error fetching", "unable to fetch", "could not fetch", "failed to fetch",
+    "unable to parse", "could not parse", "failed to parse", "couldn't parse",
+)
+
+
+def _looks_like_error(text: str) -> bool:
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    if t.startswith("error"):                       # "Error: ...", "Error fetching ..."
+        return True
+    return any(m in t for m in _ERROR_MARKERS)
+
 
 class ReliabilityCollector:
     def __init__(self, store, max_pending: int = 512):
@@ -24,8 +44,9 @@ class ReliabilityCollector:
         if k == "tool_result":
             call_ts = self._pending.pop((ev.run_id, ev.step), None)
             ms = int((ev.ts - call_ts) * 1000) if call_ts is not None else None
-            ok = bool(d.get("ok"))
-            detail = "" if ok else str(d.get("result", d.get("error", "")))[:200]
+            result = str(d.get("result", d.get("error", "")))
+            ok = bool(d.get("ok")) and not _looks_like_error(result)   # ran but returned an error string = failure
+            detail = "" if ok else result[:200]
             self.store.record("tool", d.get("tool", ""), ok, ms, detail, ev.ts)
             return
         if k == "validation" and d.get("ok") is False:
