@@ -339,6 +339,19 @@ class Engine:
         self.deps = DepStore(str(Path(__file__).resolve().parents[1] / "dep_approvals.json"))
         from engine.experimental.trust_store import TrustStore
         self.trust = TrustStore(str(Path(__file__).resolve().parents[1] / "trusted_tools.json"))
+        # interactive approvals: durable request log + per-gate policy + the broker tools call
+        # through to gate a sensitive action (dep installs, SOUL edits, ...). Routed through
+        # self._data_dir so tests get isolated storage; the broker itself is inert (nothing calls
+        # gate()) unless a caller opts in, so its mere existence is zero-behavior-change.
+        from engine.approvals import ApprovalStore, PermissionStore
+        from engine.approvals.broker import ApprovalBroker
+        self.approval_store = ApprovalStore(str(self._data_dir / "approvals.json"))
+        self.permissions = PermissionStore(str(self._data_dir / "permissions.json"))
+        self.approvals = ApprovalBroker(
+            self.approval_store, self.permissions,
+            emit=self._approval_emit, window=config.approval_window_seconds)
+        self.approvals.register_resume("dep-install", self._resume_dep)   # body: Task 8
+        self.approvals.register_resume("soul-edit", self._resume_soul)    # body: Task 7
         from engine.rules.store import RulesStore
         self.rules = RulesStore(str(self._data_dir / "rules.json"))
         from engine.model_presets import ModelPresetStore
@@ -920,6 +933,34 @@ class Engine:
     async def emit(self, run_id: str, session_id: str, step: int, kind: str, data: dict) -> None:
         await self.events.publish(StepEvent(run_id, session_id, step, kind, data, now()))
 
+    # ---- interactive approvals ----
+    async def _approval_emit(self, session_id: str, kind: str, data: dict) -> None:
+        """Bridge for ApprovalBroker's `emit`: surfaces approval_request/approval_resolved events
+        into the live trace under a synthetic run id, mirroring _notify_rule_saved's emit style."""
+        await self.emit("approval", session_id, 0, kind, data)
+
+    def approvals_list(self) -> list[dict]:
+        return self.approval_store.pending()
+
+    def permissions_list(self) -> list[dict]:
+        return self.permissions.list()
+
+    def permission_set(self, kind: str, state: str) -> None:
+        self.permissions.set(kind, state)   # raises ValueError -> 400 at the API layer
+
+    def approvals_decide(self, req_id: str, action: str, actor: str = "owner") -> str:
+        return self.approvals.resolve(req_id, action, actor)
+
+    async def _resume_dep(self, req: dict) -> None:
+        """Deferred resume for an approved dep-install request whose turn already ended.
+        Stub — Task 8 replaces this with the real re-run of the create_tool call."""
+        log.debug("dep-install resume stub called for req %s (target=%s)", req["id"], req["target"])
+
+    async def _resume_soul(self, req: dict) -> None:
+        """Deferred resume for an approved soul-edit request whose turn already ended.
+        Stub — Task 7 replaces this with the real SOUL.md write."""
+        log.debug("soul-edit resume stub called for req %s (target=%s)", req["id"], req["target"])
+
     async def _run_deterministic_skill(self, session_id: str, run_id: str, skill, text: str) -> str:
         """Execute a skill's structured `steps` through the routine executor: tool steps run in the
         harness with NO model call, the model runs only for `model` steps. Returns the output step's
@@ -1029,7 +1070,7 @@ class Engine:
         run_registry = self.registry
         if (ctx.extra_tools or tool_creation_on or skill_creation_on or scheduler_on
                 or memory_on or watch_on or c.enable_charts or c.enable_notify or c.enable_routines
-                or c.enable_code_interpreter or c.enable_rules):
+                or c.enable_code_interpreter or c.enable_rules or c.enable_interactive_approvals):
             run_registry = ToolRegistry()
             for t in self.registry.list():
                 run_registry.register(t)
