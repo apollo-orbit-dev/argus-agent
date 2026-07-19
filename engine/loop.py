@@ -24,6 +24,7 @@ CREATE_VERIFY_NUDGE = (
     "the right values, you're done: stop and report. Don't keep rewriting blind, and don't leave "
     "throwaway probe tools behind — delete_tool any scratch probes once you've learned what you need.")
 
+from engine.approvals.types import TurnPaused
 from engine.events import EventBus, StepEvent
 from engine.model_client import ModelError
 from engine.modes.base import ToolCallingMode
@@ -209,6 +210,13 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
         tool_obj = deps.registry.get(call.tool)
         try:
             result = await tool_obj.run(v.args)
+        except TurnPaused as p:
+            # A gated tool couldn't get a decision in time: end the turn cleanly, the same way
+            # a terminal tool does, rather than feeding "failure" back to the model. The request
+            # stays pending; a later turn (e.g. after the user approves) picks it up.
+            deps.store.append_message(session_id, {"role": "assistant", "content": p.message})
+            await emit(step, "paused", {"req_id": p.req_id, "kind": p.kind})
+            return p.message
         except Exception as e:  # never crash the loop; feed the error back
             result = f"tool {call.tool} failed: {e}"
             await emit(step, "tool_result", {"tool": call.tool, "ok": False, "result": result})
