@@ -953,9 +953,44 @@ class Engine:
         return self.approvals.resolve(req_id, action, actor)
 
     async def _resume_dep(self, req: dict) -> None:
-        """Deferred resume for an approved dep-install request whose turn already ended.
-        Stub — Task 8 replaces this with the real re-run of the create_tool call."""
-        log.debug("dep-install resume stub called for req %s (target=%s)", req["id"], req["target"])
+        """Deferred resume for an approved dep-install request whose turn already ended (a timeout,
+        or the owner approved from the dashboard/Telegram after the fact): install the module, then
+        spawn the 'build it now' turn in the request's original session — the owner already said yes
+        by approving, so they shouldn't have to re-prompt. Generalized from the legacy
+        `_continue_after_dep` (DepStore path): same message/spawn pattern, driven off the approvals
+        broker's request shape (`req["payload"]`) instead of a DepStore record.
+
+        ApprovalBroker.resolve() sets a one-shot pre-approval for this (kind, target, session) BEFORE
+        calling this resume, so when the spawned turn's create_tool call hits the SAME dep-install
+        gate it auto-approves without asking again — and CreateToolTool's gate branch SKIPS
+        re-installing on a one-shot decision (see tool_creation.py), so the module is installed
+        exactly once, here.
+        """
+        module = req["payload"].get("module") or req.get("target", "")
+        tool = req["payload"].get("tool_name") or "the tool"
+        from engine.experimental import dep_installer
+        ok, version, log_tail = await dep_installer.install(module)
+        if not ok:
+            log.warning("dep-install resume: install of '%s' failed for req %s: %s",
+                       module, req.get("id"), log_tail[:300])
+        prompt = (
+            f"The '{module}' library you requested has been approved. Now CREATE the '{tool}' tool "
+            f"you designed — call create_tool with that design — and then run it to fulfil my "
+            f"earlier request. You have everything you need; do NOT research further, build it now.")
+
+        async def _run() -> None:
+            try:
+                answer = await self.run_task(req["session_id"], prompt,
+                                             origin=req.get("origin", "api"))
+                deliver = getattr(self.scheduler, "deliver", None)
+                if deliver:
+                    await deliver(req["session_id"], answer)
+            except Exception:
+                log.exception("dep-install resume continuation failed for %s", req.get("id"))
+
+        task = asyncio.create_task(_run())
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
 
     async def _resume_soul(self, req: dict) -> None:
         """Deferred resume for an approved soul-edit request whose turn already ended: apply the
@@ -1149,7 +1184,9 @@ class Engine:
                     session_id=session_id, secrets=self._tool_secrets(),
                     created_sink=self._created_tools,
                     trust_store=self.trust, allow_trusted=c.enable_trusted_tools,
-                    reserved_names=GATED_BUILTIN_NAMES))
+                    reserved_names=GATED_BUILTIN_NAMES,
+                    approvals=(self.approvals if c.enable_interactive_approvals else None),
+                    run_id=run_id, origin=origin))
                 system_prompt = system_prompt + "\n\n" + TOOL_CREATION_DIRECTIVE
             if skill_creation_on:
                 from engine.experimental.skill_creation import (
