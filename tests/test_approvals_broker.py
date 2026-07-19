@@ -81,6 +81,62 @@ async def _noop():
     return None
 
 
+async def test_deferred_approve_uses_default_resume_when_no_specific_handler(tmp_path):
+    b = _broker(tmp_path, window=0.02)
+    resumed = []
+    b.set_default_resume(lambda req: resumed.append(req["id"]) or _noop())
+    # web_search has no specific handler registered; default policy is Ask? No — default is
+    # allow unless in DEFAULT_ASK. Force ask so it actually files a request.
+    b.policy.set("web_search", "ask")
+    with pytest.raises(TurnPaused):
+        await b.gate("web_search", "cats", "s", "r", "search", "dashboard")
+    req_id = b.store.pending()[0]["id"]
+    out = b.resolve(req_id, "approve_once", "owner")
+    assert out == "deferred" and resumed == [req_id]
+
+
+async def test_deferred_approve_specific_handler_beats_default(tmp_path):
+    b = _broker(tmp_path, window=0.02)
+    specific = []
+    default = []
+    b.register_resume("dep-install", lambda req: specific.append(req["id"]) or _noop())
+    b.set_default_resume(lambda req: default.append(req["id"]) or _noop())
+    with pytest.raises(TurnPaused):
+        await b.gate("dep-install", "pandas", "s", "r", "install", "dashboard")
+    req_id = b.store.pending()[0]["id"]
+    out = b.resolve(req_id, "approve_once", "owner")
+    assert out == "deferred"
+    assert specific == [req_id]
+    assert default == []
+
+
+async def test_gate_generic_tool_kind_allow_policy(tmp_path):
+    b = _broker(tmp_path)
+    d = await b.gate("web_search", "cats", "s", "r", "search", "dashboard")
+    assert d.approved and d.auto and not b.store.pending()          # default policy is allow
+
+
+async def test_gate_generic_tool_kind_deny_policy(tmp_path):
+    b = _broker(tmp_path)
+    b.policy.set("web_search", "deny")
+    d = await b.gate("web_search", "cats", "s", "r", "search", "dashboard")
+    assert d.denied and d.auto
+
+
+async def test_gate_generic_tool_kind_ask_policy_blocks_then_resolves(tmp_path):
+    b = _broker(tmp_path)
+    b.policy.set("web_search", "ask")
+    async def decide():
+        for _ in range(50):
+            pend = b.store.pending()
+            if pend:
+                b.resolve(pend[0]["id"], "approve_once", "owner"); return
+            await asyncio.sleep(0.01)
+    asyncio.get_event_loop().create_task(decide())
+    d = await b.gate("web_search", "cats", "s", "r", "search", "dashboard")
+    assert d.approved and not d.auto and d.actor == "owner"
+
+
 async def test_cancelled_gate_cleans_pending(tmp_path):
     b = _broker(tmp_path, window=5)
     task = asyncio.ensure_future(b.gate("dep-install", "pandas", "s", "r", "install", "dashboard"))

@@ -21,11 +21,15 @@ class ApprovalBroker:
         self._pending_meta: dict[str, dict] = {}    # req_id -> {kind,target,session_id}
         self._oneshots: set[tuple] = set()
         self._resume: dict = {}                 # kind -> async (req) -> None
+        self._default_resume = None             # fallback async (req) -> None for any other kind
         self._telegram = None                   # async (session_id, req) -> None; set by engine
         self._resume_tasks: set[asyncio.Task] = set()   # GC guard for fire-and-forget resume tasks
 
     def register_resume(self, kind: str, fn) -> None:
         self._resume[kind] = fn
+
+    def set_default_resume(self, fn) -> None:
+        self._default_resume = fn
 
     async def _surface(self, req: dict) -> None:
         if self._emit:
@@ -99,7 +103,7 @@ class ApprovalBroker:
         self.store.resolve(req_id, "approved" if approved else "denied", action, actor)
         if approved and stored is not None:
             self._oneshots.add((stored["kind"], stored["target"], stored["session_id"]))
-            fn = self._resume.get(stored["kind"])
+            fn = self._resume.get(stored["kind"]) or self._default_resume
             if fn is not None:
                 task = asyncio.get_running_loop().create_task(fn(stored))
                 self._resume_tasks.add(task)
