@@ -7,7 +7,10 @@ from dataclasses import dataclass
 # sub-gate inside create_tool, never blanket-allow-able).
 DEFAULT_ASK: set[str] = {
     "dep-install", "update_soul", "exec_python", "forget", "delete_row",
-    "notify",   # the single outbound-notification tool (channel is an arg; no per-channel tools exist)
+    # NOTE: 'notify' is deliberately NOT here. It is the owner's OWN delivery channel (it messages
+    # you, not third parties) and is how scheduled tasks/routines deliver results. Defaulting it to
+    # Ask would hard-pause every non-interactive (scheduled) turn that notifies. Low risk → Allow by
+    # default; the owner can still set it to Ask/Deny via the Developer-page toggle.
 }
 
 LABELS: dict[str, str] = {"dep-install": "Install a Python package"}

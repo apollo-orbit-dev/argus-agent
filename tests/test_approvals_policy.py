@@ -40,3 +40,10 @@ def test_states_listing(tmp_path):
     assert rows["forget"]["state"] == "deny" and rows["forget"]["is_default"] is False
     assert rows["update_soul"]["states"] == ["allow", "ask", "deny"]
     assert "dep-install" in {r["key"] for r in ps.states([])}   # always included
+
+
+def test_notify_defaults_allow():
+    # notify is the owner's own delivery channel + how scheduled tasks deliver results;
+    # it must NOT default to Ask (that would hard-pause every non-interactive scheduled turn).
+    assert default_for("notify") == "allow"
+    assert "notify" not in DEFAULT_ASK
