@@ -162,6 +162,21 @@ def test_insert_coerces_nonscalar_to_json(tmp_path):
     assert "70" in rows[0]["samples"]     # stored as JSON text, not lost
 
 
+def test_json_type_alias_roundtrips(tmp_path):
+    # 'json'/'list' are self-documenting aliases for TEXT; a real list inserted into a json column is
+    # stored as JSON text (via _coerce) and is queryable with json_extract/json_array_length.
+    s = _store(tmp_path)
+    s.create_table("recipes", ["name:text:key", "ingredients:json", "steps:list"])
+    cols = {c["name"]: c["type"] for c in s._rw.execute("PRAGMA table_info(recipes)")}
+    assert cols["ingredients"] == "TEXT" and cols["steps"] == "TEXT"
+    s.insert("recipes", {"name": "Pancakes",
+                         "ingredients": ["flour", "eggs", "milk"],
+                         "steps": ["mix", "cook"]})
+    rows = s.query("SELECT json_extract(ingredients, '$[1]') AS second, "
+                   "json_array_length(ingredients) AS n FROM recipes WHERE name='Pancakes'")
+    assert rows == [{"second": "eggs", "n": 3}]
+
+
 def test_delete_row_removes_matching(tmp_path):
     s = _store(tmp_path)
     s.create_table("readings", ["date:date:key", "score:integer"])

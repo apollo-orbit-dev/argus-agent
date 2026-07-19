@@ -26,7 +26,10 @@ log = logging.getLogger(__name__)
 
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _TYPES = {"text": "TEXT", "string": "TEXT", "str": "TEXT", "integer": "INTEGER", "int": "INTEGER",
-          "real": "REAL", "number": "REAL", "float": "REAL", "date": "TEXT"}
+          "real": "REAL", "number": "REAL", "float": "REAL", "date": "TEXT",
+          # A list/nested value: stored as JSON text (insert coerces a list/dict automatically) and
+          # queryable with json_extract()/json_each(). Aliases so a schema can self-document the intent.
+          "json": "TEXT", "list": "TEXT", "array": "TEXT", "object": "TEXT"}
 _MAX_ROWS = 500
 
 
@@ -206,12 +209,14 @@ class CreateTableTool(Tool):
         "records. This is the RIGHT tool (not datastore) whenever you'll want date-range queries, "
         "AVG/SUM/COUNT, or GROUP BY — datastore is only a single key→value stash and can't do any of "
         "that. Args: name (identifier), and columns — a list where each item is 'colname' or "
-        "'colname:type' (type: text, integer, real, date). Add a third part ':key' to make a column the "
-        "PRIMARY KEY — that enforces ONE row per value and makes re-inserting the same key UPDATE that "
-        "row instead of duplicating it (use it for a daily log so a re-fetch/backfill is idempotent). "
-        "Example: create_table('daily_sales', ['date:date:key', 'revenue:integer', 'units:integer', "
-        "'region:text', 'notes:text']). Then insert_row rows and query_table "
-        "to filter/aggregate (e.g. AVG(revenue) WHERE date BETWEEN …)."
+        "'colname:type' (type: text, integer, real, date, or json for a list/nested value — pass a real "
+        "list or dict to insert_row and query it with json_extract). Add a third part ':key' to make a "
+        "column the PRIMARY KEY — that enforces ONE row per value and makes re-inserting the same key "
+        "UPDATE that row instead of duplicating it (use it for a daily log so a re-fetch/backfill is "
+        "idempotent). Example: create_table('daily_sales', ['date:date:key', 'revenue:integer', "
+        "'units:integer', 'region:text', 'notes:text']); a list field goes in a json column, e.g. "
+        "create_table('recipes', ['name:text:key', 'ingredients:json', 'steps:json']). Then insert_row "
+        "rows and query_table to filter/aggregate (e.g. AVG(revenue) WHERE date BETWEEN …)."
     )
 
     class Params(BaseModel):
