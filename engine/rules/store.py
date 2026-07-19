@@ -11,6 +11,14 @@ import time
 import uuid
 
 
+def _well_formed(r: object) -> bool:
+    """A usable rule record: dict with a string id/text and a numeric created_at.
+    Read/mutate methods index these keys directly, so a malformed row is dropped at load."""
+    return (isinstance(r, dict) and isinstance(r.get("id"), str)
+            and isinstance(r.get("text"), str) and r.get("text").strip() != ""
+            and isinstance(r.get("created_at"), (int, float)))
+
+
 class RulesStore:
     def __init__(self, path: str):
         self.path = path
@@ -21,7 +29,9 @@ class RulesStore:
         if os.path.exists(self.path):
             try:
                 data = json.loads(open(self.path, encoding="utf-8").read())
-                self.rules = data if isinstance(data, list) else []
+                # Drop any malformed record at load so a hand-edited rules.json can't KeyError
+                # the every-turn injection path (enabled_rules) — one bad row shouldn't brick a turn.
+                self.rules = [r for r in data if _well_formed(r)] if isinstance(data, list) else []
             except Exception:
                 self.rules = []
 

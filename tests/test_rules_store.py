@@ -55,3 +55,23 @@ def test_persistence_and_corrupt_file(tmp_path):
     assert [r["text"] for r in RulesStore(p).list()] == ["Always cite sources"]
     open(p, "w").write("{ not json")
     assert RulesStore(p).list() == []             # corrupt file tolerated -> empty
+
+
+def test_malformed_records_dropped_at_load(tmp_path):
+    import json
+    p = str(tmp_path / "rules.json")
+    # A valid list containing junk rows: missing keys, wrong types, not-a-dict, empty text.
+    json.dump([
+        {"id": "aa11", "text": "Never use emoji", "source": "user", "enabled": True, "created_at": 1.0},
+        {"id": "bb22"},                                  # missing text/created_at
+        {"text": "no id", "created_at": 2.0},            # missing id
+        {"id": "cc33", "text": "", "created_at": 3.0},   # empty text
+        "not-a-dict",
+        {"id": "dd44", "text": "Always cite sources", "created_at": 4.0},
+    ], open(p, "w"))
+    s = RulesStore(p)
+    # Only the two well-formed rows survive; every read/mutate path stays KeyError-free.
+    assert [r["text"] for r in s.list()] == ["Always cite sources", "Never use emoji"]
+    assert [r["text"] for r in s.enabled_rules()] == ["Never use emoji"]  # dd44 has no 'enabled' -> excluded
+    assert s.add("Never USE emoji") is not None                          # dedup loop doesn't KeyError
+    assert s.remove("aa11") is True
