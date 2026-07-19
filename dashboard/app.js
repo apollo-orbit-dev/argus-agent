@@ -1684,7 +1684,7 @@
       $('toolsBuiltin').innerHTML = libItemsHtml(t.builtin, false);
       $('toolsConditional').innerHTML = cond.length
         ? '<div class="card-hint" style="margin-bottom:6px;">available when their feature flag is on</div><div style="display:flex; flex-wrap:wrap; gap:5px;">' +
-          cond.map(function(n){ return '<span class="tag tag-muted">' + esc(n) + '</span>'; }).join('') + '</div>'
+          cond.map(function(n){ return '<span class="tag tag-muted" title="' + esc(n.description || '') + '">' + esc(n.name || n) + '</span>'; }).join('') + '</div>'
         : '<div class="empty">(none active)</div>';
       $('toolsCreated').innerHTML = libItemsHtml(t.created, false, 'tool');
       $('skillsBuiltin').innerHTML = libItemsHtml(s.builtin, true);

@@ -1712,17 +1712,85 @@ class Engine:
 
     # ---- library / scheduled / memory overviews (for the dashboard) ----
     def tools_overview(self) -> dict:
+        """Enumerate every tool a turn could see: `builtin` (the base registry, fixed at Engine
+        construction), `created` (persisted create_tool output), and `conditional_enabled` — every
+        tool `run_task`'s per-run registry block (engine.py, the `run_registry = ToolRegistry()`
+        section) would register for the CURRENT config flags. This list must mirror that block
+        entry-for-entry (same flags, same tool names) or a row silently goes missing from the
+        dashboard, as happened when `update_soul` moved off the base registry onto a per-run,
+        approval-aware registration.
+
+        NOTE: tables/knowledge/ask_data/read_soul tools are NOT here — they're registered onto the
+        base registry once in Engine.__init__ (gated by enable_tables/enable_knowledge/
+        enable_soul_editing at construction time, not per-run), so they already surface via
+        `builtin` whenever the engine was built with that flag on. Listing them here too would
+        both duplicate `builtin` and misrepresent them as toggleable per-turn, which they aren't.
+        """
         c = self._config
-        conditional = []
-        if c.enable_tool_creation:
-            conditional.append("create_tool")
-        if c.enable_skill_creation:
-            conditional.append("create_skill")
-        if c.enable_scheduler:
-            conditional += ["schedule_task", "list_scheduled_tasks",
-                            "update_scheduled_task", "cancel_scheduled_task"]
-        if c.enable_memory:
-            conditional += ["remember", "recall", "forget"]
+        native = c.tool_calling_mode == "native"
+
+        def group(flag: bool, *entries: tuple[str, str]) -> list[dict]:
+            return [{"name": n, "description": d} for n, d in entries] if flag else []
+
+        conditional: list[dict] = []
+        conditional += group(
+            c.enable_tool_creation and native,
+            ("create_tool", "Write and register a new tool from a natural-language spec + Python code."),
+            ("inspect_tool", "Inspect a previously created tool's code/schema."),
+            ("delete_tool", "Delete a previously created tool."),
+        )
+        conditional += group(
+            c.enable_skill_creation and native,
+            ("create_skill", "Package a repeated procedure into a reusable skill."),
+            ("inspect_skill", "Inspect a created skill's stored procedure."),
+            ("delete_skill", "Delete a created skill."),
+        )
+        conditional += group(
+            c.enable_scheduler,
+            ("schedule_task", "Schedule an instruction to run later on a recurring/one-off cron."),
+            ("list_scheduled_tasks", "List this session's scheduled tasks."),
+            ("update_scheduled_task", "Modify an existing scheduled task."),
+            ("cancel_scheduled_task", "Cancel a scheduled task."),
+        )
+        conditional += group(
+            c.enable_memory,
+            ("remember", "Save a fact to remember about the user for future conversations."),
+            ("recall", "Search saved memories about the user."),
+            ("forget", "Delete a saved memory."),
+        )
+        conditional += group(
+            c.enable_soul_editing,
+            ("update_soul", "Revise the agent's own persona/voice (SOUL)."),
+        )
+        conditional += group(
+            c.enable_rules,
+            ("save_rule", "Save a standing behavioral rule injected into every turn."),
+            ("list_rules", "List saved standing rules."),
+            ("remove_rule", "Remove a saved standing rule."),
+        )
+        conditional += group(
+            c.enable_watch,
+            ("watch", "Watch a URL/feed and alert on changes."),
+            ("list_watches", "List active watches."),
+            ("unwatch", "Stop a watch."),
+        )
+        conditional += group(
+            c.enable_charts,
+            ("make_chart", "Render a bar/line/pie/scatter chart from data."),
+        )
+        conditional += group(
+            c.enable_notify,
+            ("notify", "Send the user a notification via email, push, or telegram."),
+        )
+        conditional += group(
+            c.enable_routines,
+            ("run_routine", "Run a saved routine."),
+            ("list_routines", "List saved routines."),
+        )
+        conditional += group(
+            c.enable_code_interpreter,
+            ("exec_python", "Run Python in a sandboxed, session-persistent REPL."),
+        )
         return {
             "builtin": [{"name": t.name, "description": t.description} for t in self.registry.list()],
             "created": [{"name": t.name, "description": t.description} for t in self._created_tools],
