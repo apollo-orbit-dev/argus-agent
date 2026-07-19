@@ -306,8 +306,13 @@ def new_run_id() -> str:
 
 
 class Engine:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, data_dir: Optional[str] = None):
         self._config = config
+        # Where per-feature databases/files live. Defaults to the repo root (unchanged behavior for
+        # every existing store); tests can point THIS at a tmp dir so a throwaway Engine doesn't write
+        # into the repo. Only newly-added stores should be routed through this — existing stores keep
+        # resolving their own paths off `Path(__file__).resolve().parents[1]` directly.
+        self._data_dir = Path(data_dir) if data_dir else Path(__file__).resolve().parents[1]
         self.events = EventBus()
         self.store = SessionStore()
         self.registry = build_base_registry(config)
@@ -426,6 +431,16 @@ class Engine:
         self.scheduler.run_routine = self._scheduled_routine_run
         self.sync_routine_schedules()
 
+        # Reliability harness (passive; dashboard-only). Consumes the event stream via a sink.
+        self._reliability = None
+        if config.enable_reliability:
+            from engine.reliability.store import ReliabilityStore
+            from engine.reliability.collector import ReliabilityCollector
+            self._reliability = ReliabilityStore(
+                str(self._data_dir / "reliability.db"),
+                retention_days=config.reliability_raw_retention_days)
+            self.events.add_sink(ReliabilityCollector(self._reliability).record)
+
     def _owner_session_id(self) -> str:
         """The owner's primary Telegram chat id — the delivery identity for scheduled routines that
         have no originating chat. '' when Telegram isn't configured (email/push still work)."""
@@ -467,13 +482,29 @@ class Engine:
             return f"(routine '{name}' is unavailable)"
         channel = (r.deliver or {}).get("channel")
         has_channel = bool(channel) and channel != "none"
-        res = await self.routine_executor.run(r, session_id, source="schedule", deliver=has_channel)
+        res = await self.routine_executor.run(r, session_id, source="schedule", deliver=has_channel,
+                                              on_result=self._emit_routine_result)
         if not has_channel:
             try:
                 await self.notifier.send("telegram", res.output, subject=r.name, session_id=session_id)
             except Exception as e:
                 log.warning("scheduled routine '%s' telegram delivery failed: %s", name, e)
         return res.output
+
+    def _emit_routine_result(self, payload: dict) -> None:
+        """Publish a routine's whole-run outcome onto the event stream so the reliability collector
+        (and any future consumer) sees it uniformly with tool/loop events. Called by the routine
+        executor's on_result hook; no-op when the harness is disabled."""
+        if self._reliability is None:
+            return
+        import time as _t
+        ev = StepEvent(run_id="routine", session_id="__routine__", step=0,
+                       kind="routine_result", data=payload, ts=_t.time())
+        # publish() is async; schedule it without blocking the (possibly sync) caller.
+        try:
+            asyncio.get_running_loop().create_task(self.events.publish(ev))
+        except RuntimeError:
+            asyncio.run(self.events.publish(ev))
 
     def _routine_registry(self, session_id: str):
         """A tool registry for routine tool-steps: base vetted tools + charts/notify + all created
@@ -1603,7 +1634,8 @@ class Engine:
         run_session = session_id
         if will_deliver and channel in ("telegram", "tg"):
             run_session = self._owner_session_id() or session_id
-        res = await self.routine_executor.run(r, run_session, source="dashboard", deliver=will_deliver)
+        res = await self.routine_executor.run(r, run_session, source="dashboard", deliver=will_deliver,
+                                              on_result=self._emit_routine_result)
         return {"ok": res.ok, "output": res.output, "error": res.error,
                 "channel": channel if will_deliver else None,
                 "delivered": res.delivered, "delivery_error": res.delivery_error,
@@ -1617,6 +1649,22 @@ class Engine:
         return {"available": self.notifier.available(), "fanout": fanout,
                 "email_to": c.notify_email_to, "ntfy_topic": c.ntfy_topic,
                 "ntfy_server": c.ntfy_server}
+
+    # ---- reliability harness (dashboard-only; delegates to the store, or a disabled shape) ----
+    def reliability_summary(self, days: int = 30) -> dict:
+        return self._reliability.summary(days) if self._reliability else {"enabled": False}
+
+    def reliability_tools(self, days: int = 30) -> list:
+        return self._reliability.per_tool(days) if self._reliability else []
+
+    def reliability_routines(self, days: int = 30) -> list:
+        return self._reliability.per_routine(days) if self._reliability else []
+
+    def reliability_loop(self, days: int = 30) -> dict:
+        return self._reliability.loop_health(days) if self._reliability else {}
+
+    def reliability_failures(self, entity: str = None, limit: int = 20) -> list:
+        return self._reliability.recent_failures(entity, limit) if self._reliability else []
 
     async def notify_test(self, channel: str) -> dict:
         ok, detail = await self.notifier.send(
