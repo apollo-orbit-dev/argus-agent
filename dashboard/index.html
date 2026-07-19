@@ -359,10 +359,14 @@
       <section class="page" id="page-developer">
         <div class="page-head">
           <span class="page-title">Developer</span>
-          <span class="page-sub">Tool &amp; skill library, dependency approvals, trusted-tool review.</span>
+          <span class="page-sub">Tool &amp; skill library, dependency approvals, trusted-tool review, interactive approvals.</span>
         </div>
 
-        <div class="grid grid-2" style="margin-bottom:16px;">
+        <div class="grid grid-3" style="margin-bottom:16px;">
+          <div class="card">
+            <div class="card-head"><span class="card-title">Pending approvals</span><span class="tag tag-amber" id="pendingApprovalsBadge">0</span></div>
+            <div id="pendingApprovals"><div class="empty">loading…</div></div>
+          </div>
           <div class="card">
             <div class="card-head"><span class="card-title">Pending installs</span><span class="tag tag-amber" id="depsBadge">0</span></div>
             <div id="pendingInstalls"><div class="empty">loading…</div></div>
@@ -376,6 +380,10 @@
         <div class="grid grid-2">
           <div class="card">
             <div class="card-head"><span class="card-title">Tools</span><span class="card-hint" id="toolsCountBadge"></span></div>
+            <div class="row-inline" style="margin-bottom:10px; align-items:center; gap:8px;">
+              <span class="card-hint" style="text-transform:none; letter-spacing:normal;">New dependency installs:</span>
+              <span id="depInstallPerm"></span>
+            </div>
             <div class="card-hint" style="margin-bottom:6px; text-transform:uppercase; letter-spacing:.08em;">built-in</div>
             <div id="toolsBuiltin" style="margin-bottom:12px;"></div>
             <div class="card-hint" style="margin-bottom:6px; text-transform:uppercase; letter-spacing:.08em;">conditional (feature-gated)</div>

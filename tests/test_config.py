@@ -53,3 +53,13 @@ def test_rules_flags_in_env_fields_and_env_pairs():
     pairs = dict(c.env_pairs())
     assert "ENABLE_RULES" in pairs
     assert "ENABLE_RULES_AUTODETECT" in pairs
+
+
+def test_approval_flags():
+    c = _mk()
+    assert c.enable_interactive_approvals is True
+    assert c.approval_window_seconds == 60
+    assert "enable_interactive_approvals" in c._ENV_FIELDS
+    assert "approval_window_seconds" in c._ENV_FIELDS
+    pairs = dict(c.env_pairs())
+    assert "ENABLE_INTERACTIVE_APPROVALS" in pairs and "APPROVAL_WINDOW_SECONDS" in pairs

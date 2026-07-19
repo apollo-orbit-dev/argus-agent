@@ -118,6 +118,28 @@ async def main() -> None:
             except Exception:
                 log.debug("could not send restart notice to %s", _cid, exc_info=True)
 
+        # Telegram parity for interactive approvals: when a Telegram-originated turn hits a gate
+        # (dep-install, soul-edit, ...), ApprovalBroker._surface() calls this to push inline
+        # Approve/Deny (+ standing, where the gate's policy allows it) buttons to that chat.
+        # ApprovalBroker itself only checks `req["origin"] == "telegram"` before calling this, so
+        # the allowlist check here is defensive-only (a telegram-origin session_id should already
+        # be an allowed chat — see on_message's _guard).
+        from backend.telegram_bot import apv_keyboard, apv_request_text
+        from engine.approvals import states_for
+
+        async def _telegram_approval(session_id: str, req: dict) -> None:
+            try:
+                chat_id = int(session_id)
+            except (TypeError, ValueError):
+                return
+            if chat_id not in config.allowed_chat_ids:
+                return
+            await tg_app.bot.send_message(
+                chat_id, apv_request_text(req),
+                reply_markup=apv_keyboard(req["id"], states_for(req["kind"])))
+
+        engine.approvals._telegram = _telegram_approval
+
         # Deliver scheduled-task results back to Telegram chats (session id == chat id).
         from backend.telegram_bot import to_telegram_html
 

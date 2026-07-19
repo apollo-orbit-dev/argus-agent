@@ -247,7 +247,10 @@
     reprompt: 'var(--amber)',
     observer: 'var(--amber)',
     final: 'var(--ok)',
-    error: 'var(--danger)'
+    error: 'var(--danger)',
+    approval_request: 'var(--amber)',
+    approval_resolved: 'var(--amber)',
+    paused: 'var(--amber)'
   };
   function kindColor(k){ return KIND_COLOR[k] || 'var(--muted)'; }
 
@@ -276,13 +279,61 @@
     return out;
   }
 
+  // Build req_id -> {approved, actor} for every approval_resolved event already present in a
+  // run's step list. Used so a FULL rebuild (renderViewerFull — page refresh replay, or clicking
+  // back onto a past run) renders an already-resolved approval_request as collapsed, instead of
+  // as a fresh live card with active buttons (the incremental append path handles this live via
+  // markApprovalResolved, but a full rebuild re-derives every step from scratch and needs to know
+  // up front which requests are already decided).
+  function resolvedMapFor(steps){
+    var m = {};
+    (steps || []).forEach(function(ev){
+      if (ev.kind === 'approval_resolved' && ev.data && ev.data.req_id){
+        m[ev.data.req_id] = { approved: ev.data.outcome === 'approved', actor: ev.data.actor };
+      }
+    });
+    return m;
+  }
+
   // Generic field renderer keyed on well-known `data` fields (not on kind) — mirrors the
   // proven index.html `affordances()` logic, restyled to Observatory's field-row/callout CSS.
-  function renderFields(kind, data){
+  function renderFields(kind, data, resolvedMap){
     if (!data || typeof data !== 'object'){
       if (data !== undefined && data !== null && data !== '')
         return '<div class="field-row"><div class="field-value">' + esc(pretty(data)) + '</div></div>';
       return '';
+    }
+    // Interactive approvals: an inline decision card (buttons + standing-policy toggle) rather than
+    // the generic field-row rendering below — this is the one kind that needs live controls, not text.
+    if (kind === 'approval_request'){
+      var apResolved = resolvedMap && resolvedMap[data.req_id];
+      var apStates = data.states || [];
+      var apOpts = apStates.map(function(s){ return '<option value="' + esc(s) + '">' + esc(s) + '</option>'; }).join('');
+      var apDisabled = apResolved ? ' disabled' : '';
+      var apOutcomeHtml = apResolved
+        ? '<span class="ap-outcome tag ' + (apResolved.approved ? 'tag-ok' : 'tag-danger') + '">' +
+          (apResolved.approved ? '✓ approved' : '✕ denied') + (apResolved.actor ? ' · ' + esc(apResolved.actor) : '') + '</span>'
+        : '<span class="ap-outcome tag" style="display:none;"></span>';
+      return '<div class="approval-card' + (apResolved ? ' resolved' : '') + '" data-req="' + esc(data.req_id) + '">' +
+        '<div class="ap-title">⏸ Approval needed — ' + esc(data.prompt || data.kind || 'action') + '</div>' +
+        (data.target ? '<div class="ap-target">' + esc(data.target) + '</div>' : '') +
+        '<div class="ap-actions">' +
+          '<button class="btn btn-primary btn-sm" data-apv="approve_once"' + apDisabled + '>Approve once</button>' +
+          '<button class="btn btn-danger btn-sm" data-apv="deny_once"' + apDisabled + '>Deny once</button>' +
+          (apOpts ? '<label class="ap-policy">Standing: <select data-apv-policy' + apDisabled + '>' +
+            '<option value="" selected disabled>set…</option>' + apOpts + '</select></label>' : '') +
+          apOutcomeHtml +
+        '</div></div>';
+    }
+    if (kind === 'approval_resolved'){
+      var apOk = data.outcome === 'approved';
+      return '<div class="field-row"><span class="field-label">decision</span><div class="field-value">' +
+        '<span class="tag ' + (apOk ? 'tag-ok' : 'tag-danger') + '">' + (apOk ? '✓ approved' : '✕ denied') + '</span>' +
+        (data.actor ? ' · ' + esc(data.actor) : '') + '</div></div>';
+    }
+    if (kind === 'paused'){
+      return '<div class="field-row"><span class="field-label">status</span><div class="field-value">' +
+        '<span class="tag tag-amber">⏸ paused</span> turn ended awaiting approval (request ' + esc(data.req_id || '?') + ')</div></div>';
     }
     var parts = [];
     function field(label, html){
@@ -326,10 +377,10 @@
     return parts.join('');
   }
 
-  function stepNodeHtml(ev){
+  function stepNodeHtml(ev, resolvedMap){
     var c = kindColor(ev.kind);
     var stepText = (ev.step !== undefined && ev.step !== null) ? ('step ' + ev.step) : '—';
-    var fieldsHtml = renderFields(ev.kind, ev.data);
+    var fieldsHtml = renderFields(ev.kind, ev.data, resolvedMap);
     return '<div class="step-node' + (reduceMotion ? '' : ' row-in') + '">' +
         '<div class="step-gutter"><span class="step-dot" style="border-color:' + c + ';"></span><span class="step-connector"></span></div>' +
         '<div class="step-body">' +
@@ -395,7 +446,10 @@
       return;
     }
     renderViewerHeader(run);
-    viewerBody.innerHTML = run.steps.length ? run.steps.map(stepNodeHtml).join('') : '<div class="empty">no events yet</div>';
+    var resolvedMap = resolvedMapFor(run.steps);
+    viewerBody.innerHTML = run.steps.length
+      ? run.steps.map(function(ev){ return stepNodeHtml(ev, resolvedMap); }).join('')
+      : '<div class="empty">no events yet</div>';
     jumpBtn.classList.remove('show');
     userScrolledUp = false;
     if (run.id === liveRunId) viewerBody.scrollTop = viewerBody.scrollHeight;
@@ -417,6 +471,55 @@
       var row = e.target.closest('.run-row');
       if (row) selectRun(row.getAttribute('data-id'));
     });
+  });
+
+  /* ---- interactive approvals: the inline trace card (delegated on viewerBody, same pattern as
+     runsLiveEl/runsPastEl above — the trace body itself has no prior delegated listener) ---- */
+  function markApprovalResolved(card, text, ok){
+    card.classList.add('resolved');
+    card.querySelectorAll('button, select').forEach(function(el){ el.disabled = true; });
+    var out = card.querySelector('.ap-outcome');
+    if (!out) return;
+    out.textContent = text;
+    out.classList.remove('tag-ok', 'tag-danger', 'tag-muted');
+    out.classList.add(ok === true ? 'tag-ok' : ok === false ? 'tag-danger' : 'tag-muted');
+    out.style.display = 'inline-flex';
+  }
+  function findApprovalCards(reqId){
+    return Array.prototype.filter.call(document.querySelectorAll('.approval-card'), function(c){
+      return c.getAttribute('data-req') === reqId;
+    });
+  }
+  async function decideApproval(card, reqId, action){
+    card.querySelectorAll('button, select').forEach(function(el){ el.disabled = true; });
+    try {
+      var res = await (await fetch('/approvals/decide', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ req_id: reqId, action: action })
+      })).json();
+      var approved = (action === 'approve_once' || action === 'always_allow');
+      if (res.result === 'unknown') markApprovalResolved(card, '— already resolved', null);
+      else markApprovalResolved(card, approved ? '✓ approved' : '✕ denied', approved);
+    } catch(e){
+      toast('Approval decision failed: ' + e.message, 'err');
+      card.querySelectorAll('button, select').forEach(function(el){ el.disabled = false; });
+    }
+  }
+  viewerBody.addEventListener('click', function(e){
+    var btn = e.target.closest('[data-apv]');
+    if (!btn) return;
+    var card = btn.closest('.approval-card');
+    if (!card || card.classList.contains('resolved')) return;
+    decideApproval(card, card.getAttribute('data-req'), btn.getAttribute('data-apv'));
+  });
+  viewerBody.addEventListener('change', function(e){
+    var sel = e.target.closest('[data-apv-policy]');
+    if (!sel) return;
+    var card = sel.closest('.approval-card');
+    if (!card || card.classList.contains('resolved')) return;
+    var val = sel.value;
+    if (!val || val === 'ask') return;   // standing "ask" is the default — nothing to change
+    decideApproval(card, card.getAttribute('data-req'), val === 'allow' ? 'always_allow' : 'always_deny');
   });
 
   var jumpBtn = document.createElement('button');
@@ -460,6 +563,17 @@
 
     if (ev.kind === 'final'){ run.status = 'ok'; if (liveRunId === run.id) liveRunId = null; }
     else if (ev.kind === 'error'){ run.status = 'error'; if (liveRunId === run.id) liveRunId = null; }
+    else if (ev.kind === 'approval_resolved' && ev.data && ev.data.req_id){
+      // The engine emits approval_resolved (ApprovalBroker._emit_resolved) whenever a request is
+      // decided, whether via this dashboard's own decideApproval() POST or another channel (another
+      // open dashboard tab, Telegram, the Developer page). This branch reacts to that event so any
+      // matching card here collapses too, even when the decision didn't originate from this card's
+      // own POST response.
+      var apApproved = ev.data.outcome === 'approved' ? true : (ev.data.outcome === 'denied' ? false : null);
+      findApprovalCards(ev.data.req_id).forEach(function(c){
+        markApprovalResolved(c, apApproved === true ? '✓ approved' : apApproved === false ? '✕ denied' : '— resolved', apApproved);
+      });
+    }
 
     if (selectedRunId === run.id){
       if (isNewRun){
@@ -1576,30 +1690,51 @@
   $('ruleInput').addEventListener('keydown', function(e){ if (e.key === 'Enter') $('ruleAddBtn').click(); });
 
   /* ================= DEVELOPER: library / deps / trust ================= */
-  function libItemsHtml(arr, withTools, delKind){
+  // Per-tool Allow/Ask/Deny select. `permMap` is {key: {state, states}} from GET /permissions
+  // (Task 5: one row per tool, plus the always-present "dep-install" sub-gate). Falls back to
+  // ["allow","ask","deny"]/"allow" for ordinary tools if the map has no entry (or fetch failed),
+  // and to ["ask","deny"]/"ask" for the binary "dep-install" gate.
+  function permSelectHtml(key, permMap){
+    var p = (permMap || {})[key] || {};
+    var fallbackStates = key === 'dep-install' ? ['ask', 'deny'] : ['allow', 'ask', 'deny'];
+    var states = p.states || fallbackStates;
+    var state = p.state || states[0];
+    var opts = states.map(function(s){
+      return '<option value="' + esc(s) + '"' + (s === state ? ' selected' : '') + '>' + esc(s) + '</option>';
+    }).join('');
+    return '<select class="perm-select" data-perm-key="' + esc(key) + '" data-prev-state="' + esc(state) + '">' + opts + '</select>';
+  }
+  function libItemsHtml(arr, withTools, delKind, permMap){
     if (!arr || !arr.length) return '<div class="empty">(none yet)</div>';
+    var isTool = !withTools;   // convention: tool call sites pass withTools=false, skill call sites pass true
     return arr.map(function(o){
       return '<div class="list-item"><div class="list-main"><div class="list-title">' + esc(o.name) +
         (o.description ? '<div class="list-sub" style="font-family:var(--font-body); color:var(--muted); white-space:normal;">' + esc(truncate(o.description,140)) + '</div>' : '') +
         (withTools && Array.isArray(o.tools) && o.tools.length ? '<div class="list-sub">tools: ' + esc(o.tools.join(', ')) + '</div>' : '') +
         '</div></div>' +   // close .list-title AND .list-main
+        (isTool ? permSelectHtml(o.name, permMap) : '') +
         (delKind ? '<button class="act-btn danger" data-lib-delete="' + delKind + '" data-lib-name="' + esc(o.name) + '" title="Delete">✕</button>' : '') +
-        '</div>';          // close .list-item — the ✕ is now a sibling of .list-main, so the flex row right-aligns it inline instead of stacking it below
+        '</div>';          // close .list-item — the ✕/select are now siblings of .list-main, so the flex row right-aligns them inline instead of stacking below
     }).join('');
   }
   async function loadLibrary(){
     try {
       var lib = await (await fetch('/library')).json();
+      var permMap = {};
+      try {
+        var pd = await (await fetch('/permissions')).json();
+        (pd.permissions || []).forEach(function(p){ permMap[p.key] = p; });
+      } catch(e){ /* leave permMap empty; per-tool selects fall back to allow/ask/deny defaults */ }
       var t = lib.tools || {}, s = lib.skills || {};
       var cond = t.conditional_enabled || [];
-      $('toolsBuiltin').innerHTML = libItemsHtml(t.builtin, false);
+      $('toolsBuiltin').innerHTML = libItemsHtml(t.builtin, false, null, permMap);
       $('toolsConditional').innerHTML = cond.length
-        ? '<div class="card-hint" style="margin-bottom:6px;">available when their feature flag is on</div><div style="display:flex; flex-wrap:wrap; gap:5px;">' +
-          cond.map(function(n){ return '<span class="tag tag-muted">' + esc(n) + '</span>'; }).join('') + '</div>'
+        ? '<div class="card-hint" style="margin-bottom:6px;">available when their feature flag is on</div>' + libItemsHtml(cond, false, null, permMap)
         : '<div class="empty">(none active)</div>';
-      $('toolsCreated').innerHTML = libItemsHtml(t.created, false, 'tool');
+      $('toolsCreated').innerHTML = libItemsHtml(t.created, false, 'tool', permMap);
       $('skillsBuiltin').innerHTML = libItemsHtml(s.builtin, true);
       $('skillsCreated').innerHTML = libItemsHtml(s.created, true, 'skill');
+      $('depInstallPerm').innerHTML = permSelectHtml('dep-install', permMap);
       var totalTools = (t.builtin||[]).length + (t.created||[]).length;
       var totalSkills = (s.builtin||[]).length + (s.created||[]).length;
       $('toolsCountBadge').textContent = totalTools + ' total';
@@ -1623,6 +1758,81 @@
       ['toolsBuiltin','toolsConditional','toolsCreated','skillsBuiltin','skillsCreated'].forEach(function(id){ $(id).innerHTML = '<div class="panel-error">Failed to load.</div>'; });
     }
   }
+
+  /* ---- interactive approvals: per-tool perm-select toggles + Pending approvals list ---- */
+  // Delegated handler for every `.perm-select` on the page: per-tool rows rendered by
+  // libItemsHtml() and the standalone dep-install control. POST body field is `key` (the
+  // tool name, or "dep-install"), NOT `kind` — that was the old bespoke permMatrix's field.
+  document.addEventListener('change', async function(e){
+    var sel = e.target.closest('.perm-select');
+    if (!sel) return;
+    var key = sel.getAttribute('data-perm-key'), state = sel.value;
+    var prev = sel.getAttribute('data-prev-state') || state;
+    sel.disabled = true;
+    try {
+      var r = await fetch('/permissions/set', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key, state: state }) });
+      if (!r.ok) { var eb = await r.json().catch(function(){ return {}; }); throw new Error(eb.detail || ('HTTP ' + r.status)); }
+      sel.setAttribute('data-prev-state', state);
+      toast('Policy updated', 'ok');
+    } catch(err){
+      sel.value = prev;
+      toast('Update failed: ' + err.message, 'err');
+    }
+    sel.disabled = false;
+  });
+
+  async function loadPendingApprovals(){
+    var el = $('pendingApprovals');
+    try {
+      var pr = await (await fetch('/permissions')).json();   // gate labels + valid states, for the standing-policy select
+      var gates = {};
+      (pr.permissions || []).forEach(function(p){ gates[p.key] = p; });
+      var d = await (await fetch('/approvals')).json();
+      var pending = d.approvals || [];
+      var badge = $('pendingApprovalsBadge');
+      badge.textContent = pending.length;
+      badge.className = 'tag ' + (pending.length ? 'tag-amber' : 'tag-muted');
+      if (!pending.length){ el.innerHTML = '<div class="empty">Nothing awaiting approval.</div>'; return; }
+      el.innerHTML = pending.map(function(r){
+        var g = gates[r.kind] || {};
+        var opts = (g.states || []).map(function(s){ return '<option value="' + esc(s) + '">' + esc(s) + '</option>'; }).join('');
+        return '<div class="warn-box">' + esc(g.label || r.kind) +
+          (r.target ? ': <strong>&nbsp;' + esc(r.target) + '&nbsp;</strong>' : '') +
+          (r.prompt ? '<br>' + esc(r.prompt) : '') + '</div>' +
+          '<div class="row-inline" style="justify-content:flex-end; margin-bottom:14px;">' +
+          (opts ? '<label style="margin-right:auto; font-size:11.5px; color:var(--muted);">Standing: ' +
+            '<select data-apv-set-kind="' + esc(r.kind) + '" data-apv-set-req="' + esc(r.id) + '" style="width:auto; min-width:90px;">' +
+            '<option value="" selected disabled>set…</option>' + opts + '</select></label>' : '') +
+          '<button class="btn btn-danger btn-sm" data-apv-dec="' + esc(r.id) + '" data-apv-act="deny_once">Deny</button>' +
+          '<button class="btn btn-primary btn-sm" data-apv-dec="' + esc(r.id) + '" data-apv-act="approve_once">Approve</button></div>';
+      }).join('');
+    } catch(e){ el.innerHTML = '<div class="panel-error">Failed to load pending approvals.</div>'; }
+  }
+  $('pendingApprovals').addEventListener('click', async function(e){
+    var b = e.target.closest('[data-apv-dec]');
+    if (!b) return;
+    var id = b.getAttribute('data-apv-dec'), action = b.getAttribute('data-apv-act');
+    b.disabled = true;
+    try {
+      var res = await (await fetch('/approvals/decide', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ req_id: id, action: action }) })).json();
+      toast(res.result === 'unknown' ? 'Already resolved' : (action === 'approve_once' ? 'Approved' : 'Denied'), res.result === 'unknown' ? 'info' : 'ok');
+    } catch(err){ toast('Decision failed: ' + err.message, 'err'); }
+    loadPendingApprovals();
+  });
+  $('pendingApprovals').addEventListener('change', async function(e){
+    var sel = e.target.closest('[data-apv-set-kind]');
+    if (!sel) return;
+    var val = sel.value;
+    if (!val || val === 'ask') { loadPendingApprovals(); return; }   // no-op standing
+    var reqId = sel.getAttribute('data-apv-set-req');
+    var action = val === 'allow' ? 'always_allow' : 'always_deny';
+    sel.disabled = true;
+    try {
+      var res = await (await fetch('/approvals/decide', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ req_id: reqId, action: action }) })).json();
+      toast(res.result === 'unknown' ? 'Already resolved' : 'Standing policy updated', res.result === 'unknown' ? 'info' : 'ok');
+    } catch(err){ toast('Update failed: ' + err.message, 'err'); }
+    loadPendingApprovals();
+  });
 
   async function loadDeps(){
     var el = $('pendingInstalls');
@@ -2317,7 +2527,7 @@
   pageLoaders.data = function(){ loadFiles(); loadKnowledge(); loadArtifacts(); loadTables(); };
   pageLoaders.memory = function(){ loadMemoryStats(); };
   pageLoaders.rules = function(){ loadRules(); };
-  pageLoaders.developer = function(){ loadLibrary(); loadDeps(); loadTrust(); };
+  pageLoaders.developer = function(){ loadLibrary(); loadDeps(); loadTrust(); loadPendingApprovals(); };
   pageLoaders.reliability = function(){ loadReliability(); };
   pageLoaders.settings = function(){
     loadRoles(); loadCommands(); loadNotify();

@@ -18,6 +18,8 @@ memory/*.db
 scheduled_jobs.json
 watches.json
 rules.json
+approvals.json
+permissions.json
 custom_commands.yaml
 # user-authored routines (repo-root runtime data dir only — not engine/routines/ source)
 /routines/

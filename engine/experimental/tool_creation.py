@@ -510,7 +510,8 @@ class CreateToolTool(Tool):
                  persist_dir: Optional[str] = None, dep_store=None, session_id: str = "",
                  secrets: Optional[dict] = None, created_sink: Optional[list] = None,
                  trust_store=None, allow_trusted: bool = False,
-                 reserved_names: Optional[set] = None):
+                 reserved_names: Optional[set] = None,
+                 approvals=None, run_id: str = "", origin: str = "api"):
         self.registry = registry
         # First-class built-ins whose NAMES are protected even when the tool isn't currently
         # registered (e.g. crawl_site/web_search when their dependency URL isn't configured). Without
@@ -528,6 +529,12 @@ class CreateToolTool(Tool):
         self.created_sink = created_sink
         self.trust_store = trust_store       # trusted-tool tier (human-approved unsandboxed code)
         self.allow_trusted = allow_trusted   # master switch: may a restricted-capability tool go trusted
+        # interactive-approvals broker: when set, a disallowed third-party import GATES through it
+        # (block for a human decision, install + recompile in the SAME turn) instead of the legacy
+        # DepStore.request() + return string. None -> legacy behavior (back-compat).
+        self.approvals = approvals
+        self.run_id = run_id
+        self.origin = origin
         if self.secrets:                 # tell the model the exact keys it may use
             keys = sorted(self.secrets)
             self.description = (
@@ -644,8 +651,52 @@ class CreateToolTool(Tool):
                 if self.allow_trusted and self.trust_store is not None:
                     return self._file_trust_request(args)
                 return self._stdlib_block_message(e.module)
+            if self.approvals is not None:
+                # Interactive approvals ON: GATE through the broker instead of filing a DepStore
+                # request — blocks for a human decision; approved installs + recompiles in THIS
+                # same turn; denied/timeout never get here as a "filed a request" string (the bug
+                # this replaces). timeout raises TurnPaused, which propagates out of run().
+                d = await self.approvals.gate(
+                    "dep-install", e.module, self.session_id, self.run_id,
+                    prompt=f"Install Python package '{e.module}' for tool '{args.name}'.",
+                    origin=self.origin,
+                    payload={"module": e.module, "tool_name": args.name, "code": args.code})
+                if d.denied:
+                    return (f"Dependency '{e.module}' was not approved; "
+                            f"'{args.name}' was not created.")
+                if not d.one_shot:
+                    # Live approval (or an auto-allow) THIS turn: install now. A one-shot decision
+                    # means a DEFERRED resume (Engine._resume_dep) already installed the module
+                    # before spawning this re-run — don't install it a second time.
+                    from engine.experimental import dep_installer
+                    ok, version, log_tail = await dep_installer.install(e.module)
+                    if not ok:
+                        return f"create_tool: install of '{e.module}' failed: {log_tail}"
+                    if self.dep_store is not None:
+                        # Record it so it lands in the startup allowlist too — otherwise a
+                        # persisted tool using this module silently fails to recompile after a
+                        # restart (the gate path installs live but, unlike the legacy
+                        # request()/mark_approved() flow, had no DepStore record at all).
+                        self.dep_store.allow_module(e.module)
+                # Dep now present — recompile the tool NOW (retry the build path, in this same
+                # turn) instead of returning a "try again later" string. Reuses the exact
+                # compile-success tail a clean scan takes (_build_and_verify) so the two paths
+                # can't drift.
+                retry_extra = extra | {e.module}
+                try:
+                    if is_trusted:
+                        run_fn = _compile_trusted(args.code, self.secrets)
+                    else:
+                        run_fn = _compile_run(args.code, self.allow_network, retry_extra, self.secrets)
+                    params_model = build_params_model(args.name, args.parameters)
+                except ToolValidationError as e2:
+                    record["error"] = str(e2)
+                    return (f"create_tool: '{args.name}' could not be built — the dependency may "
+                            f"not be installed, or the code failed to compile: {e2}\n"
+                            "Fix the code and call create_tool again with the same name.")
+                return await self._build_and_verify(args, run_fn, params_model, record)
             if self.dep_store is not None:
-                # Third-party: file a request a human can approve, then the model retries.
+                # Legacy (approvals off): file a request a human can approve, then the model retries.
                 req = self.dep_store.request(e.module, args.name, self.session_id, args.code)
                 return (f"create_tool: '{args.name}' needs the '{e.module}' library, which isn't "
                         "installed yet. I've filed a request to install it — it needs your approval "
@@ -666,6 +717,14 @@ class CreateToolTool(Tool):
                     "Fix the code and call create_tool again. Remember: define "
                     "`def run(args): ...` returning a string; args is a dict of your parameters.")
 
+        return await self._build_and_verify(args, run_fn, params_model, record)
+
+    async def _build_and_verify(self, args: "CreateToolTool.Params", run_fn: Callable,
+                                params_model: type[BaseModel], record: dict) -> str:
+        """Shared tail: compile succeeded (run_fn/params_model are ready) — validate-only report,
+        or build the DynamicTool, test-run it, and register + report (or explain why not). Used by
+        BOTH a clean compile and the post-dep-install retry compile (DRY: same success path either
+        way, so this only needs to exist once)."""
         if self.validate_only:
             record["ok"] = True
             return (f"create_tool: '{args.name}' validated OK (not registered in this "

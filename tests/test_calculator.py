@@ -45,3 +45,40 @@ def test_rejects_attribute_access():
 def test_rejects_bad_syntax():
     out = run("2 +")
     assert "error" in out.lower()
+
+
+def test_sqrt_and_functions():
+    assert run("sqrt(16)") == "4"
+    assert run("sqrt(34)").startswith("5.83")
+    assert run("pow(2, 10)") == "1024"
+    assert run("abs(-5)") == "5"
+    assert run("round(3.14159, 2)") == "3.14"
+    assert run("max(3, 7, 2)") == "7"
+    assert run("min(3, 7, 2)") == "2"
+    assert run("floor(2.9)") == "2"
+    assert run("hypot(3, 4)") == "5"
+
+
+def test_trig_and_log_and_constants():
+    assert run("sin(0)") == "0"
+    assert run("log(e)") == "1"
+    assert run("log10(1000)") == "3"
+    assert run("pi").startswith("3.14159")
+    assert run("cos(tau)") == "1"       # cos(2*pi) == 1
+    assert run("sin(pi/2)") == "1"
+
+
+def test_pow_function_respects_exponent_guard():
+    out = run("pow(2, 5000)")
+    assert "error" in out.lower() and "exponent" in out.lower()
+
+
+def test_rejects_non_whitelisted_function():
+    assert "error" in run("factorial(5)").lower()      # deliberately not whitelisted (runaway risk)
+    assert "error" in run("eval('1')").lower()
+    assert "not allowed" in run("open('x')").lower()
+
+
+def test_rejects_unknown_name():
+    assert "error" in run("x + 1").lower()
+    assert "unknown name" in run("foo").lower()

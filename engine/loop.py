@@ -7,6 +7,7 @@ are fed back to the model as results so it can recover; MAX_STEPS bounds it.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ CREATE_VERIFY_NUDGE = (
     "the right values, you're done: stop and report. Don't keep rewriting blind, and don't leave "
     "throwaway probe tools behind — delete_tool any scratch probes once you've learned what you need.")
 
+from engine.approvals.types import TurnPaused
 from engine.events import EventBus, StepEvent
 from engine.model_client import ModelError
 from engine.modes.base import ToolCallingMode
@@ -66,6 +68,38 @@ class LoopDeps:
     observer_threshold: int = 2
     think: Optional[bool] = None   # None = model default (reasoning on); adaptive router may set it
     reasoning: Optional[str] = None  # per-turn reasoning LEVEL (off|low|medium|high) from the adaptive router; wins over think
+    approvals: object = None       # ApprovalBroker | None; None -> no gating (master-flag-off parity)
+    run_id: str = ""               # this turn's run id, for the gate's resume payload
+    origin: str = "api"            # dashboard | telegram | scheduled | api — for the gate's origin-routing
+
+
+def _jsonable(args) -> object:
+    """Best-effort JSON-serializable form of validated tool args, for the gate's resume payload."""
+    try:
+        return args.model_dump() if hasattr(args, "model_dump") else args
+    except Exception:
+        return {"repr": str(args)}
+
+
+def _args_digest(args) -> str:
+    """Short stable id for a gate target: a hash of the tool's (validated) args, so two different
+    calls to the same tool get distinct targets/policies (mirrors soul.py's retired `_digest`)."""
+    blob = json.dumps(_jsonable(args), sort_keys=True, default=str)
+    return hashlib.sha1(blob.encode()).hexdigest()[:8]
+
+
+def _last_user_text(store: SessionStore, session_id: str) -> str:
+    """Best-effort original user text for this turn, carried in the gate payload so a deferred
+    resume (the owner approves after the turn already ended) can replay it. '' if unavailable
+    (e.g. no session yet, or the last user message carries non-text content like an image)."""
+    try:
+        for m in reversed(store.conversation(session_id)):
+            if m.get("role") == "user":
+                c = m.get("content")
+                return c if isinstance(c, str) else ""
+    except Exception:
+        pass
+    return ""
 
 
 def _strip_old_images(conversation: list[dict]) -> list[dict]:
@@ -208,7 +242,27 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
 
         tool_obj = deps.registry.get(call.tool)
         try:
+            if deps.approvals is not None:
+                _d = await deps.approvals.gate(
+                    call.tool, _args_digest(v.args), session_id, deps.run_id,
+                    prompt=f"Run tool: {call.tool}", origin=deps.origin,
+                    payload={"tool": call.tool, "args": _jsonable(v.args),
+                             "prompt": _last_user_text(deps.store, session_id)},
+                    step=step)
+                if _d.denied:
+                    result = f"Blocked by your policy: you declined running '{call.tool}'."
+                    for m in deps.mode.tool_result_messages(resp, call, result):
+                        deps.store.append_message(session_id, m)
+                    await emit(step, "tool_result", {"tool": call.tool, "ok": False, "result": result})
+                    continue
             result = await tool_obj.run(v.args)
+        except TurnPaused as p:
+            # A gated tool couldn't get a decision in time: end the turn cleanly, the same way
+            # a terminal tool does, rather than feeding "failure" back to the model. The request
+            # stays pending; a later turn (e.g. after the user approves) picks it up.
+            deps.store.append_message(session_id, {"role": "assistant", "content": p.message})
+            await emit(step, "paused", {"req_id": p.req_id, "kind": p.kind})
+            return p.message
         except Exception as e:  # never crash the loop; feed the error back
             result = f"tool {call.tool} failed: {e}"
             await emit(step, "tool_result", {"tool": call.tool, "ok": False, "result": result})

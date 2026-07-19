@@ -51,5 +51,21 @@ async def test_revert_with_no_backup(tmp_path):
 
 
 def test_soul_tools_registered_by_default():
+    """Both read_soul and update_soul are vetted globals on the BASE registry (Task 4 folded
+    update_soul's approval gating into the loop's per-tool gate, so the tool itself no longer
+    needs to be built per-run/approval-aware — see test_update_soul_registered_on_base_registry)."""
     e = Engine(Config(model_base_url="http://x/v1", model_name="m", telegram_bot_token=""))
-    assert "update_soul" in e.registry.names() and "read_soul" in e.registry.names()
+    assert "read_soul" in e.registry.names()
+    assert "update_soul" in e.registry.names()
+
+
+def test_update_soul_registered_on_base_registry():
+    """update_soul is registered once, at Engine construction, next to read_soul — not per-run —
+    when enable_soul_editing is on; absent from the base registry when it's off."""
+    e_on = Engine(Config(model_base_url="http://x/v1", model_name="m", telegram_bot_token="",
+                         enable_soul_editing=True))
+    assert "update_soul" in e_on.registry.names()
+
+    e_off = Engine(Config(model_base_url="http://x/v1", model_name="m", telegram_bot_token="",
+                          enable_soul_editing=False))
+    assert "update_soul" not in e_off.registry.names()

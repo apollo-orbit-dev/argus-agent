@@ -87,6 +87,36 @@ def dep_keyboard(req_id: str) -> InlineKeyboardMarkup:
     ]])
 
 
+def apv_request_text(req: dict) -> str:
+    """Plain-text description of a pending unified-approval request (any gate kind — dep-install,
+    soul-edit, ...), shown alongside its Approve/Deny buttons. Unlike ``dep_request_text`` this
+    isn't dep-specific: ``req['prompt']`` (set by whichever gate() call filed the request) already
+    carries the human-readable detail."""
+    return f"⏸ Approval needed: {req.get('prompt') or req.get('target', 'an action')}"
+
+
+def apv_keyboard(req_id: str, states: list | None = None) -> InlineKeyboardMarkup:
+    """Inline decision buttons for any gated approval request (unified ``apv:`` scheme, generalizing
+    ``dep_keyboard`` beyond dep-installs). Always offers approve/deny-once; a standing
+    always_allow/always_deny button is added only when the gate's policy actually supports that
+    state (``states`` from ``states_for(kind)``) — e.g. dep-install has no "allow" state (an
+    unreviewed install can never be blanket-trusted), so it gets no "always allow" button.
+    callback_data stays well under Telegram's 64-byte limit (req_id is 8 hex chars)."""
+    states = states or []
+    rows = [[
+        InlineKeyboardButton("✅ Approve", callback_data=f"apv:approve_once:{req_id}"),
+        InlineKeyboardButton("🚫 Deny", callback_data=f"apv:deny_once:{req_id}"),
+    ]]
+    standing = []
+    if "allow" in states:
+        standing.append(InlineKeyboardButton("👍 Always allow", callback_data=f"apv:always_allow:{req_id}"))
+    if "deny" in states:
+        standing.append(InlineKeyboardButton("👎 Always deny", callback_data=f"apv:always_deny:{req_id}"))
+    if standing:
+        rows.append(standing)
+    return InlineKeyboardMarkup(rows)
+
+
 def _approve_result_text(res: dict) -> str:
     """Plain-text result line for an approve action (button or command)."""
     if res.get("ok"):
@@ -627,7 +657,7 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
         )
         typing = asyncio.create_task(_keep_typing(update.get_bot(), chat_id))
         try:
-            answer = await engine.run_task(session_id, text, images=images or None)
+            answer = await engine.run_task(session_id, text, images=images or None, origin="telegram")
         except asyncio.CancelledError:      # /stop cancelled the in-flight run
             answer = "⏹️ Stopped."
         except Exception as e:              # surface loop failures instead of hanging
@@ -821,7 +851,7 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
             _consume_progress(engine, session_id, status_msg, verbose=chat_id in verbose_chats))
         typing = asyncio.create_task(_keep_typing(update.get_bot(), chat_id))
         try:
-            answer = await engine.run_task(session_id, text)
+            answer = await engine.run_task(session_id, text, origin="telegram")
         except asyncio.CancelledError:
             answer = "⏹️ Stopped."
         except Exception as e:
@@ -965,7 +995,11 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
                 f"Verbose is {state}. Use /verbose on or /verbose off.")
 
     async def on_dep_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle taps on the inline Approve/Deny buttons."""
+        """Handle taps on the legacy dep-only Approve/Deny buttons (``depok:``/``depno:``). Kept
+        alongside the unified ``on_apv_callback`` for the ``enable_interactive_approvals=False``
+        case: with that flag off, ``CreateToolTool`` files requests through the old DepStore
+        (``engine.approve_dep``/``deny_dep``), never the approvals broker, so this is still the
+        only path that can resolve them from Telegram."""
         q = update.callback_query
         chat = update.effective_chat
         if chat is None or not is_allowed(chat.id, config):
@@ -988,6 +1022,30 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
             await q.edit_message_text(_approve_result_text(res))
             return
         await q.answer()
+
+    async def on_apv_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle taps on the unified approval buttons (``apv:<action>:<req_id>``) — any gate kind
+        (dep-install, soul-edit, ...), not just dependency installs. This is the generalized
+        successor to ``on_dep_callback``'s depok/depno pair; that legacy handler stays registered
+        too (see its docstring) so the dep-approval Telegram path still works when
+        ``enable_interactive_approvals`` is off and dep installs go through the old DepStore flow
+        instead of a broker gate."""
+        q = update.callback_query
+        chat = update.effective_chat
+        if chat is None or not is_allowed(chat.id, config):
+            await q.answer("Not authorized.")
+            return
+        data = q.data or ""
+        _, action, req_id = data.split(":")
+        outcome = engine.approvals_decide(req_id, action)
+        if outcome == "unknown":
+            await q.answer("Already resolved.")
+            await q.edit_message_text("This request is no longer pending.")
+            return
+        approved = action in ("approve_once", "always_allow")
+        await q.answer("Approved." if approved else "Denied.")
+        tail = " — remembered for next time" if action in ("always_allow", "always_deny") else ""
+        await q.edit_message_text(("✅ Approved" if approved else "🚫 Denied") + tail + ".")
 
     # concurrent_updates=True so each update runs in its own task: a slash command (/stop,
     # /status, /verbose) is handled WHILE the agent is working instead of queuing behind it,
@@ -1020,6 +1078,7 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
     app.add_handler(CommandHandler("approve", on_approve))
     app.add_handler(CommandHandler("deny", on_deny))
     app.add_handler(CallbackQueryHandler(on_dep_callback, pattern=r"^dep(ok|no):"))
+    app.add_handler(CallbackQueryHandler(on_apv_callback, pattern=r"^apv:"))
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, on_message))
     # Registered LAST: any /command not claimed by a built-in handler above falls through to here,
     # where it's matched against the user's custom aliases (unknown commands stay silent).
