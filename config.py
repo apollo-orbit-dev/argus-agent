@@ -177,6 +177,9 @@ class Config(BaseSettings):
     embedding_model: str = ""
     embedding_api_key: str = "dummy"   # so the embedding role can point at a keyed provider
     enable_memory_autoextract: bool = True
+    # Behavioral rules: standing rules injected into every turn (context window / cost permitting).
+    enable_rules: bool = True             # standing behavioral rules injected into every turn
+    enable_rules_autodetect: bool = True  # auto-draft rules from owner corrections (aux model call)
     # Memory scoping. Default "global": memory is about the *user*, not the interface,
     # so what you tell the dashboard is recalled in Telegram and vice-versa. Set
     # "session" to isolate memory per conversation (e.g. a multi-user Telegram bot).
@@ -243,7 +246,7 @@ class Config(BaseSettings):
         "smtp_user", "smtp_password", "ntfy_topic", "ntfy_server", "notify_fanout",
         "enable_scheduler", "enable_clarify", "enable_observer", "observer_repeat_threshold",
         "enable_memory", "semantic_recall", "embedding_base_url", "embedding_model", "embedding_api_key",
-        "enable_memory_autoextract", "memory_scope", "memory_user_id",
+        "enable_memory_autoextract", "enable_rules", "enable_rules_autodetect", "memory_scope", "memory_user_id",
         "host", "port", "log_file", "ssl_certfile", "ssl_keyfile",
         "telegram_bot_token", "allowed_chat_ids", "admin_token",
     )
