@@ -24,6 +24,7 @@ from engine.events import EventBus, StepEvent
 from engine.loop import LoopDeps, run_loop
 from engine.model_client import ModelClient
 from engine.modes.base import get_mode
+from engine.rules.detect import RULE_EXTRACT_PROMPT, has_rule_cue
 from engine.scheduler import Scheduler
 from engine.skills.base import SkillRegistry, get_selector
 from engine.state import SessionStore
@@ -1150,6 +1151,12 @@ class Engine:
             task = asyncio.create_task(self.autoextract(session_id, text))
             self._bg_tasks.add(task)                     # hold a ref so it isn't GC'd
             task.add_done_callback(self._bg_tasks.discard)
+        # Same idea, scoped to standing behavioral rules: gate on a cheap lexical cue so the
+        # aux model isn't invoked on ordinary chat.
+        if c.enable_rules and c.enable_rules_autodetect and has_rule_cue(text):
+            rt = asyncio.create_task(self.autodetect_rule(session_id, text))
+            self._bg_tasks.add(rt)
+            rt.add_done_callback(self._bg_tasks.discard)
         return answer
 
     # meta/trivial tools whose repetition shouldn't trigger a "make a tool" nudge
@@ -1418,6 +1425,64 @@ class Engine:
             await deliver(session_id, f"🧠 I remembered this about you:\n{lines}")
         except Exception:
             log.debug("memory-saved notify failed", exc_info=True)
+
+    async def autodetect_rule(self, session_id: str, user_text: str) -> list[dict]:
+        """Background: draft standing behavioral rules from an owner correction (e.g. 'don't do
+        that again'). Mirrors autoextract but scoped to how-to-behave directives. Conservative +
+        deduped (RulesStore.add re-enables an existing match instead of duplicating); never
+        raises into a turn."""
+        text = (user_text or "").strip()
+        if len(text) < 3:
+            return []
+        saved: list[dict] = []
+        try:
+            known = self.rules.enabled_rules()
+            known_str = "\n".join(f"- {r['text']}" for r in known) or "(none)"
+            ctx_str = self._recent_context(session_id, exclude_last_user=text)
+            resp = await self._aux_model_client().chat([
+                {"role": "system", "content": RULE_EXTRACT_PROMPT},
+                {"role": "user", "content":
+                    f"Current standing rules:\n{known_str}\n\n"
+                    f"Recent conversation (context only):\n{ctx_str}\n\n"
+                    f"The owner's latest message:\n{text}\n\n"
+                    "New standing rules to add (or NONE):"}],
+                max_tokens=300, think=False)  # think=False: no reasoning pass, same as autoextract
+            content = (resp.content or "").strip()
+        except Exception:
+            log.debug("autodetect_rule failed", exc_info=True)
+            return []
+        if not content or content.upper() == "NONE":
+            return []
+        for line in content.splitlines():
+            line = line.strip().lstrip("-•*0123456789.) ").strip()
+            if not line or line.upper() == "NONE":
+                continue
+            rec = self.rules.add(line, source="auto")
+            if rec is not None:
+                saved.append(rec)
+        if saved:                                    # make autodetect REVIEWABLE, not silent
+            await self._notify_rule_saved(session_id, saved)
+        return saved
+
+    async def _notify_rule_saved(self, session_id: str, saved: list[dict]) -> None:
+        """Surface auto-saved rules to the owner (reviewable) + emit a trace event. Delivers over
+        the same channel autoextract's _notify_memory_saved uses; no-ops for non-numeric
+        (dashboard) session ids."""
+        try:
+            await self.emit("autodetect", session_id, 0, "rule_saved",
+                            {"rules": [{"id": r["id"], "text": r["text"]} for r in saved]})
+        except Exception:
+            pass
+        deliver = getattr(self.scheduler, "deliver", None)
+        if not deliver:
+            return
+        lines = "\n".join(f"• {r['text']}" for r in saved)
+        msg = ("📌 I'll remember to follow this from now on:\n" + lines +
+               "\n(Remove it on the Rules page to undo.)")
+        try:
+            await deliver(session_id, msg)
+        except Exception:
+            log.debug("rule-saved notify failed", exc_info=True)
 
     # ---- context usage + compaction ----
     async def usage(self, session_id: str) -> dict:
