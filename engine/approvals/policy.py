@@ -1,6 +1,6 @@
 """PermissionStore — the Allow/Ask/Deny toggle per gate. JSON, atomic."""
 from __future__ import annotations
-import json, os, time
+import json, os
 from engine.approvals.types import GATES
 
 

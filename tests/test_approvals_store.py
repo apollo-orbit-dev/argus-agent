@@ -41,3 +41,26 @@ def test_policy_persistence(tmp_path):
     p = str(tmp_path / "permissions.json")
     PermissionStore(p).set("dep-install", "deny")
     assert PermissionStore(p).get("dep-install") == "deny"
+
+
+def test_malformed_rows_dropped_at_load(tmp_path):
+    import json
+    from engine.approvals.store import ApprovalStore
+    from engine.approvals.policy import PermissionStore
+    ap = str(tmp_path / "approvals.json")
+    json.dump([
+        {"id": "aa11", "kind": "dep-install", "target": "pandas", "session_id": "s",
+         "prompt": "p", "origin": "dashboard", "payload": {}, "status": "pending", "created_at": 1.0,
+         "resolved_at": None, "decision": None, "actor": None},
+        {"id": "bb22"},                       # missing kind/created_at
+        {"kind": "soul-edit", "created_at": 2.0},  # missing id
+        "not-a-dict",
+    ], open(ap, "w"))
+    assert [r["id"] for r in ApprovalStore(ap).pending()] == ["aa11"]
+
+    pp = str(tmp_path / "permissions.json")
+    json.dump({"dep-install": "deny", "soul-edit": "banana", "bogus-kind": "ask"}, open(pp, "w"))
+    ps = PermissionStore(pp)
+    assert ps.get("dep-install") == "deny"    # valid kept
+    assert ps.get("soul-edit") == "ask"       # invalid state 'banana' dropped -> default
+    assert all(row["kind"] != "bogus-kind" for row in ps.list())   # unknown kind ignored

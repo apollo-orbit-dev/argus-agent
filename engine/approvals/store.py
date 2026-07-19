@@ -1,6 +1,6 @@
 """ApprovalStore — durable log of approval requests. JSON, atomic, mirrors RulesStore hardening."""
 from __future__ import annotations
-import json, os, time, uuid
+import copy, json, os, time, uuid
 
 
 def _well_formed(r: object) -> bool:
@@ -36,7 +36,7 @@ class ApprovalStore:
                "resolved_at": None, "decision": None, "actor": None}
         self.reqs.append(rec)
         self._save()
-        return dict(rec)
+        return copy.deepcopy(rec)
 
     def resolve(self, req_id, status, decision, actor, now=None) -> bool:
         for r in self.reqs:
@@ -50,10 +50,10 @@ class ApprovalStore:
         return False
 
     def get(self, req_id) -> dict | None:
-        return next((dict(r) for r in self.reqs if r["id"] == req_id), None)
+        return next((copy.deepcopy(r) for r in self.reqs if r["id"] == req_id), None)
 
     def pending(self) -> list[dict]:
-        return [dict(r) for r in self.reqs if r.get("status") == "pending"]
+        return [copy.deepcopy(r) for r in self.reqs if r.get("status") == "pending"]
 
     def list(self, limit: int = 50) -> list[dict]:
-        return [dict(r) for r in sorted(self.reqs, key=lambda r: r["created_at"], reverse=True)][:limit]
+        return [copy.deepcopy(r) for r in sorted(self.reqs, key=lambda r: r["created_at"], reverse=True)][:limit]
