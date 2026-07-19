@@ -948,14 +948,16 @@ class Engine:
         return self.approval_store.pending()
 
     def permissions_list(self) -> list[dict]:
-        # MINIMAL fix for the GATES retirement (Task 1 of the per-tool permission matrix):
-        # PermissionStore.list() is gone, replaced by states(keys). The full tool enumeration
-        # (builtin + conditional_enabled + created, via tools_overview()) is Task 5's job; for now
-        # just cover the two keys the shipped feature actually gates so this stays green.
-        return self.permissions.states(["dep-install", "update_soul"])
+        # Full tool enumeration (Task 5): every tool a turn could see, via tools_overview()
+        # (builtin + conditional_enabled + created). states() dedups and always adds "dep-install".
+        ov = self.tools_overview()
+        keys = ([t["name"] for t in ov["builtin"]]
+                + [t["name"] for t in ov["conditional_enabled"]]
+                + [t["name"] for t in ov["created"]])
+        return self.permissions.states(keys)
 
-    def permission_set(self, kind: str, state: str) -> None:
-        self.permissions.set(kind, state)   # raises ValueError -> 400 at the API layer
+    def permission_set(self, key: str, state: str) -> None:
+        self.permissions.set(key, state)   # raises ValueError -> 400 at the API layer
 
     def approvals_decide(self, req_id: str, action: str, actor: str = "owner") -> str:
         return self.approvals.resolve(req_id, action, actor)

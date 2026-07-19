@@ -519,9 +519,9 @@ def create_app(engine: Engine) -> FastAPI:
     async def permissions_set(body: dict, request: Request):
         _require_admin(request)
         try:
-            engine.permission_set(body.get("kind", ""), body.get("state", ""))
+            engine.permission_set(body.get("key", ""), body.get("state", ""))
         except (ValueError, KeyError):
-            raise HTTPException(400, "invalid kind/state")
+            raise HTTPException(400, "invalid key/state")
         return {"ok": True}
 
     @app.post("/approvals/decide")
