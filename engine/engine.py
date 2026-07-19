@@ -422,9 +422,10 @@ class Engine:
         self.code_interp = CodeInterpreter(allow_network=config.code_interpreter_allow_network,
                                            timeout=config.code_interpreter_timeout)
         if config.enable_soul_editing:                    # the agent can revise its OWN persona
-            from engine.tools.soul import ReadSoulTool, UpdateSoulTool
+            from engine.tools.soul import ReadSoulTool
             self.registry.register(ReadSoulTool(self.get_soul))
-            self.registry.register(UpdateSoulTool(self.get_soul, self.set_soul))
+            # UpdateSoulTool is registered PER-RUN (not here) so it can be built approval-aware,
+            # bound to this turn's session/run/origin — see the per-run registry block in run_task.
         from engine.tools.watch import WatchManager, WatchStore
         self.watches = WatchStore(str(root / "watches.json"))
         self.watch_manager = WatchManager(self.watches)   # deliver + summarize wired in main.py
@@ -957,9 +958,19 @@ class Engine:
         log.debug("dep-install resume stub called for req %s (target=%s)", req["id"], req["target"])
 
     async def _resume_soul(self, req: dict) -> None:
-        """Deferred resume for an approved soul-edit request whose turn already ended.
-        Stub — Task 7 replaces this with the real SOUL.md write."""
-        log.debug("soul-edit resume stub called for req %s (target=%s)", req["id"], req["target"])
+        """Deferred resume for an approved soul-edit request whose turn already ended: apply the
+        new persona the tool call staged in the request's payload, then let the owner know it took
+        effect (their turn ended with the edit still pending, so it would otherwise be silent).
+        Mirrors _notify_rule_saved/_notify_memory_saved's deliver-guarded notify style."""
+        self.set_soul(req["payload"]["soul"])
+        deliver = getattr(self.scheduler, "deliver", None)
+        if not deliver:
+            return
+        try:
+            await deliver(req["session_id"],
+                         "My persona (SOUL) edit was approved and is now in effect.")
+        except Exception:
+            log.debug("soul-edit resume notify failed", exc_info=True)
 
     async def _run_deterministic_skill(self, session_id: str, run_id: str, skill, text: str) -> str:
         """Execute a skill's structured `steps` through the routine executor: tool steps run in the
@@ -1070,7 +1081,8 @@ class Engine:
         run_registry = self.registry
         if (ctx.extra_tools or tool_creation_on or skill_creation_on or scheduler_on
                 or memory_on or watch_on or c.enable_charts or c.enable_notify or c.enable_routines
-                or c.enable_code_interpreter or c.enable_rules or c.enable_interactive_approvals):
+                or c.enable_code_interpreter or c.enable_rules or c.enable_interactive_approvals
+                or c.enable_soul_editing):
             run_registry = ToolRegistry()
             for t in self.registry.list():
                 run_registry.register(t)
@@ -1082,6 +1094,12 @@ class Engine:
                 run_registry.register(RememberTool(self.memory, mkey))
                 run_registry.register(RecallTool(self.memory, mkey))
                 run_registry.register(ForgetTool(self.memory, mkey))
+            if c.enable_soul_editing:
+                from engine.tools.soul import UpdateSoulTool
+                broker = self.approvals if c.enable_interactive_approvals else None
+                run_registry.register(UpdateSoulTool(self.get_soul, self.set_soul,
+                                                     approvals=broker, session_id=session_id,
+                                                     run_id=run_id, origin=origin))
             if c.enable_rules:
                 from engine.tools.rules import ListRulesTool, RemoveRuleTool, SaveRuleTool
                 run_registry.register(SaveRuleTool(self.rules))

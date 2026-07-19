@@ -51,5 +51,25 @@ async def test_revert_with_no_backup(tmp_path):
 
 
 def test_soul_tools_registered_by_default():
+    """read_soul is a vetted global; update_soul is now built PER-RUN (approval-aware, bound to
+    this turn's session/run/origin — Task 7), so it no longer lives in the engine's global
+    registry. See test_update_soul_registered_per_run for the per-run registration itself."""
     e = Engine(Config(model_base_url="http://x/v1", model_name="m", telegram_bot_token=""))
-    assert "update_soul" in e.registry.names() and "read_soul" in e.registry.names()
+    assert "read_soul" in e.registry.names()
+    assert "update_soul" not in e.registry.names()   # no longer global
+
+
+async def test_update_soul_registered_per_run(monkeypatch):
+    """Drive a real turn (stubbing only the model loop) and inspect the per-run registry it
+    builds, confirming update_soul is registered there when enable_soul_editing is on."""
+    e = Engine(Config(model_base_url="http://x/v1", model_name="m", telegram_bot_token=""))
+    import engine.engine as engine_mod
+    captured = {}
+
+    async def _fake_run_loop(deps, session_id, run_id, text, user_content=None):
+        captured["names"] = deps.registry.names()
+        return "ok"
+
+    monkeypatch.setattr(engine_mod, "run_loop", _fake_run_loop)
+    await e.run_task("s1", "hi")
+    assert "update_soul" in captured["names"]

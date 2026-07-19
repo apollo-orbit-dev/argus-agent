@@ -8,11 +8,18 @@ the next turn (the engine updates its live soul) and persist to SOUL.md.
 """
 from __future__ import annotations
 
+import hashlib
+
 from pydantic import BaseModel, Field
 
 from engine.tools.base import Tool
 
 _MAX_SOUL = 4000       # keep the persona from bloating the system prompt
+
+
+def _digest(text: str) -> str:
+    """Short stable id for a soul-edit gate target (not a security hash — just a dedup/display key)."""
+    return hashlib.sha1(text.encode()).hexdigest()[:8]
 
 
 class ReadSoulTool(Tool):
@@ -45,10 +52,15 @@ class UpdateSoulTool(Tool):
     class Params(BaseModel):
         soul: str = Field(..., description="the complete new persona/voice text (revise your current one)")
 
-    def __init__(self, get_soul, set_soul, max_len: int = _MAX_SOUL):
+    def __init__(self, get_soul, set_soul, max_len: int = _MAX_SOUL, approvals=None,
+                session_id: str = "", run_id: str = "", origin: str = "api"):
         self.get_soul = get_soul
         self.set_soul = set_soul
         self.max_len = max_len
+        self.approvals = approvals            # None -> apply directly (back-compat); else gate first
+        self.session_id = session_id
+        self.run_id = run_id
+        self.origin = origin
 
     async def run(self, args: "UpdateSoulTool.Params") -> str:
         text = (args.soul or "").strip()
@@ -57,6 +69,13 @@ class UpdateSoulTool(Tool):
         if len(text) > self.max_len:
             return (f"update_soul error: that's too long ({len(text)} chars; max {self.max_len}). "
                     "Keep the persona concise.")
+        if self.approvals is not None:
+            d = await self.approvals.gate("soul-edit", _digest(text), self.session_id, self.run_id,
+                                          prompt=f"Edit my persona (SOUL):\n{text[:400]}",
+                                          origin=self.origin, payload={"soul": text})
+            if d.denied:
+                return "You declined the persona edit; leaving my SOUL unchanged."
+            # approved (auto/once/always/one_shot) -> fall through and apply
         self.set_soul(text)
         return ("update_soul: my persona is updated and in effect from now on. My previous persona is "
                 "backed up, so this can be reverted from the dashboard's Soul panel if needed.")
