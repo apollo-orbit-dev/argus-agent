@@ -1523,9 +1523,9 @@
       return '<div class="list-item"><div class="list-main"><div class="list-title">' + esc(o.name) +
         (o.description ? '<div class="list-sub" style="font-family:var(--font-body); color:var(--muted); white-space:normal;">' + esc(truncate(o.description,140)) + '</div>' : '') +
         (withTools && Array.isArray(o.tools) && o.tools.length ? '<div class="list-sub">tools: ' + esc(o.tools.join(', ')) + '</div>' : '') +
-        '</div>' +
+        '</div></div>' +   // close .list-title AND .list-main
         (delKind ? '<button class="act-btn danger" data-lib-delete="' + delKind + '" data-lib-name="' + esc(o.name) + '" title="Delete">✕</button>' : '') +
-        '</div></div>';   // close .list-main AND .list-item (the item-close was missing → items nested/stretched)
+        '</div>';          // close .list-item — the ✕ is now a sibling of .list-main, so the flex row right-aligns it inline instead of stacking it below
     }).join('');
   }
   async function loadLibrary(){
