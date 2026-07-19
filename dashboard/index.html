@@ -359,7 +359,18 @@
       <section class="page" id="page-developer">
         <div class="page-head">
           <span class="page-title">Developer</span>
-          <span class="page-sub">Tool &amp; skill library, dependency approvals, trusted-tool review.</span>
+          <span class="page-sub">Tool &amp; skill library, dependency approvals, trusted-tool review, interactive approvals.</span>
+        </div>
+
+        <div class="grid grid-2" style="margin-bottom:16px;">
+          <div class="card">
+            <div class="card-head"><span class="card-title">Permissions</span><span class="card-hint">standing policy per gated action</span></div>
+            <div id="permMatrix"><div class="empty">loading…</div></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><span class="card-title">Pending approvals</span><span class="tag tag-amber" id="pendingApprovalsBadge">0</span></div>
+            <div id="pendingApprovals"><div class="empty">loading…</div></div>
+          </div>
         </div>
 
         <div class="grid grid-2" style="margin-bottom:16px;">
