@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here.
 
+## 0.5.0
+
+### Added
+- **Structured-data skills** — two skills that teach a small model to work with tables well, the first
+  of the skills-led push (skills as the guidance layer that gets more out of the existing tools):
+  - **`design_table`** — designs a sound schema *before* creating a table: real column types (not
+    all-text), a `json` column for list/nested fields (ingredients, tags, line-items), the embed-vs-
+    split judgment, and a primary key for natural ids. Fixes the small-model default of flat, all-`TEXT`
+    tables with lists buried in text blobs.
+  - **`extract_to_table`** — pulls records out of a document, file, or pasted text into a queryable
+    table: reads the source with the right tool (`read_document` incl. OCR, `read_file`, or
+    `download_file` for a document URL), designs a typed schema, then inserts one row per record —
+    instead of returning the content as prose or one giant text column.
+- **`json` / `list` column-type alias** for `create_table` — a list or nested field can be declared
+  `field:json` (stored as JSON text, queryable with `json_extract`), so the schema self-documents the
+  intent. Additive: existing schemas are unaffected.
+
 ## 0.4.0
 
 ### Added
