@@ -44,3 +44,31 @@ def test_missing_dir_does_not_crash():
     reg = SkillRegistry()
     reg.load_dir("/nonexistent/skills/dir")
     assert reg.list() == []
+
+
+def test_design_table_skill_loads():
+    reg = SkillRegistry()
+    reg.load_dir(LIB)
+    s = reg.get("design_table")
+    assert s is not None
+    assert s.description and s.procedure
+    assert set(s.tools) == {"list_tables", "create_table", "read_document", "read_file", "insert_row"}
+    assert s.steps == []                      # prose-only, no deterministic steps
+    assert any("table" in t for t in s.triggers)
+    # the schema-design teeth are present
+    assert "json" in s.procedure.lower()
+    assert "grain" in s.procedure.lower() or "one row" in s.procedure.lower()
+
+
+def test_extract_to_table_skill_loads():
+    reg = SkillRegistry()
+    reg.load_dir(LIB)
+    s = reg.get("extract_to_table")
+    assert s is not None
+    assert s.description and s.procedure
+    assert set(s.tools) == {"download_file", "read_document", "read_file",
+                            "create_table", "insert_row", "list_tables", "query_table"}
+    assert s.steps == []                       # prose-only
+    body = s.procedure.lower()
+    assert "read_document" in body and "read_file" in body and "insert_row" in body
+    assert "one row" in body                    # the structuring pitfall is addressed

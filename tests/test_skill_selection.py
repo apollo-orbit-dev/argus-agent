@@ -65,6 +65,34 @@ def test_bare_url_does_not_activate_summarize():
     assert ctx.active_skill != "summarize_url"
 
 
+def test_table_skills_do_not_overfire_on_lookalike_words():
+    """Regression: design_table's triggers are substring-matched, so 'table for this' used to fire
+    inside 'comfortable for this' / 'presentable for this'. Triggers must be table-anchored and NOT
+    hijack ordinary requests that merely contain a word ending in '-table'."""
+    from engine.skills.base import SkillRegistry
+    from pathlib import Path
+    reg = SkillRegistry()
+    reg.load_dir(str(Path(__file__).resolve().parents[1] / "engine" / "skills" / "library"))
+    sel = ExplicitSelector(reg)
+    for text in ("is this comfortable for this weather?",
+                 "make this presentable for this meeting",
+                 "is that acceptable for this project?"):
+        ctx = sel.prepare("s", text, None)
+        assert ctx.active_skill not in ("design_table", "extract_to_table"), text
+
+
+def test_put_x_in_a_table_activates_design_table():
+    """'in a table' trigger catches natural 'put/track X in a table' phrasings (coverage gap fix),
+    and must not be swallowed by extract_to_table's 'into a table'."""
+    from engine.skills.base import SkillRegistry
+    from pathlib import Path
+    reg = SkillRegistry()
+    reg.load_dir(str(Path(__file__).resolve().parents[1] / "engine" / "skills" / "library"))
+    sel = ExplicitSelector(reg)
+    ctx = sel.prepare("s", "put these expenses in a table for me", None)
+    assert ctx.active_skill == "design_table"
+
+
 def test_explicit_no_match_returns_empty():
     sel = ExplicitSelector(registry_with_research())
     ctx = sel.prepare("s", "hello there", None)
