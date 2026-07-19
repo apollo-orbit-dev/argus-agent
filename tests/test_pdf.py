@@ -3,6 +3,11 @@ import asyncio
 
 import pytest
 
+# WeasyPrint is an OPTIONAL dependency (the `pdf` extra) — it needs native GTK/Pango/cairo libs, so
+# it isn't part of the base install and isn't present in CI. Skip this whole module when it's absent
+# rather than failing (mirrors the tesseract skip in test_documents.py).
+pytest.importorskip("weasyprint")
+
 from engine.tools.files import FileWorkspace
 from engine.tools.pdf import ConvertToPdfTool, MakePdfTool, _no_external_fetch, file_to_html
 
