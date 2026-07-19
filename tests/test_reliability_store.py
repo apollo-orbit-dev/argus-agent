@@ -16,13 +16,13 @@ def test_record_and_summary(tmp_path):
     s.record("tool", "web_search", ok=0, ms=50, detail="timeout", ts=now)
     s.record("validation_fail", "web_search", ok=0, ms=None, detail="bad args", ts=now)
     s.record("reprompt", "", ok=None, ms=None, detail="no tool call", ts=now)
-    out = s.summary(days=30)
+    out = s.summary(days=30, now=now)
     assert out["tool_calls"] == 3
     assert out["tool_success_pct"] == round(2 / 3 * 100, 1)
-    tools = {t["entity"]: t for t in s.per_tool(days=30)}
+    tools = {t["entity"]: t for t in s.per_tool(days=30, now=now)}
     assert tools["weather"]["success_pct"] == 100.0 and tools["weather"]["mean_ms"] == 200
     assert tools["web_search"]["success_pct"] == 0.0
-    lh = s.loop_health(days=30)
+    lh = s.loop_health(days=30, now=now)
     assert lh["reprompt"]["total"] == 1 and lh["validation_fail"]["total"] == 1
 
 
@@ -31,7 +31,7 @@ def test_routine_completion(tmp_path):
     now = 1_700_000_000.0
     s.record("routine", "morning", ok=1, ms=5000, detail="", ts=now)
     s.record("routine", "morning", ok=0, ms=100, detail="step 'x' failed", ts=now)
-    r = {x["entity"]: x for x in s.per_routine(days=30)}["morning"]
+    r = {x["entity"]: x for x in s.per_routine(days=30, now=now)}["morning"]
     assert r["runs"] == 2 and r["completion_pct"] == 50.0
 
 

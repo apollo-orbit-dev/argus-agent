@@ -49,8 +49,8 @@ class ReliabilityStore:
         entity = entity or ""
         detail = (detail or "")[:_DETAIL_CAP]
         day = _day(ts)
-        okc = 1 if ok == 1 or ok is True else 0
-        errc = 1 if ok == 0 or ok is False else 0
+        okc = 1 if ok in (1, True) else 0
+        errc = 1 if ok in (0, False) else 0
         sms = int(ms) if isinstance(ms, (int, float)) else 0
         cms = 1 if isinstance(ms, (int, float)) else 0
         with self._lock:
@@ -82,15 +82,11 @@ class ReliabilityStore:
             self._rw.commit()
 
     # ---- reads (aggregate) ----
-    def _cutoff_day(self, days: int) -> str:
-        # Use the latest recorded timestamp in the store as reference, falling back to current time
-        # This allows tests with historical data to work correctly
-        latest = self._rw.execute("SELECT MAX(ts) as max_ts FROM outcomes").fetchone()
-        ref_ts = latest["max_ts"] if latest and latest["max_ts"] else time.time()
-        return _day(ref_ts - days * 86400)
+    def _cutoff_day(self, days: int, now: float = None) -> str:
+        return _day((now if now is not None else time.time()) - days * 86400)
 
-    def summary(self, days: int = 30) -> dict:
-        since = self._cutoff_day(days)
+    def summary(self, days: int = 30, now: float = None) -> dict:
+        since = self._cutoff_day(days, now)
         row = self._rw.execute(
             "SELECT COALESCE(SUM(calls),0) c, COALESCE(SUM(ok_count),0) ok "
             "FROM daily WHERE kind='tool' AND day>=?", (since,)).fetchone()
@@ -111,8 +107,8 @@ class ReliabilityStore:
             "friction_events": friction,
         }
 
-    def per_tool(self, days: int = 30) -> list:
-        since = self._cutoff_day(days)
+    def per_tool(self, days: int = 30, now: float = None) -> list:
+        since = self._cutoff_day(days, now)
         rows = self._rw.execute(
             "SELECT entity, SUM(calls) calls, SUM(ok_count) ok, SUM(sum_ms) sms, SUM(cnt_ms) cms "
             "FROM daily WHERE kind='tool' AND day>=? GROUP BY entity", (since,)).fetchall()
@@ -135,8 +131,8 @@ class ReliabilityStore:
         out.sort(key=lambda t: (t["success_pct"] if t["success_pct"] is not None else 100))
         return out
 
-    def per_routine(self, days: int = 30) -> list:
-        since = self._cutoff_day(days)
+    def per_routine(self, days: int = 30, now: float = None) -> list:
+        since = self._cutoff_day(days, now)
         rows = self._rw.execute(
             "SELECT entity, SUM(calls) runs, SUM(ok_count) ok FROM daily "
             "WHERE kind='routine' AND day>=? GROUP BY entity", (since,)).fetchall()
@@ -145,8 +141,8 @@ class ReliabilityStore:
             "completion_pct": round(r["ok"] / r["runs"] * 100, 1) if r["runs"] else None,
         } for r in rows]
 
-    def loop_health(self, days: int = 30) -> dict:
-        since = self._cutoff_day(days)
+    def loop_health(self, days: int = 30, now: float = None) -> dict:
+        since = self._cutoff_day(days, now)
         out = {}
         for kind in ("parse_fail", "reprompt", "validation_fail"):
             series = self._rw.execute(
