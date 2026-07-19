@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented here.
 
+## 0.2.0
+
+### Added
+- **Reliability harness** — a passive, always-on instrument that records tool, routine, and
+  loop-health outcomes from the existing event stream into a dedicated `reliability.db`, surfaced on
+  a new dashboard **Reliability** page: a top-line tool-success score, a worst-first per-tool table
+  (success %, latency, sparkline, last-error drill-down), routine completion, and a loop-health strip
+  (parse-failure / reprompt / validation-failure rates). Costs no model calls — it only observes.
+  Gated by `ENABLE_RELIABILITY` (on by default).
+
+### Fixed
+- Scheduling tools (`list_scheduled_tasks`, `cancel_scheduled_task`, `update_scheduled_task`) are now
+  **owner-wide** instead of session-scoped — a task created from Telegram is visible and manageable
+  from the dashboard and vice-versa (Argus is single-user with global identity). Jobs still remember
+  their origin session for delivery.
+- `GET /version` (and the FastAPI app version) now derive from `pyproject.toml` via a single source,
+  so the reported version can no longer drift from the package version.
+
 ## 0.1.0
 
 Initial public release.

@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from config import persist_to_env
 from engine.engine import Engine
+from engine.version import get_version
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 DASHBOARD_DIR = PROJECT_DIR / "dashboard"
@@ -37,7 +38,7 @@ def _sse(ev) -> str:
 
 
 def create_app(engine: Engine) -> FastAPI:
-    app = FastAPI(title="Argus", version="0.1.0")
+    app = FastAPI(title="Argus", version=get_version())
 
     @app.post("/run")
     async def run(req: RunRequest):
