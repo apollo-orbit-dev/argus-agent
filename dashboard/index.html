@@ -36,6 +36,10 @@
     <rect x="3" y="4" width="18" height="16" rx="2.2"/>
     <path d="M7 9.2 10 12l-3 2.8M12.5 15h4.5"/>
   </symbol>
+  <symbol id="ic-reliability" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 3 4 6.5v5c0 5 3.4 8.6 8 9.5 4.6-.9 8-4.5 8-9.5v-5Z"/>
+    <path d="M8.2 12.3l2.4 2.4 5.2-5.2"/>
+  </symbol>
   <symbol id="ic-hamburger" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
     <path d="M3 6h18M3 12h18M3 18h18"/>
   </symbol>
@@ -86,6 +90,7 @@
       <button class="rail-item" data-page="memory"><svg><use href="#ic-memory"/></svg><span class="rail-label">Memory</span></button>
       <button class="rail-item" data-page="developer"><svg><use href="#ic-developer"/></svg><span class="rail-label">Developer</span></button>
       <button class="rail-item" data-page="logs"><svg><use href="#ic-logs"/></svg><span class="rail-label">Logs</span></button>
+      <button class="rail-item" data-page="reliability"><svg><use href="#ic-reliability"/></svg><span class="rail-label">Reliability</span></button>
       <button class="rail-item" data-page="settings"><svg><use href="#ic-settings"/></svg><span class="rail-label">Settings</span></button>
       <div class="rail-footer" id="railFooter"></div>
     </nav>
@@ -385,6 +390,29 @@
         <div class="log-viewer" id="logViewer">
           <div class="log-body" id="logBody"><div class="empty">Waiting for log output…</div></div>
           <button class="jump-latest" id="logsJumpBtn">↓ jump to latest</button>
+        </div>
+      </section>
+
+      <!-- ================= RELIABILITY ================= -->
+      <section class="page" id="page-reliability">
+        <div class="page-head">
+          <div><h1 class="page-title" style="margin:0;">Reliability</h1>
+            <span class="page-sub">How often tools and routines actually work.</span></div>
+          <div class="row-inline" style="margin-left:auto;">
+            <select id="relRange"><option value="7">7d</option><option value="30" selected>30d</option>
+              <option value="90">90d</option></select>
+            <button class="btn btn-sm" id="relRefresh">Refresh</button>
+          </div>
+        </div>
+        <div id="relDisabled" class="empty" style="display:none;">Reliability is off — enable it in Settings.</div>
+        <div id="relScore" class="grid grid-3"></div>
+        <div class="card"><div class="card-head"><span class="card-title">Tools</span></div>
+          <div id="relTools"></div></div>
+        <div class="grid grid-2">
+          <div class="card"><div class="card-head"><span class="card-title">Routines</span></div>
+            <div id="relRoutines"></div></div>
+          <div class="card"><div class="card-head"><span class="card-title">Loop health</span></div>
+            <div id="relLoop"></div></div>
         </div>
       </section>
 

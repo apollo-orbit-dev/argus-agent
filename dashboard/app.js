@@ -2199,11 +2199,66 @@
   pageEnter.logs = connectLogs;
   pageLeave.logs = disconnectLogs;
 
+  /* ================= RELIABILITY: tool/routine/loop health ================= */
+  function sparkline(vals, w, h){
+    if (!vals || !vals.length) return '';
+    var max = 100, min = 0, n = vals.length;
+    var pts = vals.map(function(v,i){
+      var x = n<2 ? 0 : (i/(n-1))*(w-2)+1;
+      var y = h - 1 - ((v-min)/(max-min))*(h-2);
+      return x.toFixed(1)+','+y.toFixed(1);
+    }).join(' ');
+    return '<svg class="spark" width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'">'
+      + '<polyline fill="none" stroke="currentColor" stroke-width="1.5" points="'+pts+'"/></svg>';
+  }
+  function scoreCard(label, big, sub){
+    return '<div class="card rel-score"><div class="rel-big">'+esc(String(big))+'</div>'
+      + '<div class="rel-label">'+esc(label)+'</div><div class="rel-sub">'+esc(sub)+'</div></div>';
+  }
+  function toolRow(t){
+    var pct = t.success_pct==null?'—':t.success_pct+'%';
+    var cls = t.success_pct==null?'':(t.success_pct>=95?'ok':(t.success_pct>=80?'warn':'bad'));
+    return '<div class="rel-tool"><span class="rt-name">'+esc(t.entity)+'</span>'
+      + '<span class="rt-spark '+cls+'">'+sparkline(t.spark,64,16)+'</span>'
+      + '<span class="rt-pct '+cls+'">'+pct+'</span>'
+      + '<span class="rt-meta">'+t.calls+' calls'+(t.mean_ms!=null?' · '+t.mean_ms+'ms':'')+'</span>'
+      + '<span class="rt-err" title="'+esc(t.last_error||'')+'">'+esc(t.last_error||'')+'</span></div>';
+  }
+  async function loadReliability(){
+    var days = $('relRange').value || '30';
+    try {
+      var s = await (await fetch('/reliability/summary?days='+days)).json();
+      if (!s.enabled){ $('relDisabled').style.display=''; $('relScore').innerHTML=''; return; }
+      $('relDisabled').style.display='none';
+      $('relScore').innerHTML =
+        scoreCard('Tool success', s.tool_success_pct==null?'—':s.tool_success_pct+'%', s.tool_calls+' calls')
+        + scoreCard('Routine completion', s.routine_completion_pct==null?'—':s.routine_completion_pct+'%', s.routine_runs+' runs')
+        + scoreCard('Loop friction', s.friction_events, 'reprompts + parse-fails');
+      var tools = await (await fetch('/reliability/tools?days='+days)).json();
+      $('relTools').innerHTML = tools.length ? tools.map(toolRow).join('')
+        : '<div class="empty">No tool calls recorded yet.</div>';
+      var routines = await (await fetch('/reliability/routines?days='+days)).json();
+      $('relRoutines').innerHTML = routines.length ? routines.map(function(r){
+        return '<div class="rel-line"><span>'+esc(r.entity)+'</span><span>'+r.runs+' runs · '
+          + (r.completion_pct==null?'—':r.completion_pct+'%')+'</span></div>'; }).join('')
+        : '<div class="empty">No routine runs yet.</div>';
+      var loop = await (await fetch('/reliability/loop?days='+days)).json();
+      $('relLoop').innerHTML = ['parse_fail','reprompt','validation_fail'].map(function(k){
+        var d = loop[k]||{total:0,series:[]};
+        return '<div class="rel-line"><span>'+k.replace('_',' ')+'</span><span>'+d.total
+          + ' '+sparkline((d.series||[]).map(function(x){return Math.max(0,100-x.n*10);}),80,18)+'</span></div>';
+      }).join('');
+    } catch(e){ toast('Failed to load reliability data: ' + e.message, 'err'); }
+  }
+  $('relRefresh').addEventListener('click', loadReliability);
+  $('relRange').addEventListener('change', loadReliability);
+
   /* ================= WIRE-UP: page-first-open loaders + initial calls ================= */
   pageLoaders.automation = function(){ loadRoutines(); loadScheduled(); loadWatches(); };
   pageLoaders.data = function(){ loadFiles(); loadKnowledge(); loadArtifacts(); loadTables(); };
   pageLoaders.memory = function(){ loadMemoryStats(); };
   pageLoaders.developer = function(){ loadLibrary(); loadDeps(); loadTrust(); };
+  pageLoaders.reliability = function(){ loadReliability(); };
   pageLoaders.settings = function(){
     loadRoles(); loadCommands(); loadNotify();
     loadSystemPrompt(); loadSoul(); loadEnv();
