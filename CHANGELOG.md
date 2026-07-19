@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here.
 
+## 0.2.1
+
+### Fixed
+- **Reliability metric honesty** — the Reliability page counted a tool call as a success whenever it
+  didn't raise, but most tools catch their own errors and *return* an error string (so `ok` stays
+  true). Tools that returned `"Error fetching…"` every call were scored 100%. Error-shaped results
+  (`Error…` / `Traceback` / `looks WRONG` / fetch+parse errors) are now counted as failures; honest
+  `no-data` / `CANNOT` outcomes still count as successes.
+- Dashboard: the delete (`✕`) button on created-tool and created-skill rows was dropping to its own
+  line; it's now inline on the right of each row.
+
 ## 0.2.0
 
 ### Added
