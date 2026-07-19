@@ -1665,30 +1665,51 @@
   $('ruleInput').addEventListener('keydown', function(e){ if (e.key === 'Enter') $('ruleAddBtn').click(); });
 
   /* ================= DEVELOPER: library / deps / trust ================= */
-  function libItemsHtml(arr, withTools, delKind){
+  // Per-tool Allow/Ask/Deny select. `permMap` is {key: {state, states}} from GET /permissions
+  // (Task 5: one row per tool, plus the always-present "dep-install" sub-gate). Falls back to
+  // ["allow","ask","deny"]/"allow" for ordinary tools if the map has no entry (or fetch failed),
+  // and to ["ask","deny"]/"ask" for the binary "dep-install" gate.
+  function permSelectHtml(key, permMap){
+    var p = (permMap || {})[key] || {};
+    var fallbackStates = key === 'dep-install' ? ['ask', 'deny'] : ['allow', 'ask', 'deny'];
+    var states = p.states || fallbackStates;
+    var state = p.state || states[0];
+    var opts = states.map(function(s){
+      return '<option value="' + esc(s) + '"' + (s === state ? ' selected' : '') + '>' + esc(s) + '</option>';
+    }).join('');
+    return '<select class="perm-select" data-perm-key="' + esc(key) + '" data-prev-state="' + esc(state) + '">' + opts + '</select>';
+  }
+  function libItemsHtml(arr, withTools, delKind, permMap){
     if (!arr || !arr.length) return '<div class="empty">(none yet)</div>';
+    var isTool = !withTools;   // convention: tool call sites pass withTools=false, skill call sites pass true
     return arr.map(function(o){
       return '<div class="list-item"><div class="list-main"><div class="list-title">' + esc(o.name) +
         (o.description ? '<div class="list-sub" style="font-family:var(--font-body); color:var(--muted); white-space:normal;">' + esc(truncate(o.description,140)) + '</div>' : '') +
         (withTools && Array.isArray(o.tools) && o.tools.length ? '<div class="list-sub">tools: ' + esc(o.tools.join(', ')) + '</div>' : '') +
         '</div></div>' +   // close .list-title AND .list-main
+        (isTool ? permSelectHtml(o.name, permMap) : '') +
         (delKind ? '<button class="act-btn danger" data-lib-delete="' + delKind + '" data-lib-name="' + esc(o.name) + '" title="Delete">✕</button>' : '') +
-        '</div>';          // close .list-item — the ✕ is now a sibling of .list-main, so the flex row right-aligns it inline instead of stacking it below
+        '</div>';          // close .list-item — the ✕/select are now siblings of .list-main, so the flex row right-aligns them inline instead of stacking below
     }).join('');
   }
   async function loadLibrary(){
     try {
       var lib = await (await fetch('/library')).json();
+      var permMap = {};
+      try {
+        var pd = await (await fetch('/permissions')).json();
+        (pd.permissions || []).forEach(function(p){ permMap[p.key] = p; });
+      } catch(e){ /* leave permMap empty; per-tool selects fall back to allow/ask/deny defaults */ }
       var t = lib.tools || {}, s = lib.skills || {};
       var cond = t.conditional_enabled || [];
-      $('toolsBuiltin').innerHTML = libItemsHtml(t.builtin, false);
+      $('toolsBuiltin').innerHTML = libItemsHtml(t.builtin, false, null, permMap);
       $('toolsConditional').innerHTML = cond.length
-        ? '<div class="card-hint" style="margin-bottom:6px;">available when their feature flag is on</div><div style="display:flex; flex-wrap:wrap; gap:5px;">' +
-          cond.map(function(n){ return '<span class="tag tag-muted" title="' + esc(n.description || '') + '">' + esc(n.name || n) + '</span>'; }).join('') + '</div>'
+        ? '<div class="card-hint" style="margin-bottom:6px;">available when their feature flag is on</div>' + libItemsHtml(cond, false, null, permMap)
         : '<div class="empty">(none active)</div>';
-      $('toolsCreated').innerHTML = libItemsHtml(t.created, false, 'tool');
+      $('toolsCreated').innerHTML = libItemsHtml(t.created, false, 'tool', permMap);
       $('skillsBuiltin').innerHTML = libItemsHtml(s.builtin, true);
       $('skillsCreated').innerHTML = libItemsHtml(s.created, true, 'skill');
+      $('depInstallPerm').innerHTML = permSelectHtml('dep-install', permMap);
       var totalTools = (t.builtin||[]).length + (t.created||[]).length;
       var totalSkills = (s.builtin||[]).length + (s.created||[]).length;
       $('toolsCountBadge').textContent = totalTools + ' total';
@@ -1713,34 +1734,26 @@
     }
   }
 
-  /* ---- interactive approvals: Permissions matrix + Pending approvals list ---- */
-  async function loadPermissions(){
-    var el = $('permMatrix');
-    try {
-      var d = await (await fetch('/permissions')).json();
-      var perms = d.permissions || [];
-      if (!perms.length){ el.innerHTML = '<div class="empty">No gated actions configured.</div>'; return; }
-      el.innerHTML = perms.map(function(p){
-        var opts = (p.states || []).map(function(s){
-          return '<option value="' + esc(s) + '"' + (s === p.state ? ' selected' : '') + '>' + esc(s) + '</option>';
-        }).join('');
-        return '<div class="list-item"><div class="list-main"><div class="list-title">' + esc(p.label || p.kind) + '</div>' +
-          '<div class="list-sub">' + esc(p.kind) + '</div></div>' +
-          '<select data-perm-kind="' + esc(p.kind) + '" style="width:auto; min-width:100px;">' + opts + '</select></div>';
-      }).join('');
-    } catch(e){ el.innerHTML = '<div class="panel-error">Failed to load permissions.</div>'; }
-  }
-  $('permMatrix').addEventListener('change', async function(e){
-    var sel = e.target.closest('[data-perm-kind]');
+  /* ---- interactive approvals: per-tool perm-select toggles + Pending approvals list ---- */
+  // Delegated handler for every `.perm-select` on the page: per-tool rows rendered by
+  // libItemsHtml() and the standalone dep-install control. POST body field is `key` (the
+  // tool name, or "dep-install"), NOT `kind` — that was the old bespoke permMatrix's field.
+  document.addEventListener('change', async function(e){
+    var sel = e.target.closest('.perm-select');
     if (!sel) return;
-    var kind = sel.getAttribute('data-perm-kind'), state = sel.value;
+    var key = sel.getAttribute('data-perm-key'), state = sel.value;
+    var prev = sel.getAttribute('data-prev-state') || state;
     sel.disabled = true;
     try {
-      var r = await fetch('/permissions/set', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: kind, state: state }) });
+      var r = await fetch('/permissions/set', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key, state: state }) });
       if (!r.ok) { var eb = await r.json().catch(function(){ return {}; }); throw new Error(eb.detail || ('HTTP ' + r.status)); }
-      toast('Standing policy updated', 'ok');
-    } catch(err){ toast('Update failed: ' + err.message, 'err'); }
-    loadPermissions();
+      sel.setAttribute('data-prev-state', state);
+      toast('Policy updated', 'ok');
+    } catch(err){
+      sel.value = prev;
+      toast('Update failed: ' + err.message, 'err');
+    }
+    sel.disabled = false;
   });
 
   async function loadPendingApprovals(){
@@ -1748,7 +1761,7 @@
     try {
       var pr = await (await fetch('/permissions')).json();   // gate labels + valid states, for the standing-policy select
       var gates = {};
-      (pr.permissions || []).forEach(function(p){ gates[p.kind] = p; });
+      (pr.permissions || []).forEach(function(p){ gates[p.key] = p; });
       var d = await (await fetch('/approvals')).json();
       var pending = d.approvals || [];
       var badge = $('pendingApprovalsBadge');
@@ -2489,7 +2502,7 @@
   pageLoaders.data = function(){ loadFiles(); loadKnowledge(); loadArtifacts(); loadTables(); };
   pageLoaders.memory = function(){ loadMemoryStats(); };
   pageLoaders.rules = function(){ loadRules(); };
-  pageLoaders.developer = function(){ loadLibrary(); loadDeps(); loadTrust(); loadPermissions(); loadPendingApprovals(); };
+  pageLoaders.developer = function(){ loadLibrary(); loadDeps(); loadTrust(); loadPendingApprovals(); };
   pageLoaders.reliability = function(){ loadReliability(); };
   pageLoaders.settings = function(){
     loadRoles(); loadCommands(); loadNotify();

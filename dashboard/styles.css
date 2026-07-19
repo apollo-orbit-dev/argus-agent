@@ -503,6 +503,9 @@
   .ap-policy select{ width:auto; min-width:0; }
   .ap-outcome{ margin-left:auto; }
 
+  /* Allow/Ask/Deny per-tool toggle: on list-item tool rows and the standalone dep-install control. */
+  .perm-select{ width:auto; min-width:84px; flex-shrink:0; }
+
   /* ---------- Modal ---------- */
   .modal-overlay{
     position:fixed; inset:0; background:rgba(6,10,16,.68); display:none; align-items:center; justify-content:center;
