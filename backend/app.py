@@ -74,6 +74,32 @@ def create_app(engine: Engine) -> FastAPI:
         return StreamingResponse(gen(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
+    # ---- reliability harness (dashboard-only; admin-gated) ----
+    @app.get("/reliability/summary")
+    async def reliability_summary(request: Request, days: int = 30):
+        _require_admin(request)
+        return engine.reliability_summary(days)
+
+    @app.get("/reliability/tools")
+    async def reliability_tools(request: Request, days: int = 30):
+        _require_admin(request)
+        return engine.reliability_tools(days)
+
+    @app.get("/reliability/routines")
+    async def reliability_routines(request: Request, days: int = 30):
+        _require_admin(request)
+        return engine.reliability_routines(days)
+
+    @app.get("/reliability/loop")
+    async def reliability_loop(request: Request, days: int = 30):
+        _require_admin(request)
+        return engine.reliability_loop(days)
+
+    @app.get("/reliability/failures")
+    async def reliability_failures(request: Request, entity: str = "", limit: int = 20):
+        _require_admin(request)
+        return engine.reliability_failures(entity or None, limit)
+
     @app.post("/session/reset")
     async def session_reset(body: dict):
         # "New session": clear the conversation + the event replay buffer for a session.
