@@ -75,3 +75,7 @@ dist/
 # NODE (only the Playwright QA harness uses this; not shipped)
 # ============================================================================
 node_modules/
+
+# SDD design artifacts (internal, like docs/plan-*.md)
+docs/superpowers/
+.superpowers/
