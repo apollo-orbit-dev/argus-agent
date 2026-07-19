@@ -68,8 +68,8 @@ def test_add_list_cancel(tmp_path):
 async def test_fire_due_runs_and_delivers(tmp_path):
     ran, delivered = [], []
 
-    async def fake_run(session_id, instruction):
-        ran.append((session_id, instruction))
+    async def fake_run(session_id, instruction, **kwargs):
+        ran.append((session_id, instruction, kwargs.get("origin")))
         return f"result of {instruction}"
 
     async def fake_deliver(session_id, text):
@@ -79,14 +79,14 @@ async def test_fire_due_runs_and_delivers(tmp_path):
     # a one-shot already due
     job = sched.add("weather", {"type": "once", "at": (now_local() - timedelta(minutes=1)).isoformat()}, "42")
     await sched.fire_due()
-    assert ran == [("42", "weather")]
+    assert ran == [("42", "weather", "scheduled")]   # scheduler passes origin="scheduled"
     assert delivered and "result of weather" in delivered[0][1]
     assert sched.jobs[job.id].active is False  # one-shot deactivates
     assert sched.jobs[job.id].runs == 1
 
 
 async def test_recurring_reschedules(tmp_path):
-    async def fake_run(s, i): return "ok"
+    async def fake_run(s, i, **kwargs): return "ok"
     sched = Scheduler(str(tmp_path / "j.json"), run_task=fake_run)
     job = sched.add("hourly", {"type": "interval", "seconds": 3600}, "s")
     job.next_run = (now_local() - timedelta(seconds=1)).isoformat()
@@ -166,7 +166,7 @@ def test_scheduler_routine_job_calls_run_routine_not_run_task(tmp_path):
 
 
 def test_scheduler_prompt_job_still_delivers(tmp_path):
-    async def run_task(sid, instr):
+    async def run_task(sid, instr, **kwargs):
         return "answer"
 
     delivered = []

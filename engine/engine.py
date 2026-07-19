@@ -545,7 +545,7 @@ class Engine:
         never pollute the user's real chat history."""
         eph = f"__routine__:{session_id}"
         self.store.reset(eph)                      # fresh context per model step
-        return await self.run_task(eph, prompt, requested_skill=skill)
+        return await self.run_task(eph, prompt, requested_skill=skill, origin="scheduled")
 
     def _load_system_prompt(self) -> str:
         for f in (self._system_prompt_file, self._system_prompt_legacy):  # .md, then legacy .txt
@@ -960,10 +960,15 @@ class Engine:
     # ---- run ----
     async def run_task(self, session_id: str, text: str,
                        requested_skill: Optional[str] = None,
-                       images: Optional[list] = None) -> str:
+                       images: Optional[list] = None,
+                       origin: str = "api") -> str:
         text = self._expand_command(text)   # /alias -> its stored expansion (works in every interface)
         run_id = new_run_id()
         self.store.record_run(session_id, run_id)
+        # `origin` (dashboard | telegram | scheduled | api) stays in scope for the whole turn — the
+        # per-run registry-build block below uses it to construct approval-aware tools (later tasks).
+        # Stashed here too so tests/callers can observe which channel drove this turn.
+        self._last_run_origin = origin
         self._pending_images.pop(session_id, None)   # fresh per turn; drained by the Telegram layer
         c = self._config
 
@@ -1874,7 +1879,8 @@ class Engine:
 
         async def _run() -> None:
             try:
-                answer = await self.run_task(req["session_id"], prompt)
+                answer = await self.run_task(req["session_id"], prompt,
+                                             origin=req.get("origin", "api"))
                 deliver = getattr(self.scheduler, "deliver", None)
                 if deliver:
                     await deliver(req["session_id"], answer)

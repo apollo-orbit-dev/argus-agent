@@ -627,7 +627,7 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
         )
         typing = asyncio.create_task(_keep_typing(update.get_bot(), chat_id))
         try:
-            answer = await engine.run_task(session_id, text, images=images or None)
+            answer = await engine.run_task(session_id, text, images=images or None, origin="telegram")
         except asyncio.CancelledError:      # /stop cancelled the in-flight run
             answer = "⏹️ Stopped."
         except Exception as e:              # surface loop failures instead of hanging
@@ -821,7 +821,7 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
             _consume_progress(engine, session_id, status_msg, verbose=chat_id in verbose_chats))
         typing = asyncio.create_task(_keep_typing(update.get_bot(), chat_id))
         try:
-            answer = await engine.run_task(session_id, text)
+            answer = await engine.run_task(session_id, text, origin="telegram")
         except asyncio.CancelledError:
             answer = "⏹️ Stopped."
         except Exception as e:

@@ -43,7 +43,7 @@ def create_app(engine: Engine) -> FastAPI:
     @app.post("/run")
     async def run(req: RunRequest):
         answer = await engine.run_task(req.session_id, req.text, requested_skill=req.skill,
-                                       images=req.images)
+                                       images=req.images, origin="dashboard")
         return {"answer": answer, "session_id": req.session_id}
 
     @app.get("/version")

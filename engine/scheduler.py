@@ -157,7 +157,7 @@ class Job:
 
 class Scheduler:
     def __init__(self, path: str,
-                 run_task: Callable[[str, str], Awaitable[str]],
+                 run_task: Callable[..., Awaitable[str]],
                  deliver: Optional[Callable[[str, str], Awaitable[None]]] = None,
                  tick_seconds: int = 20,
                  run_routine: Optional[Callable[[str, str], Awaitable[str]]] = None):
@@ -255,7 +255,7 @@ class Scheduler:
             if is_routine:
                 result = await self.run_routine(job.session_id, job.instruction)
             else:
-                result = await self.run_task(job.session_id, job.instruction)
+                result = await self.run_task(job.session_id, job.instruction, origin="scheduled")
         except Exception as e:
             result = f"(scheduled {job.kind} failed: {e})"
         job.last_run = now_local().isoformat()
