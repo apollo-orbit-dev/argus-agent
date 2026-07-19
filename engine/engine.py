@@ -338,6 +338,8 @@ class Engine:
         self.deps = DepStore(str(Path(__file__).resolve().parents[1] / "dep_approvals.json"))
         from engine.experimental.trust_store import TrustStore
         self.trust = TrustStore(str(Path(__file__).resolve().parents[1] / "trusted_tools.json"))
+        from engine.rules.store import RulesStore
+        self.rules = RulesStore(str(self._data_dir / "rules.json"))
         from engine.model_presets import ModelPresetStore
         self._env_path = Path(__file__).resolve().parents[1] / ".env"
         self.model_presets_store = ModelPresetStore(
@@ -598,6 +600,29 @@ class Engine:
         except Exception as e:
             return {"ok": False, "error": str(e)}
         return {"ok": True, "soul": self.soul}
+
+    # ---- standing behavioral rules ----
+    def _compose_rules_block(self) -> str:
+        """The 'Standing instructions from your owner' block, or '' if none / disabled."""
+        if not self._config.enable_rules:
+            return ""
+        rows = self.rules.enabled_rules()
+        if not rows:
+            return ""
+        return ("## Standing instructions from your owner (always follow these):\n"
+                + "\n".join(f"- {r['text']}" for r in rows))
+
+    def rules_list(self) -> list[dict]:
+        return self.rules.list()
+
+    def rules_add(self, text: str) -> dict | None:
+        return self.rules.add(text, source="user")
+
+    def rules_remove(self, rule_id: str) -> bool:
+        return self.rules.remove(rule_id)
+
+    def rules_set_enabled(self, rule_id: str, enabled: bool) -> bool:
+        return self.rules.set_enabled(rule_id, enabled)
 
     def _model_client(self) -> ModelClient:
         c = self._config
@@ -982,6 +1007,10 @@ class Engine:
                 system_prompt = system_prompt + "\n\n## What you remember about this user:\n" + \
                     "\n".join(f"- {m['text']}" for m in mems)
 
+        _rules_block = self._compose_rules_block()
+        if _rules_block:
+            system_prompt = system_prompt + "\n\n" + _rules_block
+
         # Tool/skill creation are native-only (manual mode can't carry code/multiline payloads).
         tool_creation_on = c.enable_tool_creation and c.tool_calling_mode == "native"
         skill_creation_on = c.enable_skill_creation and c.tool_calling_mode == "native"
@@ -994,7 +1023,7 @@ class Engine:
         run_registry = self.registry
         if (ctx.extra_tools or tool_creation_on or skill_creation_on or scheduler_on
                 or memory_on or watch_on or c.enable_charts or c.enable_notify or c.enable_routines
-                or c.enable_code_interpreter):
+                or c.enable_code_interpreter or c.enable_rules):
             run_registry = ToolRegistry()
             for t in self.registry.list():
                 run_registry.register(t)
@@ -1006,6 +1035,11 @@ class Engine:
                 run_registry.register(RememberTool(self.memory, mkey))
                 run_registry.register(RecallTool(self.memory, mkey))
                 run_registry.register(ForgetTool(self.memory, mkey))
+            if c.enable_rules:
+                from engine.tools.rules import ListRulesTool, RemoveRuleTool, SaveRuleTool
+                run_registry.register(SaveRuleTool(self.rules))
+                run_registry.register(ListRulesTool(self.rules))
+                run_registry.register(RemoveRuleTool(self.rules))
             if scheduler_on:
                 from engine.tools.schedule import (CancelScheduledTaskTool,
                                                    ListScheduledTasksTool, ScheduleTaskTool,
