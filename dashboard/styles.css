@@ -280,9 +280,18 @@
   .log-line.lvl-error{ color:var(--danger); }
 
   /* ---------- Reliability page ---------- */
-  .rel-score{ text-align:center; padding:14px; }
+  /* Reliability page: keep the range select + Refresh inline (the global `select{width:100%}`
+     otherwise makes the select fill the row and pushes Refresh onto a second line). */
+  #page-reliability .page-head{ align-items:center; }
+  #page-reliability .row-inline{ flex-wrap:nowrap; align-items:center; gap:8px; }
+  #relRange{ width:auto; flex:none; }
+  /* Even vertical rhythm between the section's stacked blocks (score row / tools / routines+loop). */
+  #page-reliability > .grid, #page-reliability > .card{ margin-bottom:16px; }
+  #page-reliability > .grid:last-child{ margin-bottom:0; }
+  .rel-score{ display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:3px; text-align:center; padding:16px 14px; min-height:96px; }
   .rel-big{ font:600 26px/1 var(--font-mono); color:var(--ink); }
-  .rel-label{ font-size:11px; color:var(--muted); margin-top:4px; }
+  .rel-label{ font-size:11px; color:var(--muted); }
   .rel-sub{ font-size:10.5px; color:var(--faint); }
   .rel-tool{ display:grid; grid-template-columns:1fr auto 56px auto 1fr; gap:10px; align-items:center;
     padding:6px 0; border-bottom:1px solid var(--border); font-size:12px; }
