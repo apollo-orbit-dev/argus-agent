@@ -1,8 +1,8 @@
 ---
 name: design_table
 description: Design a sound table schema before creating it — pick real column types, use a json column for list or nested fields, choose a key, and decide when to split into a second table. Use whenever the user wants to make a new table or store something in a table.
-tools: [list_tables, create_table]
-triggers: [make a table, create a table, new table, set up a table, store this in a table, put this in a table, keep this in a table, track this in a table, table for this, store these in a table, store it in a table, store them in a table]
+tools: [list_tables, create_table, read_document, read_file, insert_row]
+triggers: [make a table, create a table, new table, set up a table, a table for this, in a table, store this in a table, put this in a table, keep this in a table, track this in a table, store these in a table]
 ---
 Before you touch `create_table`, design the shape. A small model's default — every column `text`,
 lists jammed into a prose blob — is the failure mode this skill exists to prevent. The fix is judgment,

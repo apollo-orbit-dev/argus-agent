@@ -52,7 +52,7 @@ def test_design_table_skill_loads():
     s = reg.get("design_table")
     assert s is not None
     assert s.description and s.procedure
-    assert set(s.tools) == {"list_tables", "create_table"}
+    assert set(s.tools) == {"list_tables", "create_table", "read_document", "read_file", "insert_row"}
     assert s.steps == []                      # prose-only, no deterministic steps
     assert any("table" in t for t in s.triggers)
     # the schema-design teeth are present
