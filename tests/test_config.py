@@ -38,3 +38,18 @@ def test_allowed_chat_ids_parses_csv():
 def test_allowed_chat_ids_empty():
     c = _mk(allowed_chat_ids="")
     assert c.allowed_chat_ids == []
+
+
+def test_rules_flags_default_on():
+    c = _mk()
+    assert c.enable_rules is True
+    assert c.enable_rules_autodetect is True
+
+
+def test_rules_flags_in_env_fields_and_env_pairs():
+    c = _mk()
+    assert "enable_rules" in c._ENV_FIELDS
+    assert "enable_rules_autodetect" in c._ENV_FIELDS
+    pairs = dict(c.env_pairs())
+    assert "ENABLE_RULES" in pairs
+    assert "ENABLE_RULES_AUTODETECT" in pairs

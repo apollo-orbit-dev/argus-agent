@@ -1516,6 +1516,65 @@
     finally { btn.disabled = false; }
   });
 
+  /* ================= RULES ================= */
+  async function loadRules(){
+    var el = $('rulesList');
+    try {
+      var d = await (await fetch('/rules/list')).json();
+      var rules = d.rules || [];
+      $('rulesCount').textContent = rules.length ? (' ' + rules.length) : '';
+      if (!rules.length){
+        el.innerHTML = '<div class="empty"><span class="empty-title">No standing rules yet</span>Add one below, or Argus will draft one automatically when you correct it.</div>';
+        return;
+      }
+      el.innerHTML = rules.map(function(r){
+        return '<div class="list-item"><div class="list-main"><div class="list-title' + (r.enabled ? '' : ' muted') + '">' +
+          esc(r.text) + '</div></div>' +
+          (r.source === 'auto' ? '<span class="tag tag-muted">auto</span>' : '') +
+          '<label class="switch" style="margin-left:8px;" title="' + (r.enabled ? 'Enabled' : 'Disabled') + '">' +
+          '<input type="checkbox" data-rule-toggle="' + esc(r.id) + '"' + (r.enabled ? ' checked' : '') + '><span class="track"><span class="thumb"></span></span></label>' +
+          '<button class="act-btn danger" data-rule-forget="' + esc(r.id) + '" style="margin-left:8px;" title="Remove">✕</button></div>';
+      }).join('');
+    } catch(e){ el.innerHTML = '<div class="panel-error">Failed to load rules.</div>'; }
+  }
+  $('rulesList').addEventListener('change', function(e){
+    var t = e.target.closest('[data-rule-toggle]');
+    if (!t) return;
+    var id = t.getAttribute('data-rule-toggle');
+    fetch('/rules/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id, enabled: t.checked }) })
+      .then(function(){ loadRules(); })
+      .catch(function(){ toast('Toggle failed', 'err'); loadRules(); });
+  });
+  $('rulesList').addEventListener('click', function(e){
+    var b = e.target.closest('[data-rule-forget]');
+    if (!b) return;
+    var id = b.getAttribute('data-rule-forget');
+    var text = b.closest('.list-item').querySelector('.list-title').textContent;
+    confirmDelete({
+      title: 'Remove rule', message: 'Remove "' + text + '"? This can\'t be undone.',
+      onConfirm: async function(){
+        try {
+          var r = await (await fetch('/rules/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) })).json();
+          toast(r.ok === false ? 'Remove failed' : 'Rule removed', r.ok === false ? 'err' : 'ok');
+        } catch(e){ toast('Remove failed: ' + e.message, 'err'); }
+        loadRules();
+      }
+    });
+  });
+  $('ruleAddBtn').addEventListener('click', async function(){
+    var inp = $('ruleInput');
+    var text = inp.value.trim();
+    if (!text) { toast('Enter a rule', 'info'); return; }
+    try {
+      var r = await fetch('/rules/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: text }) });
+      if (!r.ok) { var e = await r.json().catch(function(){ return {}; }); throw new Error(e.detail || ('HTTP ' + r.status)); }
+      inp.value = '';
+      await loadRules();
+      toast('Rule added', 'ok');
+    } catch(e){ toast(e.message || 'Add failed', 'err'); }
+  });
+  $('ruleInput').addEventListener('keydown', function(e){ if (e.key === 'Enter') $('ruleAddBtn').click(); });
+
   /* ================= DEVELOPER: library / deps / trust ================= */
   function libItemsHtml(arr, withTools, delKind){
     if (!arr || !arr.length) return '<div class="empty">(none yet)</div>';
@@ -2257,6 +2316,7 @@
   pageLoaders.automation = function(){ loadRoutines(); loadScheduled(); loadWatches(); };
   pageLoaders.data = function(){ loadFiles(); loadKnowledge(); loadArtifacts(); loadTables(); };
   pageLoaders.memory = function(){ loadMemoryStats(); };
+  pageLoaders.rules = function(){ loadRules(); };
   pageLoaders.developer = function(){ loadLibrary(); loadDeps(); loadTrust(); };
   pageLoaders.reliability = function(){ loadReliability(); };
   pageLoaders.settings = function(){

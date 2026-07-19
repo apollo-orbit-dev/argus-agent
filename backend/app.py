@@ -482,6 +482,30 @@ def create_app(engine: Engine) -> FastAPI:
     async def memory_summary(body: dict):
         return await engine.memory_summary(body.get("session_id", "dashboard"))
 
+    # ---- behavioral rules (dashboard-managed; mutations admin-gated like /memory) ----
+    @app.get("/rules/list")
+    async def rules_list():
+        return {"rules": engine.rules_list()}
+
+    @app.post("/rules/save")
+    async def rules_save(body: dict, request: Request):
+        _require_admin(request)
+        text = (body.get("text") or "").strip()
+        if not text:
+            raise HTTPException(400, "rule text required")
+        rec = engine.rules_add(text)
+        return {"rule": rec}
+
+    @app.post("/rules/remove")
+    async def rules_remove(body: dict, request: Request):
+        _require_admin(request)
+        return {"ok": engine.rules_remove(body.get("id", ""))}
+
+    @app.post("/rules/toggle")
+    async def rules_toggle(body: dict, request: Request):
+        _require_admin(request)
+        return {"ok": engine.rules_set_enabled(body.get("id", ""), bool(body.get("enabled")))}
+
     @app.get("/usage")
     async def usage(session_id: str = "dashboard"):
         return await engine.usage(session_id)

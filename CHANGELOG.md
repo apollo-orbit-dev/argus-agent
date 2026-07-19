@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+- **Standing behavioral rules** — a durable, owner-managed set of "how to behave" directives
+  ("always confirm before deleting", "never use emoji") that persist across sessions. Enabled rules
+  are injected into every turn as a distinct "Standing instructions from your owner" block (separate
+  from factual memory and from persona/SOUL). Rules can be captured three ways: the agent auto-drafts
+  them from owner corrections (a background, cue-gated aux-model pass — "don't do that again" survives
+  the session and the owner is notified with an undo hint), the model saves them explicitly
+  (`save_rule` / `list_rules` / `remove_rule` tools), or they're managed on a new dashboard **Rules**
+  page (add / enable-disable / delete, admin-gated). Backed by a small `rules.json` state file.
+  Gated by `ENABLE_RULES` (on) and `ENABLE_RULES_AUTODETECT` (on).
+
 ## 0.2.1
 
 ### Fixed
