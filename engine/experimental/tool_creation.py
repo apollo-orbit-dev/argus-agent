@@ -672,6 +672,12 @@ class CreateToolTool(Tool):
                     ok, version, log_tail = await dep_installer.install(e.module)
                     if not ok:
                         return f"create_tool: install of '{e.module}' failed: {log_tail}"
+                    if self.dep_store is not None:
+                        # Record it so it lands in the startup allowlist too — otherwise a
+                        # persisted tool using this module silently fails to recompile after a
+                        # restart (the gate path installs live but, unlike the legacy
+                        # request()/mark_approved() flow, had no DepStore record at all).
+                        self.dep_store.allow_module(e.module)
                 # Dep now present — recompile the tool NOW (retry the build path, in this same
                 # turn) instead of returning a "try again later" string. Reuses the exact
                 # compile-success tail a clean scan takes (_build_and_verify) so the two paths
@@ -685,8 +691,8 @@ class CreateToolTool(Tool):
                     params_model = build_params_model(args.name, args.parameters)
                 except ToolValidationError as e2:
                     record["error"] = str(e2)
-                    return (f"create_tool: '{e.module}' was installed, but '{args.name}' still "
-                            f"failed to compile: {e2}\n"
+                    return (f"create_tool: '{args.name}' could not be built — the dependency may "
+                            f"not be installed, or the code failed to compile: {e2}\n"
                             "Fix the code and call create_tool again with the same name.")
                 return await self._build_and_verify(args, run_fn, params_model, record)
             if self.dep_store is not None:

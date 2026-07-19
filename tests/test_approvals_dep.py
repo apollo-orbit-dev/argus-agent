@@ -74,6 +74,34 @@ async def test_dep_gate_approved_installs_and_builds(monkeypatch):
     assert calls == ["example_sdk"]                     # installed exactly once
 
 
+async def test_dep_gate_approved_install_records_in_dep_store(monkeypatch, tmp_path):
+    """Durability regression: a dep approved via the NEW gate path (CreateToolTool.run's live-approve
+    install) must be recorded in DepStore too, not just pip-installed — otherwise approved_modules()
+    (which feeds the startup allowlist for load_persisted_tools) won't know about it, and the
+    persisted tool silently fails to recompile after a restart."""
+    from engine.experimental.dep_store import DepStore
+
+    calls = _fake_install_factory(monkeypatch)
+    reg = ToolRegistry()
+    broker = _FakeBroker(Decision(approved=True))
+    store = DepStore(str(tmp_path / "dep_approvals.json"))
+    ct = CreateToolTool(reg, approvals=broker, dep_store=store,
+                        session_id="s1", run_id="r1", origin="dashboard")
+
+    out = await ct.run(ct.Params(
+        name="sdk_tool", description="uses example_sdk", code=NONSTD_CODE,
+        parameters={}, test_args={}))
+
+    assert "created" in out.lower()
+    assert calls == ["example_sdk"]
+    assert "example_sdk" in store.approved_modules()          # survives to the startup allowlist
+
+    # And it persisted to disk (a fresh DepStore reading the same path also sees it) —
+    # this is what makes it survive an actual process restart.
+    reloaded = DepStore(str(tmp_path / "dep_approvals.json"))
+    assert "example_sdk" in reloaded.approved_modules()
+
+
 async def test_dep_gate_denied_not_created_nothing_installed(monkeypatch):
     calls = _fake_install_factory(monkeypatch)
     reg = ToolRegistry()

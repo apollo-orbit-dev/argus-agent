@@ -77,6 +77,16 @@ class DepStore:
         self._save()
         return req
 
+    def allow_module(self, module: str, version: str = "") -> None:
+        """Record a module approved OUT OF BAND of the request/mark_approved flow (the interactive
+        gate path installs directly via the approvals broker, with no DepStore request record to
+        resolve) so it still appears in `approved_modules()` for the next startup's allowlist.
+        Idempotent: a module already recorded here is left as-is, not duplicated or overwritten."""
+        if module in self.approved:
+            return
+        self.approved[module] = {"version": version, "approved_at": _now()}
+        self._save()
+
     def mark_approved(self, req_id: str, version: str = "") -> Optional[dict]:
         r = self.get(req_id)
         if not r or r["status"] != "pending":

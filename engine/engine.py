@@ -973,6 +973,11 @@ class Engine:
         if not ok:
             log.warning("dep-install resume: install of '%s' failed for req %s: %s",
                        module, req.get("id"), log_tail[:300])
+        else:
+            # Record it so the startup allowlist (extra_modules, fed by approved_modules()) picks
+            # it up too — otherwise a persisted tool using this module silently fails to recompile
+            # after a restart (this gate path has no DepStore request record to mark_approved()).
+            self.deps.allow_module(module, version)
         prompt = (
             f"The '{module}' library you requested has been approved. Now CREATE the '{tool}' tool "
             f"you designed — call create_tool with that design — and then run it to fulfil my "
