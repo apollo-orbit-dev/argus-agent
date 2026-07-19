@@ -28,12 +28,14 @@ class ApprovalStore:
             json.dump(self.reqs, fh, indent=1)
         os.replace(tmp, self.path)
 
-    def create(self, kind, target, session_id, prompt, origin, payload=None, now=None) -> dict:
+    def create(self, kind, target, session_id, prompt, origin, payload=None, now=None,
+               run_id: str = "", step: int = 0) -> dict:
         rec = {"id": uuid.uuid4().hex[:8], "kind": kind, "target": target,
                "session_id": session_id, "prompt": prompt, "origin": origin,
                "payload": payload or {}, "status": "pending",
                "created_at": time.time() if now is None else now,
-               "resolved_at": None, "decision": None, "actor": None}
+               "resolved_at": None, "decision": None, "actor": None,
+               "run_id": run_id, "step": step}
         self.reqs.append(rec)
         self._save()
         return copy.deepcopy(rec)

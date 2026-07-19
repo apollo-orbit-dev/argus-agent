@@ -15,7 +15,7 @@ class ApprovalBroker:
     def __init__(self, store, policy, emit=None, window: float = 60, resume=None):
         self.store = store
         self.policy = policy
-        self._emit = emit                       # async (session_id, kind, data) -> None  (dashboard trace)
+        self._emit = emit                       # async (session_id, run_id, step, kind, data) -> None  (dashboard trace)
         self.window = window
         self._pending: dict[str, asyncio.Future] = {}
         self._pending_meta: dict[str, dict] = {}    # req_id -> {kind,target,session_id}
@@ -34,7 +34,8 @@ class ApprovalBroker:
     async def _surface(self, req: dict) -> None:
         if self._emit:
             try:
-                await self._emit(req["session_id"], "approval_request", {
+                await self._emit(req["session_id"], req.get("run_id", ""), req.get("step", 0),
+                                  "approval_request", {
                     "req_id": req["id"], "kind": req["kind"], "target": req["target"],
                     "prompt": req["prompt"], "states": states_for(req["kind"])})
             except Exception:
@@ -45,7 +46,8 @@ class ApprovalBroker:
             except Exception:
                 log.debug("approval surface (telegram) failed", exc_info=True)
 
-    async def gate(self, kind, target, session_id, run_id, prompt, origin, payload=None) -> Decision:
+    async def gate(self, kind, target, session_id, run_id, prompt, origin, payload=None,
+                    step: int = 0) -> Decision:
         key = (kind, target, session_id)
         if key in self._oneshots:                          # deferred pre-approval consumed once
             self._oneshots.discard(key)
@@ -56,7 +58,8 @@ class ApprovalBroker:
         if state == "deny":
             return Decision(denied=True, auto=True)
         # state == "ask"
-        req = self.store.create(kind, target, session_id, prompt, origin, payload)
+        req = self.store.create(kind, target, session_id, prompt, origin, payload,
+                                 run_id=run_id, step=step)
         await self._surface(req)
         if origin not in _INTERACTIVE:                     # nobody attached -> straight to pending
             raise TurnPaused(req["id"], kind, self._pending_msg(req))
@@ -86,6 +89,8 @@ class ApprovalBroker:
             return "unknown"          # already resolved — idempotent no-op
         kind = (meta or stored)["kind"]
         session_id = (meta or stored)["session_id"]
+        run_id = (stored or {}).get("run_id", "")
+        step = (stored or {}).get("step", 0)
         approved = action in ("approve_once", "always_allow")
         if action in _ACTION_STATE:
             try:
@@ -97,7 +102,7 @@ class ApprovalBroker:
         if fut is not None and not fut.done():              # LIVE: unblock the waiting turn
             self.store.resolve(req_id, "approved" if approved else "denied", action, actor)
             fut.set_result(decision)
-            self._emit_resolved(session_id, req_id, action, approved, actor)
+            self._emit_resolved(session_id, run_id, step, req_id, action, approved, actor)
             return "live"
         # DEFERRED: turn already ended (timeout/restart)
         self.store.resolve(req_id, "approved" if approved else "denied", action, actor)
@@ -108,15 +113,16 @@ class ApprovalBroker:
                 task = asyncio.get_running_loop().create_task(fn(stored))
                 self._resume_tasks.add(task)
                 task.add_done_callback(self._on_resume_done)
-        self._emit_resolved(session_id, req_id, action, approved, actor)
+        self._emit_resolved(session_id, run_id, step, req_id, action, approved, actor)
         return "deferred"
 
-    def _emit_resolved(self, session_id, req_id, action, approved, actor) -> None:
+    def _emit_resolved(self, session_id, run_id, step, req_id, action, approved, actor) -> None:
         if self._emit is None:
             return
         data = {"req_id": req_id, "action": action,
                 "outcome": "approved" if approved else "denied", "actor": actor}
-        task = asyncio.get_running_loop().create_task(self._emit(session_id, "approval_resolved", data))
+        task = asyncio.get_running_loop().create_task(
+            self._emit(session_id, run_id, step, "approval_resolved", data))
         self._resume_tasks.add(task)
         task.add_done_callback(self._on_resume_done)
 

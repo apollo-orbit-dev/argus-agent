@@ -247,7 +247,8 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
                     call.tool, _args_digest(v.args), session_id, deps.run_id,
                     prompt=f"Run tool: {call.tool}", origin=deps.origin,
                     payload={"tool": call.tool, "args": _jsonable(v.args),
-                             "prompt": _last_user_text(deps.store, session_id)})
+                             "prompt": _last_user_text(deps.store, session_id)},
+                    step=step)
                 if _d.denied:
                     result = f"Blocked by your policy: you declined running '{call.tool}'."
                     for m in deps.mode.tool_result_messages(resp, call, result):

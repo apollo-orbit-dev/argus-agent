@@ -939,10 +939,12 @@ class Engine:
         await self.events.publish(StepEvent(run_id, session_id, step, kind, data, now()))
 
     # ---- interactive approvals ----
-    async def _approval_emit(self, session_id: str, kind: str, data: dict) -> None:
+    async def _approval_emit(self, session_id: str, run_id: str, step: int, kind: str, data: dict) -> None:
         """Bridge for ApprovalBroker's `emit`: surfaces approval_request/approval_resolved events
-        into the live trace under a synthetic run id, mirroring _notify_rule_saved's emit style."""
-        await self.emit("approval", session_id, 0, kind, data)
+        into the live trace under the REAL run_id/step of the turn that's paused, so the approval
+        card lands in the same run as the calculation it belongs to (not a synthetic 'approval'
+        run that never gets a `final` event)."""
+        await self.emit(run_id, session_id, step, kind, data)
 
     def approvals_list(self) -> list[dict]:
         return self.approval_store.pending()

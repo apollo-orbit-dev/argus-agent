@@ -279,9 +279,25 @@
     return out;
   }
 
+  // Build req_id -> {approved, actor} for every approval_resolved event already present in a
+  // run's step list. Used so a FULL rebuild (renderViewerFull — page refresh replay, or clicking
+  // back onto a past run) renders an already-resolved approval_request as collapsed, instead of
+  // as a fresh live card with active buttons (the incremental append path handles this live via
+  // markApprovalResolved, but a full rebuild re-derives every step from scratch and needs to know
+  // up front which requests are already decided).
+  function resolvedMapFor(steps){
+    var m = {};
+    (steps || []).forEach(function(ev){
+      if (ev.kind === 'approval_resolved' && ev.data && ev.data.req_id){
+        m[ev.data.req_id] = { approved: ev.data.outcome === 'approved', actor: ev.data.actor };
+      }
+    });
+    return m;
+  }
+
   // Generic field renderer keyed on well-known `data` fields (not on kind) — mirrors the
   // proven index.html `affordances()` logic, restyled to Observatory's field-row/callout CSS.
-  function renderFields(kind, data){
+  function renderFields(kind, data, resolvedMap){
     if (!data || typeof data !== 'object'){
       if (data !== undefined && data !== null && data !== '')
         return '<div class="field-row"><div class="field-value">' + esc(pretty(data)) + '</div></div>';
@@ -290,17 +306,23 @@
     // Interactive approvals: an inline decision card (buttons + standing-policy toggle) rather than
     // the generic field-row rendering below — this is the one kind that needs live controls, not text.
     if (kind === 'approval_request'){
+      var apResolved = resolvedMap && resolvedMap[data.req_id];
       var apStates = data.states || [];
       var apOpts = apStates.map(function(s){ return '<option value="' + esc(s) + '">' + esc(s) + '</option>'; }).join('');
-      return '<div class="approval-card" data-req="' + esc(data.req_id) + '">' +
+      var apDisabled = apResolved ? ' disabled' : '';
+      var apOutcomeHtml = apResolved
+        ? '<span class="ap-outcome tag ' + (apResolved.approved ? 'tag-ok' : 'tag-danger') + '">' +
+          (apResolved.approved ? '✓ approved' : '✕ denied') + (apResolved.actor ? ' · ' + esc(apResolved.actor) : '') + '</span>'
+        : '<span class="ap-outcome tag" style="display:none;"></span>';
+      return '<div class="approval-card' + (apResolved ? ' resolved' : '') + '" data-req="' + esc(data.req_id) + '">' +
         '<div class="ap-title">⏸ Approval needed — ' + esc(data.prompt || data.kind || 'action') + '</div>' +
         (data.target ? '<div class="ap-target">' + esc(data.target) + '</div>' : '') +
         '<div class="ap-actions">' +
-          '<button class="btn btn-primary btn-sm" data-apv="approve_once">Approve once</button>' +
-          '<button class="btn btn-danger btn-sm" data-apv="deny_once">Deny once</button>' +
-          (apOpts ? '<label class="ap-policy">Standing: <select data-apv-policy>' +
+          '<button class="btn btn-primary btn-sm" data-apv="approve_once"' + apDisabled + '>Approve once</button>' +
+          '<button class="btn btn-danger btn-sm" data-apv="deny_once"' + apDisabled + '>Deny once</button>' +
+          (apOpts ? '<label class="ap-policy">Standing: <select data-apv-policy' + apDisabled + '>' +
             '<option value="" selected disabled>set…</option>' + apOpts + '</select></label>' : '') +
-          '<span class="ap-outcome tag" style="display:none;"></span>' +
+          apOutcomeHtml +
         '</div></div>';
     }
     if (kind === 'approval_resolved'){
@@ -355,10 +377,10 @@
     return parts.join('');
   }
 
-  function stepNodeHtml(ev){
+  function stepNodeHtml(ev, resolvedMap){
     var c = kindColor(ev.kind);
     var stepText = (ev.step !== undefined && ev.step !== null) ? ('step ' + ev.step) : '—';
-    var fieldsHtml = renderFields(ev.kind, ev.data);
+    var fieldsHtml = renderFields(ev.kind, ev.data, resolvedMap);
     return '<div class="step-node' + (reduceMotion ? '' : ' row-in') + '">' +
         '<div class="step-gutter"><span class="step-dot" style="border-color:' + c + ';"></span><span class="step-connector"></span></div>' +
         '<div class="step-body">' +
@@ -424,7 +446,10 @@
       return;
     }
     renderViewerHeader(run);
-    viewerBody.innerHTML = run.steps.length ? run.steps.map(stepNodeHtml).join('') : '<div class="empty">no events yet</div>';
+    var resolvedMap = resolvedMapFor(run.steps);
+    viewerBody.innerHTML = run.steps.length
+      ? run.steps.map(function(ev){ return stepNodeHtml(ev, resolvedMap); }).join('')
+      : '<div class="empty">no events yet</div>';
     jumpBtn.classList.remove('show');
     userScrolledUp = false;
     if (run.id === liveRunId) viewerBody.scrollTop = viewerBody.scrollHeight;
