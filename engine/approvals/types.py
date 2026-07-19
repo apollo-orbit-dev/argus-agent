@@ -7,8 +7,7 @@ from dataclasses import dataclass
 # sub-gate inside create_tool, never blanket-allow-able).
 DEFAULT_ASK: set[str] = {
     "dep-install", "update_soul", "exec_python", "forget", "delete_row",
-    # outbound notifications — CONFIRM the real tool names against the registry:
-    "send_telegram", "send_email", "send_ntfy",
+    "notify",   # the single outbound-notification tool (channel is an arg; no per-channel tools exist)
 }
 
 LABELS: dict[str, str] = {"dep-install": "Install a Python package"}
