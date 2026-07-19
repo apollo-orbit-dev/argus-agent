@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## 0.3.0
 
 ### Added
 - **Standing behavioral rules** — a durable, owner-managed set of "how to behave" directives
