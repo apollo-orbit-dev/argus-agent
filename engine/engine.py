@@ -500,9 +500,12 @@ class Engine:
         import time as _t
         ev = StepEvent(run_id="routine", session_id="__routine__", step=0,
                        kind="routine_result", data=payload, ts=_t.time())
-        # publish() is async; schedule it without blocking the (possibly sync) caller.
+        # publish() is async; schedule it without blocking the (possibly sync) caller. Hold a ref in
+        # self._bg_tasks — asyncio keeps only a weak ref, so an unheld task can be GC'd before it runs.
         try:
-            asyncio.get_running_loop().create_task(self.events.publish(ev))
+            t = asyncio.get_running_loop().create_task(self.events.publish(ev))
+            self._bg_tasks.add(t)
+            t.add_done_callback(self._bg_tasks.discard)
         except RuntimeError:
             asyncio.run(self.events.publish(ev))
 
@@ -1663,7 +1666,7 @@ class Engine:
     def reliability_loop(self, days: int = 30) -> dict:
         return self._reliability.loop_health(days) if self._reliability else {}
 
-    def reliability_failures(self, entity: str = None, limit: int = 20) -> list:
+    def reliability_failures(self, entity: Optional[str] = None, limit: int = 20) -> list:
         return self._reliability.recent_failures(entity, limit) if self._reliability else []
 
     async def notify_test(self, channel: str) -> dict:
