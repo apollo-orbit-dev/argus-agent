@@ -17,7 +17,7 @@ log = logging.getLogger("argus.events")
 
 # StepEvent.kind vocabulary (documented, not enforced):
 #   info | model_request | model_response | tool_call | validation |
-#   tool_result | final | error | reprompt | skill
+#   tool_result | final | error | reprompt | skill | routine_result
 
 
 @dataclass
