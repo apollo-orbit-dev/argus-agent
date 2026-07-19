@@ -506,6 +506,30 @@ def create_app(engine: Engine) -> FastAPI:
         _require_admin(request)
         return {"ok": engine.rules_set_enabled(body.get("id", ""), bool(body.get("enabled")))}
 
+    # ---- approvals (dashboard/Telegram-managed; mutations admin-gated like /rules) ----
+    @app.get("/approvals")
+    async def approvals_list():
+        return {"approvals": engine.approvals_list()}
+
+    @app.get("/permissions")
+    async def permissions_list():
+        return {"permissions": engine.permissions_list()}
+
+    @app.post("/permissions/set")
+    async def permissions_set(body: dict, request: Request):
+        _require_admin(request)
+        try:
+            engine.permission_set(body.get("kind", ""), body.get("state", ""))
+        except (ValueError, KeyError):
+            raise HTTPException(400, "invalid kind/state")
+        return {"ok": True}
+
+    @app.post("/approvals/decide")
+    async def approvals_decide(body: dict, request: Request):
+        _require_admin(request)
+        result = engine.approvals_decide(body.get("req_id", ""), body.get("action", ""))
+        return {"result": result}
+
     @app.get("/usage")
     async def usage(session_id: str = "dashboard"):
         return await engine.usage(session_id)
