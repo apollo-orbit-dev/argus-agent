@@ -1,7 +1,6 @@
 import pytest
 from engine.approvals.store import ApprovalStore
 from engine.approvals.policy import PermissionStore
-from engine.approvals.types import GATES
 
 
 def test_approval_create_resolve_pending(tmp_path):
@@ -27,14 +26,14 @@ def test_approval_persistence_and_corrupt(tmp_path):
 def test_policy_defaults_and_set(tmp_path):
     ps = PermissionStore(str(tmp_path / "permissions.json"))
     assert ps.get("dep-install") == "ask"          # default
-    assert ps.get("soul-edit") == "ask"
-    ps.set("soul-edit", "allow")
-    assert ps.get("soul-edit") == "allow"
+    assert ps.get("web_search") == "allow"         # per-tool default: not dangerous
+    ps.set("web_search", "deny")
+    assert ps.get("web_search") == "deny"
     with pytest.raises(ValueError):
         ps.set("dep-install", "allow")             # deps have no 'allow' state
-    listing = {row["kind"]: row for row in ps.list()}
-    assert listing["soul-edit"]["state"] == "allow"
-    assert listing["dep-install"]["states"] == ["ask", "deny"]
+    listing = {row["key"]: row for row in ps.states(["web_search"])}
+    assert listing["web_search"]["state"] == "deny"
+    assert listing["dep-install"]["states"] == ["ask", "deny"]   # always included
 
 
 def test_policy_persistence(tmp_path):
@@ -59,8 +58,9 @@ def test_malformed_rows_dropped_at_load(tmp_path):
     assert [r["id"] for r in ApprovalStore(ap).pending()] == ["aa11"]
 
     pp = str(tmp_path / "permissions.json")
-    json.dump({"dep-install": "deny", "soul-edit": "banana", "bogus-kind": "ask"}, open(pp, "w"))
+    json.dump({"dep-install": "deny", "web_search": "banana", "custom_tool": "ask"}, open(pp, "w"))
     ps = PermissionStore(pp)
-    assert ps.get("dep-install") == "deny"    # valid kept
-    assert ps.get("soul-edit") == "ask"       # invalid state 'banana' dropped -> default
-    assert all(row["kind"] != "bogus-kind" for row in ps.list())   # unknown kind ignored
+    assert ps.get("dep-install") == "deny"      # valid kept
+    assert ps.get("web_search") == "allow"      # invalid state 'banana' dropped -> default
+    assert ps.get("custom_tool") == "ask"       # any tool name is a valid key now — kept
+    assert any(row["key"] == "custom_tool" for row in ps.states(["custom_tool"]))

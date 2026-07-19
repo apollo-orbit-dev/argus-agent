@@ -50,6 +50,7 @@ async def test_ask_times_out_to_paused(tmp_path):
 
 async def test_always_allow_sets_policy(tmp_path):
     b = _broker(tmp_path)
+    b.policy.set("soul-edit", "ask")   # per-tool default for "soul-edit" is now allow; force Ask
     async def decide():
         for _ in range(50):
             pend = b.store.pending()
@@ -124,6 +125,7 @@ async def test_resolve_emits_approval_resolved(tmp_path):
         events.append((session_id, kind, data))
     b = ApprovalBroker(ApprovalStore(str(tmp_path / "a.json")),
                         PermissionStore(str(tmp_path / "p.json")), emit=cap, window=5)
+    b.policy.set("soul-edit", "ask")   # per-tool default for "soul-edit" is now allow; force Ask
     task = asyncio.ensure_future(b.gate("soul-edit", "t", "sess", "r", "edit", "dashboard", payload={"soul": "x"}))
     for _ in range(50):
         if b.store.pending(): break

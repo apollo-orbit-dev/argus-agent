@@ -99,7 +99,7 @@ def apv_keyboard(req_id: str, states: list | None = None) -> InlineKeyboardMarku
     """Inline decision buttons for any gated approval request (unified ``apv:`` scheme, generalizing
     ``dep_keyboard`` beyond dep-installs). Always offers approve/deny-once; a standing
     always_allow/always_deny button is added only when the gate's policy actually supports that
-    state (``states`` from ``GATES[kind].states``) — e.g. dep-install has no "allow" state (an
+    state (``states`` from ``states_for(kind)``) — e.g. dep-install has no "allow" state (an
     unreviewed install can never be blanket-trusted), so it gets no "always allow" button.
     callback_data stays well under Telegram's 64-byte limit (req_id is 8 hex chars)."""
     states = states or []

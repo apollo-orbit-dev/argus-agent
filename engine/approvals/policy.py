@@ -1,13 +1,13 @@
-"""PermissionStore — the Allow/Ask/Deny toggle per gate. JSON, atomic."""
+"""PermissionStore — the Allow/Ask/Deny toggle per tool. JSON, atomic."""
 from __future__ import annotations
 import json, os
-from engine.approvals.types import GATES
+from engine.approvals.types import states_for, default_for
 
 
 class PermissionStore:
     def __init__(self, path: str):
         self.path = path
-        self.states: dict[str, str] = {}
+        self.states_map: dict[str, str] = {}
         self._load()
 
     def _load(self) -> None:
@@ -15,26 +15,31 @@ class PermissionStore:
             try:
                 data = json.loads(open(self.path, encoding="utf-8").read())
                 if isinstance(data, dict):
-                    self.states = {k: v for k, v in data.items()
-                                   if k in GATES and v in GATES[k].states}
+                    self.states_map = {k: v for k, v in data.items()
+                                       if isinstance(k, str) and v in states_for(k)}
             except Exception:
-                self.states = {}
+                self.states_map = {}
 
     def _save(self) -> None:
         tmp = self.path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(self.states, fh, indent=1)
+            json.dump(self.states_map, fh, indent=1)
         os.replace(tmp, self.path)
 
-    def get(self, kind: str) -> str:
-        return self.states.get(kind, GATES[kind].default)
+    def get(self, key: str) -> str:
+        return self.states_map.get(key, default_for(key))
 
-    def set(self, kind: str, state: str) -> None:
-        if kind not in GATES or state not in GATES[kind].states:
-            raise ValueError(f"invalid policy {kind}={state}")
-        self.states[kind] = state
+    def set(self, key: str, state: str) -> None:
+        if state not in states_for(key):
+            raise ValueError(f"invalid policy {key}={state}")
+        self.states_map[key] = state
         self._save()
 
-    def list(self) -> list[dict]:
-        return [{"kind": k, "label": g.label, "state": self.get(k), "states": list(g.states)}
-                for k, g in GATES.items()]
+    def states(self, keys: list[str]) -> list[dict]:
+        allkeys = list(dict.fromkeys([*keys, "dep-install"]))    # dedup, always include dep-install
+        out = []
+        for k in allkeys:
+            st = self.get(k)
+            out.append({"key": k, "state": st, "states": states_for(k),
+                        "is_default": k not in self.states_map})
+        return out

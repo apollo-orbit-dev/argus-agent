@@ -2,18 +2,27 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-@dataclass(frozen=True)
-class Gate:
-    label: str
-    states: list[str]     # allowed policy states, e.g. ["ask", "deny"]
-    default: str          # default state when unset
-
-
-# The one declarative registry of gated actions.
-GATES: dict[str, Gate] = {
-    "dep-install": Gate("Install a Python package", ["ask", "deny"], "ask"),
-    "soul-edit":   Gate("Edit my persona (SOUL)", ["allow", "ask", "deny"], "ask"),
+# Per-tool Allow/Ask/Deny policy. Any tool name is a valid policy key (default Allow); a fixed
+# DEFAULT_ASK set defaults to Ask instead. "dep-install" is the one non-tool key (a mid-tool
+# sub-gate inside create_tool, never blanket-allow-able).
+DEFAULT_ASK: set[str] = {
+    "dep-install", "update_soul", "exec_python", "forget", "delete_row",
+    # outbound notifications — CONFIRM the real tool names against the registry:
+    "send_telegram", "send_email", "send_ntfy",
 }
+
+LABELS: dict[str, str] = {"dep-install": "Install a Python package"}
+
+
+def states_for(key: str) -> list[str]:
+    """Allowed policy states for a key. dep-install can never be blanket-allowed; every other
+    key (any tool name) supports the full allow/ask/deny range."""
+    return ["ask", "deny"] if key == "dep-install" else ["allow", "ask", "deny"]
+
+
+def default_for(key: str) -> str:
+    """Default policy state for a key when unset: Ask for the fixed DEFAULT_ASK set, else Allow."""
+    return "ask" if key in DEFAULT_ASK else "allow"
 
 
 @dataclass

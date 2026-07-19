@@ -4,7 +4,7 @@ gate() blocks on an in-memory Future bounded by a timeout: answered -> resume sa
 timeout or non-interactive origin -> raise TurnPaused (request stays pending, resumable later)."""
 from __future__ import annotations
 import asyncio, logging
-from engine.approvals.types import GATES, Decision, TurnPaused
+from engine.approvals.types import LABELS, states_for, Decision, TurnPaused
 
 log = logging.getLogger("argus.approvals")
 _INTERACTIVE = {"dashboard", "telegram"}
@@ -32,7 +32,7 @@ class ApprovalBroker:
             try:
                 await self._emit(req["session_id"], "approval_request", {
                     "req_id": req["id"], "kind": req["kind"], "target": req["target"],
-                    "prompt": req["prompt"], "states": list(GATES[req["kind"]].states)})
+                    "prompt": req["prompt"], "states": states_for(req["kind"])})
             except Exception:
                 log.debug("approval surface (event) failed", exc_info=True)
         if req["origin"] == "telegram" and self._telegram:
@@ -69,7 +69,7 @@ class ApprovalBroker:
             self._pending_meta.pop(req["id"], None)
 
     def _pending_msg(self, req: dict) -> str:
-        return (f"⏸ Waiting for your approval: {GATES[req['kind']].label.lower()} "
+        return (f"⏸ Waiting for your approval: {LABELS.get(req['kind'], req['kind']).lower()} "
                 f"({req['target']}). Approve it in the dashboard or Telegram and I'll continue. "
                 f"(request {req['id']})")
 

@@ -944,7 +944,11 @@ class Engine:
         return self.approval_store.pending()
 
     def permissions_list(self) -> list[dict]:
-        return self.permissions.list()
+        # MINIMAL fix for the GATES retirement (Task 1 of the per-tool permission matrix):
+        # PermissionStore.list() is gone, replaced by states(keys). The full tool enumeration
+        # (builtin + conditional_enabled + created, via tools_overview()) is Task 5's job; for now
+        # just cover the two keys the shipped feature actually gates so this stays green.
+        return self.permissions.states(["dep-install", "soul-edit"])
 
     def permission_set(self, kind: str, state: str) -> None:
         self.permissions.set(kind, state)   # raises ValueError -> 400 at the API layer

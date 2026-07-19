@@ -40,13 +40,13 @@ def test_permissions_set_requires_admin_and_validates(tmp_path):
     # valid state -> 200 and persisted
     kinds = e.permissions_list()
     assert kinds, "expected at least one managed permission kind"
-    kind = kinds[0]["kind"]
+    kind = kinds[0]["key"]
     valid_states = kinds[0].get("states") or ["ask", "always", "never"]
     state = valid_states[0]
     r = client.post("/permissions/set", json={"kind": kind, "state": state}, headers=hdr)
     assert r.status_code == 200
     assert r.json() == {"ok": True}
-    updated = {p["kind"]: p["state"] for p in e.permissions_list()}
+    updated = {p["key"]: p["state"] for p in e.permissions_list()}
     assert updated[kind] == state
 
 

@@ -125,7 +125,7 @@ async def main() -> None:
         # the allowlist check here is defensive-only (a telegram-origin session_id should already
         # be an allowed chat — see on_message's _guard).
         from backend.telegram_bot import apv_keyboard, apv_request_text
-        from engine.approvals import GATES
+        from engine.approvals import states_for
 
         async def _telegram_approval(session_id: str, req: dict) -> None:
             try:
@@ -134,10 +134,9 @@ async def main() -> None:
                 return
             if chat_id not in config.allowed_chat_ids:
                 return
-            gate = GATES.get(req["kind"])
             await tg_app.bot.send_message(
                 chat_id, apv_request_text(req),
-                reply_markup=apv_keyboard(req["id"], gate.states if gate else []))
+                reply_markup=apv_keyboard(req["id"], states_for(req["kind"])))
 
         engine.approvals._telegram = _telegram_approval
 
