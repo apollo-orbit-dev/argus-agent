@@ -58,3 +58,17 @@ def test_design_table_skill_loads():
     # the schema-design teeth are present
     assert "json" in s.procedure.lower()
     assert "grain" in s.procedure.lower() or "one row" in s.procedure.lower()
+
+
+def test_extract_to_table_skill_loads():
+    reg = SkillRegistry()
+    reg.load_dir(LIB)
+    s = reg.get("extract_to_table")
+    assert s is not None
+    assert s.description and s.procedure
+    assert set(s.tools) == {"download_file", "read_document", "read_file",
+                            "create_table", "insert_row", "list_tables", "query_table"}
+    assert s.steps == []                       # prose-only
+    body = s.procedure.lower()
+    assert "read_document" in body and "read_file" in body and "insert_row" in body
+    assert "one row" in body                    # the structuring pitfall is addressed
