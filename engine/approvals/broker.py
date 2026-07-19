@@ -93,7 +93,7 @@ class ApprovalBroker:
         if fut is not None and not fut.done():              # LIVE: unblock the waiting turn
             self.store.resolve(req_id, "approved" if approved else "denied", action, actor)
             fut.set_result(decision)
-            self._emit_resolved(session_id, req_id, action, approved)
+            self._emit_resolved(session_id, req_id, action, approved, actor)
             return "live"
         # DEFERRED: turn already ended (timeout/restart)
         self.store.resolve(req_id, "approved" if approved else "denied", action, actor)
@@ -104,13 +104,14 @@ class ApprovalBroker:
                 task = asyncio.get_running_loop().create_task(fn(stored))
                 self._resume_tasks.add(task)
                 task.add_done_callback(self._on_resume_done)
-        self._emit_resolved(session_id, req_id, action, approved)
+        self._emit_resolved(session_id, req_id, action, approved, actor)
         return "deferred"
 
-    def _emit_resolved(self, session_id, req_id, action, approved) -> None:
+    def _emit_resolved(self, session_id, req_id, action, approved, actor) -> None:
         if self._emit is None:
             return
-        data = {"req_id": req_id, "action": action, "outcome": "approved" if approved else "denied"}
+        data = {"req_id": req_id, "action": action,
+                "outcome": "approved" if approved else "denied", "actor": actor}
         task = asyncio.get_running_loop().create_task(self._emit(session_id, "approval_resolved", data))
         self._resume_tasks.add(task)
         task.add_done_callback(self._on_resume_done)

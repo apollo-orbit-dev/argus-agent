@@ -133,7 +133,9 @@ async def test_resolve_emits_approval_resolved(tmp_path):
     await task
     await asyncio.sleep(0.01)   # let the scheduled emit task run
     resolved = [e for e in events if e[1] == "approval_resolved"]
-    assert resolved and resolved[0][2]["req_id"] == req_id and resolved[0][2]["outcome"] == "approved"
+    assert resolved and resolved[0][2]["req_id"] == req_id
+    assert resolved[0][2]["outcome"] == "approved"
+    assert resolved[0][2]["actor"] == "owner"
 
 
 async def test_deferred_resolve_emits_approval_resolved(tmp_path):
@@ -149,4 +151,6 @@ async def test_deferred_resolve_emits_approval_resolved(tmp_path):
     assert out == "deferred"
     await asyncio.sleep(0.01)   # let the scheduled emit task run
     resolved = [e for e in events if e[1] == "approval_resolved"]
-    assert resolved and resolved[0][2]["req_id"] == req_id and resolved[0][2]["outcome"] == "approved"
+    assert resolved and resolved[0][2]["req_id"] == req_id
+    assert resolved[0][2]["outcome"] == "approved"
+    assert resolved[0][2]["actor"] == "owner"

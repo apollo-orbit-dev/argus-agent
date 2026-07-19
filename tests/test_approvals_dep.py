@@ -263,6 +263,42 @@ async def test_engine_resume_dep_installs_once_and_spawns_build_turn(tmp_path, m
     assert delivered == [("chat-1", "built it")]
 
 
+async def test_run_task_dep_gate_needs_both_flags_on(tmp_path, monkeypatch):
+    """Spec: a gate engages only when its OWN feature flag is also on. With interactive-approvals
+    ON but enable_dep_approval OFF, the CreateToolTool built for the run must get approvals=None —
+    otherwise the dep gate fires without a dep_store to record the install (dep_store is only
+    passed when enable_dep_approval), and a persisted tool silently fails to recompile on restart."""
+    from engine.experimental import tool_creation
+    from engine.protocol import ModelResponse
+
+    captured = {}
+    real_init = tool_creation.CreateToolTool.__init__
+
+    def spy_init(self, *args, **kwargs):
+        captured["approvals"] = kwargs.get("approvals")
+        captured["dep_store"] = kwargs.get("dep_store")
+        return real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(tool_creation.CreateToolTool, "__init__", spy_init)
+
+    class _CaptureModel:
+        async def chat(self, messages, tools=None, max_tokens=None, temperature=None,
+                       think=None, reasoning=None):
+            return ModelResponse(content="ok", finish_reason="stop")
+
+    cfg = Config(model_base_url="http://x/v1", model_name="m", telegram_bot_token="",
+                 enable_tool_creation=True, tool_calling_mode="native",
+                 enable_interactive_approvals=True, enable_dep_approval=False)
+    e = Engine(cfg, data_dir=str(tmp_path))
+    e._model_client = lambda: _CaptureModel()
+
+    await e.run_task("s1", "hello", origin="dashboard")
+
+    assert "approvals" in captured
+    assert captured["approvals"] is None      # dep gate must NOT engage
+    assert captured["dep_store"] is None       # consistent: no store either (legacy/hard-fail)
+
+
 async def test_engine_resume_dep_registered_on_broker_for_dep_install(tmp_path):
     """Wiring check: the Task-6 stub is replaced — the broker's dep-install resume handler is
     Engine._resume_dep, not a no-op."""

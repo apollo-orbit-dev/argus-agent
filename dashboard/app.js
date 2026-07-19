@@ -304,7 +304,7 @@
         '</div></div>';
     }
     if (kind === 'approval_resolved'){
-      var apOk = data.approved === true;
+      var apOk = data.outcome === 'approved';
       return '<div class="field-row"><span class="field-label">decision</span><div class="field-value">' +
         '<span class="tag ' + (apOk ? 'tag-ok' : 'tag-danger') + '">' + (apOk ? '✓ approved' : '✕ denied') + '</span>' +
         (data.actor ? ' · ' + esc(data.actor) : '') + '</div></div>';
@@ -539,12 +539,12 @@
     if (ev.kind === 'final'){ run.status = 'ok'; if (liveRunId === run.id) liveRunId = null; }
     else if (ev.kind === 'error'){ run.status = 'error'; if (liveRunId === run.id) liveRunId = null; }
     else if (ev.kind === 'approval_resolved' && ev.data && ev.data.req_id){
-      // Defensive/future-proofing: as of this writing the engine only ever emits approval_request
-      // (ApprovalBroker._surface never calls _emit for a resolution) — the primary collapse path is
-      // decideApproval() above, reacting to its own POST response. This branch exists so that if a
-      // decision is ever also emitted as an event (e.g. resolved from another open dashboard tab or
-      // the Developer page while this trace is open), any matching card here collapses too.
-      var apApproved = ev.data.approved === true ? true : (ev.data.approved === false ? false : null);
+      // The engine emits approval_resolved (ApprovalBroker._emit_resolved) whenever a request is
+      // decided, whether via this dashboard's own decideApproval() POST or another channel (another
+      // open dashboard tab, Telegram, the Developer page). This branch reacts to that event so any
+      // matching card here collapses too, even when the decision didn't originate from this card's
+      // own POST response.
+      var apApproved = ev.data.outcome === 'approved' ? true : (ev.data.outcome === 'denied' ? false : null);
       findApprovalCards(ev.data.req_id).forEach(function(c){
         markApprovalResolved(c, apApproved === true ? '✓ approved' : apApproved === false ? '✕ denied' : '— resolved', apApproved);
       });

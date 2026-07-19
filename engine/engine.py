@@ -1190,7 +1190,7 @@ class Engine:
                     created_sink=self._created_tools,
                     trust_store=self.trust, allow_trusted=c.enable_trusted_tools,
                     reserved_names=GATED_BUILTIN_NAMES,
-                    approvals=(self.approvals if c.enable_interactive_approvals else None),
+                    approvals=(self.approvals if (c.enable_interactive_approvals and c.enable_dep_approval) else None),
                     run_id=run_id, origin=origin))
                 system_prompt = system_prompt + "\n\n" + TOOL_CREATION_DIRECTIVE
             if skill_creation_on:
