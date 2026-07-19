@@ -136,6 +136,9 @@ class Config(BaseSettings):
     enable_knowledge: bool = True
     # Watcher: poll a URL/feed and alert on change (watch/list_watches/unwatch). Safe.
     enable_watch: bool = True
+    # Reliability harness: passive instrument of tool/routine/loop outcomes (dashboard only).
+    enable_reliability: bool = True
+    reliability_raw_retention_days: int = 30
     # Charts: make_chart renders bar/line/pie/scatter to PNG (view/Telegram) + SVG (embed). Safe.
     enable_charts: bool = True
     # ASCII charts: ascii_chart draws text charts (hbar/vbar/composition/sparkline/line/scatter) that
@@ -233,7 +236,8 @@ class Config(BaseSettings):
         "adaptive_thinking",
         "enable_skill_creation", "enable_soul_editing", "enable_datastore", "enable_tables",
         "enable_artifacts", "enable_pdf",
-        "enable_files", "enable_documents", "enable_knowledge", "enable_watch", "enable_charts",
+        "enable_files", "enable_documents", "enable_knowledge", "enable_watch", "enable_reliability",
+        "reliability_raw_retention_days", "enable_charts",
         "enable_ascii_charts", "enable_routines",
         "enable_notify", "notify_email_to", "notify_email_from", "smtp_host", "smtp_port",
         "smtp_user", "smtp_password", "ntfy_topic", "ntfy_server", "notify_fanout",
