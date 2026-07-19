@@ -10,8 +10,8 @@ def test_broker_and_wrappers_exist(tmp_path):
     e = _engine(tmp_path)
     assert e.approvals is not None
     assert isinstance(e.permissions_list(), list)
-    e.permission_set("soul-edit", "allow")
-    assert any(r["key"] == "soul-edit" and r["state"] == "allow" for r in e.permissions_list())
+    e.permission_set("update_soul", "allow")
+    assert any(r["key"] == "update_soul" and r["state"] == "allow" for r in e.permissions_list())
     assert e.approvals_list() == []
 
 

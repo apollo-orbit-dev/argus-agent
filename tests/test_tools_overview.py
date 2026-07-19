@@ -1,8 +1,9 @@
 """tools_overview() must enumerate every per-run/conditional tool run_task actually registers.
 
-Regression: update_soul moved off the base registry onto a per-run, approval-aware registration
-and silently dropped out of the dashboard's tool library. tools_overview()'s hand-maintained
-`conditional_enabled` list must be extended alongside any future per-run registration change.
+update_soul is back on the BASE registry (Task 4 folded its approval gating into the loop's
+per-tool gate, so the tool no longer needs to be built per-run/approval-aware) — it surfaces via
+`builtin`, same as read_soul, not `conditional_enabled`. See test_read_soul_not_duplicated_in_
+conditional's sibling checks below.
 """
 from config import Config
 from engine.engine import Engine
@@ -10,12 +11,18 @@ from engine.engine import Engine
 
 def test_update_soul_listed_when_enabled(tmp_path):
     e = Engine(Config(enable_soul_editing=True), data_dir=str(tmp_path))
-    names = {t["name"] for t in e.tools_overview()["conditional_enabled"]}
-    assert "update_soul" in names                 # regressed out when moved per-run; must be back
+    names = {t["name"] for t in e.tools_overview()["builtin"]}
+    assert "update_soul" in names
 
 
 def test_update_soul_absent_when_disabled(tmp_path):
     e = Engine(Config(enable_soul_editing=False), data_dir=str(tmp_path))
+    names = {t["name"] for t in e.tools_overview()["builtin"]}
+    assert "update_soul" not in names
+
+
+def test_update_soul_not_duplicated_in_conditional(tmp_path):
+    e = Engine(Config(enable_soul_editing=True), data_dir=str(tmp_path))
     names = {t["name"] for t in e.tools_overview()["conditional_enabled"]}
     assert "update_soul" not in names
 
@@ -24,7 +31,7 @@ def test_enumeration_covers_flagged_groups(tmp_path):
     e = Engine(Config(enable_soul_editing=True, enable_rules=True, enable_memory=True),
                data_dir=str(tmp_path))
     names = {t["name"] for t in e.tools_overview()["conditional_enabled"]}
-    assert {"update_soul", "save_rule", "remember", "forget"} <= names
+    assert {"save_rule", "remember", "forget"} <= names
 
 
 def test_entries_are_uniform_dicts_with_name_and_description(tmp_path):

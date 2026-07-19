@@ -351,7 +351,9 @@ class Engine:
             self.approval_store, self.permissions,
             emit=self._approval_emit, window=config.approval_window_seconds)
         self.approvals.register_resume("dep-install", self._resume_dep)   # body: Task 8
-        self.approvals.register_resume("soul-edit", self._resume_soul)    # body: Task 7
+        # Every other gated tool (update_soul, exec_python, forget, delete_row, notify, ...) shares
+        # one generic deferred resume: re-run the turn with its original prompt (Task 4).
+        self.approvals.set_default_resume(self._resume_default)
         from engine.rules.store import RulesStore
         self.rules = RulesStore(str(self._data_dir / "rules.json"))
         from engine.model_presets import ModelPresetStore
@@ -422,10 +424,12 @@ class Engine:
         self.code_interp = CodeInterpreter(allow_network=config.code_interpreter_allow_network,
                                            timeout=config.code_interpreter_timeout)
         if config.enable_soul_editing:                    # the agent can revise its OWN persona
-            from engine.tools.soul import ReadSoulTool
+            from engine.tools.soul import ReadSoulTool, UpdateSoulTool
             self.registry.register(ReadSoulTool(self.get_soul))
-            # UpdateSoulTool is registered PER-RUN (not here) so it can be built approval-aware,
-            # bound to this turn's session/run/origin — see the per-run registry block in run_task.
+            # update_soul is a normal base-registry tool (Task 4): the loop's per-tool gate
+            # covers its approval, so the tool itself no longer needs to be built per-run/
+            # approval-aware (it used to be — see soul.py's history).
+            self.registry.register(UpdateSoulTool(self.get_soul, self.set_soul))
         from engine.tools.watch import WatchManager, WatchStore
         self.watches = WatchStore(str(root / "watches.json"))
         self.watch_manager = WatchManager(self.watches)   # deliver + summarize wired in main.py
@@ -948,7 +952,7 @@ class Engine:
         # PermissionStore.list() is gone, replaced by states(keys). The full tool enumeration
         # (builtin + conditional_enabled + created, via tools_overview()) is Task 5's job; for now
         # just cover the two keys the shipped feature actually gates so this stays green.
-        return self.permissions.states(["dep-install", "soul-edit"])
+        return self.permissions.states(["dep-install", "update_soul"])
 
     def permission_set(self, kind: str, state: str) -> None:
         self.permissions.set(kind, state)   # raises ValueError -> 400 at the API layer
@@ -1001,20 +1005,34 @@ class Engine:
         self._bg_tasks.add(task)
         task.add_done_callback(self._bg_tasks.discard)
 
-    async def _resume_soul(self, req: dict) -> None:
-        """Deferred resume for an approved soul-edit request whose turn already ended: apply the
-        new persona the tool call staged in the request's payload, then let the owner know it took
-        effect (their turn ended with the edit still pending, so it would otherwise be silent).
-        Mirrors _notify_rule_saved/_notify_memory_saved's deliver-guarded notify style."""
-        self.set_soul(req["payload"]["soul"])
-        deliver = getattr(self.scheduler, "deliver", None)
-        if not deliver:
+    async def _resume_default(self, req: dict) -> None:
+        """Generic deferred resume for any gated tool without its own registered resume (e.g.
+        update_soul, exec_python, forget, delete_row, notify — any per-tool gate, present or
+        future): the turn that requested it already ended (timeout, or the owner approved from the
+        dashboard/Telegram after the fact), so replay it as a NEW turn with the SAME prompt — the
+        loop's per-tool gate sees the one-shot pre-approval ApprovalBroker.resolve() already set for
+        this (kind, target, session) and lets the call through without asking again (same pattern
+        as _resume_dep's dep-install one-shot). If we don't have the original prompt, there's
+        nothing sensible to replay: log and stop rather than crash."""
+        prompt = req["payload"].get("prompt", "")
+        if not prompt:
+            log.warning("default resume: no prompt in payload for req %s (kind=%s); nothing to "
+                       "replay", req.get("id"), req.get("kind"))
             return
-        try:
-            await deliver(req["session_id"],
-                         "My persona (SOUL) edit was approved and is now in effect.")
-        except Exception:
-            log.debug("soul-edit resume notify failed", exc_info=True)
+
+        async def _run() -> None:
+            try:
+                answer = await self.run_task(req["session_id"], prompt,
+                                             origin=req.get("origin", "api"))
+                deliver = getattr(self.scheduler, "deliver", None)
+                if deliver:
+                    await deliver(req["session_id"], answer)
+            except Exception:
+                log.exception("default resume continuation failed for %s", req.get("id"))
+
+        task = asyncio.create_task(_run())
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
 
     async def _run_deterministic_skill(self, session_id: str, run_id: str, skill, text: str) -> str:
         """Execute a skill's structured `steps` through the routine executor: tool steps run in the
@@ -1125,8 +1143,7 @@ class Engine:
         run_registry = self.registry
         if (ctx.extra_tools or tool_creation_on or skill_creation_on or scheduler_on
                 or memory_on or watch_on or c.enable_charts or c.enable_notify or c.enable_routines
-                or c.enable_code_interpreter or c.enable_rules or c.enable_interactive_approvals
-                or c.enable_soul_editing):
+                or c.enable_code_interpreter or c.enable_rules or c.enable_interactive_approvals):
             run_registry = ToolRegistry()
             for t in self.registry.list():
                 run_registry.register(t)
@@ -1138,12 +1155,6 @@ class Engine:
                 run_registry.register(RememberTool(self.memory, mkey))
                 run_registry.register(RecallTool(self.memory, mkey))
                 run_registry.register(ForgetTool(self.memory, mkey))
-            if c.enable_soul_editing:
-                from engine.tools.soul import UpdateSoulTool
-                broker = self.approvals if c.enable_interactive_approvals else None
-                run_registry.register(UpdateSoulTool(self.get_soul, self.set_soul,
-                                                     approvals=broker, session_id=session_id,
-                                                     run_id=run_id, origin=origin))
             if c.enable_rules:
                 from engine.tools.rules import ListRulesTool, RemoveRuleTool, SaveRuleTool
                 run_registry.register(SaveRuleTool(self.rules))
@@ -1242,6 +1253,8 @@ class Engine:
             system_prompt=system_prompt,
             enable_observer=c.enable_observer,
             observer_threshold=c.observer_repeat_threshold,
+            approvals=(self.approvals if c.enable_interactive_approvals else None),
+            run_id=run_id, origin=origin,
         )
         if self._adaptive_reasoning_active():            # route this turn to a reasoning LEVEL
             deps.reasoning = await self._route_reasoning(text)
@@ -1717,14 +1730,16 @@ class Engine:
         tool `run_task`'s per-run registry block (engine.py, the `run_registry = ToolRegistry()`
         section) would register for the CURRENT config flags. This list must mirror that block
         entry-for-entry (same flags, same tool names) or a row silently goes missing from the
-        dashboard, as happened when `update_soul` moved off the base registry onto a per-run,
-        approval-aware registration.
+        dashboard — as happened once when `update_soul` moved off the base registry onto a
+        per-run, approval-aware registration (Task 4 moved it back: the loop's per-tool gate now
+        covers its approval, so it's a plain base-registry tool again, alongside read_soul).
 
-        NOTE: tables/knowledge/ask_data/read_soul tools are NOT here — they're registered onto the
-        base registry once in Engine.__init__ (gated by enable_tables/enable_knowledge/
-        enable_soul_editing at construction time, not per-run), so they already surface via
-        `builtin` whenever the engine was built with that flag on. Listing them here too would
-        both duplicate `builtin` and misrepresent them as toggleable per-turn, which they aren't.
+        NOTE: tables/knowledge/ask_data/read_soul/update_soul tools are NOT here — they're
+        registered onto the base registry once in Engine.__init__ (gated by enable_tables/
+        enable_knowledge/enable_soul_editing at construction time, not per-run), so they already
+        surface via `builtin` whenever the engine was built with that flag on. Listing them here
+        too would both duplicate `builtin` and misrepresent them as toggleable per-turn, which
+        they aren't.
         """
         c = self._config
         native = c.tool_calling_mode == "native"
@@ -1757,10 +1772,6 @@ class Engine:
             ("remember", "Save a fact to remember about the user for future conversations."),
             ("recall", "Search saved memories about the user."),
             ("forget", "Delete a saved memory."),
-        )
-        conditional += group(
-            c.enable_soul_editing,
-            ("update_soul", "Revise the agent's own persona/voice (SOUL)."),
         )
         conditional += group(
             c.enable_rules,
