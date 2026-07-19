@@ -247,3 +247,35 @@ def test_executor_no_delivery_when_channel_none():
     ex = _exec({"fetch_metrics": "x"}, notifier=n)
     res = asyncio.run(ex.run(_routine(deliver={"channel": "none"}), "sess", deliver=True))
     assert not n.calls and not res.delivered
+
+
+# ---- executor: routine_result outcome emit ----
+def test_executor_emits_routine_result():
+    ex = _exec({"comprehensive": "X"})
+    events = []
+    r = _routine(steps=[{"type": "tool", "id": "comprehensive", "tool": "comprehensive", "args": {}}])
+    res = asyncio.run(ex.run(r, "sess", deliver=False, on_result=lambda payload: events.append(payload)))
+    assert res.ok
+    assert len(events) == 1
+    p = events[0]
+    assert p["name"] == r.name and p["ok"] is True
+    assert p["steps_total"] == 1 and p["steps_ok"] == 1 and isinstance(p["ms"], int)
+
+
+def test_executor_emits_routine_result_on_failure():
+    r = _routine(steps=[{"type": "tool", "id": "w", "tool": "weather", "args": {}}])
+    ex = _exec({"weather": ValueError("boom")})
+    events = []
+    res = asyncio.run(ex.run(r, "sess", deliver=False, on_result=lambda p: events.append(p)))
+    assert not res.ok
+    assert len(events) == 1
+    p = events[0]
+    assert p["name"] == r.name and p["ok"] is False
+    assert p["steps_total"] == 1 and p["steps_ok"] == 0    # failing step counted, not passed
+
+
+def test_executor_on_result_error_does_not_break_run():
+    ex = _exec({"fetch_metrics": "METRICS=7.7h"})
+    res = asyncio.run(ex.run(_routine(), "sess", deliver=False,
+                             on_result=lambda p: (_ for _ in ()).throw(RuntimeError("boom"))))
+    assert res.ok                                          # raising callback must not propagate

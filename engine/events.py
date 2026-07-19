@@ -17,7 +17,7 @@ log = logging.getLogger("argus.events")
 
 # StepEvent.kind vocabulary (documented, not enforced):
 #   info | model_request | model_response | tool_call | validation |
-#   tool_result | final | error | reprompt | skill
+#   tool_result | final | error | reprompt | skill | routine_result
 
 
 @dataclass
@@ -39,6 +39,12 @@ class EventBus:
         self._history: dict[str, deque[StepEvent]] = defaultdict(lambda: deque(maxlen=maxlen))
         # subscribers: (session_filter_or_None, queue)
         self._subscribers: list[tuple[Optional[str], asyncio.Queue]] = []
+        self._sinks: list = []                      # synchronous, fail-safe outcome listeners
+
+    def add_sink(self, fn) -> None:
+        """Register a synchronous listener invoked on every publish (e.g. the reliability collector).
+        Sinks must be cheap and non-blocking; exceptions are logged and swallowed."""
+        self._sinks.append(fn)
 
     async def publish(self, ev: StepEvent) -> None:
         self._history[ev.session_id].append(ev)
@@ -47,6 +53,11 @@ class EventBus:
         for session_filter, q in list(self._subscribers):
             if session_filter is None or session_filter == ev.session_id:
                 q.put_nowait(ev)
+        for sink in self._sinks:
+            try:
+                sink(ev)
+            except Exception:
+                log.exception("event sink failed (ignored)")
 
     def recent(self, session_id: str) -> list[StepEvent]:
         return list(self._history.get(session_id, ()))
