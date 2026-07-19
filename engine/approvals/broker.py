@@ -22,6 +22,7 @@ class ApprovalBroker:
         self._oneshots: set[tuple] = set()
         self._resume: dict = {}                 # kind -> async (req) -> None
         self._telegram = None                   # async (session_id, req) -> None; set by engine
+        self._resume_tasks: set[asyncio.Task] = set()   # GC guard for fire-and-forget resume tasks
 
     def register_resume(self, kind: str, fn) -> None:
         self._resume[kind] = fn
@@ -55,19 +56,17 @@ class ApprovalBroker:
         await self._surface(req)
         if origin not in _INTERACTIVE:                     # nobody attached -> straight to pending
             raise TurnPaused(req["id"], kind, self._pending_msg(req))
-        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[req["id"]] = fut
         self._pending_meta[req["id"]] = {"kind": kind, "target": target, "session_id": session_id}
         try:
             done, _ = await asyncio.wait({fut}, timeout=self.window)
+            if fut in done and not fut.cancelled():
+                return fut.result()
+            raise TurnPaused(req["id"], kind, self._pending_msg(req))   # timeout
         finally:
-            pass
-        if fut in done and not fut.cancelled():
-            self._pending.pop(req["id"], None); self._pending_meta.pop(req["id"], None)
-            return fut.result()
-        # timeout
-        self._pending.pop(req["id"], None); self._pending_meta.pop(req["id"], None)
-        raise TurnPaused(req["id"], kind, self._pending_msg(req))
+            self._pending.pop(req["id"], None)
+            self._pending_meta.pop(req["id"], None)
 
     def _pending_msg(self, req: dict) -> str:
         return (f"⏸ Waiting for your approval: {GATES[req['kind']].label.lower()} "
@@ -79,6 +78,8 @@ class ApprovalBroker:
         stored = self.store.get(req_id)
         if meta is None and stored is None:
             return "unknown"
+        if stored is not None and stored.get("status") != "pending":
+            return "unknown"          # already resolved — idempotent no-op
         kind = (meta or stored)["kind"]
         approved = action in ("approve_once", "always_allow")
         if action in _ACTION_STATE:
@@ -98,5 +99,15 @@ class ApprovalBroker:
             self._oneshots.add((stored["kind"], stored["target"], stored["session_id"]))
             fn = self._resume.get(stored["kind"])
             if fn is not None:
-                asyncio.get_event_loop().create_task(fn(stored))
+                task = asyncio.get_running_loop().create_task(fn(stored))
+                self._resume_tasks.add(task)
+                task.add_done_callback(self._on_resume_done)
         return "deferred"
+
+    def _on_resume_done(self, task: asyncio.Task) -> None:
+        self._resume_tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            log.error("approval resume callback failed", exc_info=exc)

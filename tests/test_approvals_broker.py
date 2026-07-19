@@ -78,3 +78,41 @@ async def test_deferred_approve_registers_oneshot_and_resumes(tmp_path):
 
 async def _noop():
     return None
+
+
+async def test_cancelled_gate_cleans_pending(tmp_path):
+    b = _broker(tmp_path, window=5)
+    task = asyncio.ensure_future(b.gate("dep-install", "pandas", "s", "r", "install", "dashboard"))
+    for _ in range(50):
+        if b.store.pending(): break
+        await asyncio.sleep(0.01)
+    task.cancel()
+    try: await task
+    except asyncio.CancelledError: pass
+    assert b._pending == {}                      # no leaked future
+    # a later decision now takes the DEFERRED path correctly
+    req_id = b.store.pending()[0]["id"]
+    assert b.resolve(req_id, "approve_once", "owner") == "deferred"
+
+
+async def test_double_resolve_is_idempotent(tmp_path):
+    b = _broker(tmp_path, window=0.05)
+    with pytest.raises(TurnPaused):
+        await b.gate("dep-install", "pandas", "s", "r", "install", "dashboard")
+    req_id = b.store.pending()[0]["id"]
+    resumes = []
+    b.register_resume("dep-install", lambda req: resumes.append(req["id"]) or _noop())
+    assert b.resolve(req_id, "approve_once", "owner") == "deferred"
+    assert b.resolve(req_id, "approve_once", "owner") == "unknown"   # 2nd is a no-op
+    assert resumes == [req_id]                    # resume fired exactly once
+    assert (("dep-install", "pandas", "s")) in b._oneshots
+    assert len([k for k in b._oneshots if k == ("dep-install", "pandas", "s")]) == 1
+
+
+async def test_always_allow_on_deny_only_gate_is_unknown(tmp_path):
+    b = _broker(tmp_path, window=0.05)
+    with pytest.raises(TurnPaused):
+        await b.gate("dep-install", "pandas", "s", "r", "install", "dashboard")
+    req_id = b.store.pending()[0]["id"]
+    assert b.resolve(req_id, "always_allow", "owner") == "unknown"   # deps have no 'allow' state
+    assert b.policy.get("dep-install") == "ask"                       # policy unchanged
