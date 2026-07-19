@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## 0.4.0
 
 ### Added
 - **Interactive blocking approvals** — sensitive agent actions now *pause the turn and wait* for a
@@ -17,6 +17,10 @@ All notable changes to this project are documented here.
   default Ask. Enforcement is a single check in the loop before any tool runs: Allow runs it, Deny
   refuses it (and Argus adapts), Ask pauses for your decision. Gated by `ENABLE_INTERACTIVE_APPROVALS`
   (on by default); off restores the previous record-and-continue behavior exactly.
+- **More calculator functions** — `calculator` now supports `sqrt`, `cbrt`, `pow`, `abs`, `round`,
+  `min`, `max`, `floor`, `ceil`, `trunc`, `exp`, `log`/`log2`/`log10`, the trig functions, `hypot`,
+  `degrees`/`radians`, and the constants `pi`, `e`, `tau` — still evaluated through the safe
+  AST whitelist (no `eval`), with the same runaway-exponent guard applied to `pow`.
 
 ### Added
 - **Standing behavioral rules** — a durable, owner-managed set of "how to behave" directives
