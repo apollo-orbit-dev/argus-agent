@@ -48,7 +48,10 @@ class ListScheduledTasksTool(Tool):
         self.session_id = session_id
 
     async def run(self, args: "ListScheduledTasksTool.Params") -> str:
-        jobs = self.scheduler.list(self.session_id)
+        # Owner-wide: Argus is single-user with global identity, so a scheduled task belongs to the
+        # USER, not the interface it was created from. List all of them (Telegram- and dashboard-
+        # created alike) — jobs still remember their origin session_id for delivery.
+        jobs = self.scheduler.list()
         if not jobs:
             return "You have no scheduled tasks."
         lines = ["Scheduled tasks:"]
@@ -82,7 +85,7 @@ class UpdateScheduledTaskTool(Tool):
         instruction = args.instruction.strip() or None
         if instruction is None and spec is None:
             return "update_scheduled_task error: provide a new instruction and/or a new 'when'."
-        job = self.scheduler.update(args.task_id, self.session_id, instruction=instruction, spec=spec)
+        job = self.scheduler.update(args.task_id, instruction=instruction, spec=spec)  # owner-wide
         if not job:
             return f"No scheduled task with id '{args.task_id}' found for you."
         return (f"Updated {job.id}: \"{job.instruction}\" — {describe(job.schedule)}. "
@@ -101,6 +104,6 @@ class CancelScheduledTaskTool(Tool):
         self.session_id = session_id
 
     async def run(self, args: "CancelScheduledTaskTool.Params") -> str:
-        if self.scheduler.cancel(args.task_id, self.session_id):
+        if self.scheduler.cancel(args.task_id):     # owner-wide (single-user)
             return f"Cancelled scheduled task {args.task_id}."
         return f"No scheduled task with id '{args.task_id}' found for you."

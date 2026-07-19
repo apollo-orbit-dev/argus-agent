@@ -178,3 +178,17 @@ def test_scheduler_prompt_job_still_delivers(tmp_path):
     job = sch.add("remind me", {"type": "interval", "seconds": 60}, "chat1")   # kind defaults to prompt
     asyncio.run(sch._run_job(job))
     assert len(delivered) == 1 and "answer" in delivered[0]      # prompt jobs deliver generically
+
+
+async def test_scheduling_tools_are_owner_wide_across_sessions(tmp_path):
+    # Regression: a job created in one interface's session must be visible AND manageable from
+    # another (single-user, global identity). list_scheduled_tasks was wrongly session-scoped, so
+    # a Telegram-created job was invisible from the dashboard.
+    sched = Scheduler(str(tmp_path / "j.json"), run_task=None)
+    sched.add("telegram job", {"type": "daily", "hour": 7, "minute": 0}, "telegram_chat")
+    lst = ListScheduledTasksTool(sched, "dashboard")          # DIFFERENT session than the job's
+    assert "telegram job" in await lst.run(lst.Params())      # still sees it
+    job_id = next(iter(sched.jobs))
+    cancel = CancelScheduledTaskTool(sched, "dashboard")
+    assert "Cancelled" in await cancel.run(cancel.Params(task_id=job_id))   # can manage it too
+    assert "no scheduled tasks" in (await lst.run(lst.Params())).lower()
