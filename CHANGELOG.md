@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here.
 
+## 0.6.1
+
+Internal/testbed release — no user-facing behavior change.
+
+### Added
+- **Model-graded judge** (`engine/eval/judge.py`) for the skill-eval harness — a pure prompt-builder +
+  reply-parser that scores a run's output QUALITY (0–3) against per-case rubric criteria, complementing
+  the deterministic chain-scorer (which can't see, e.g., a correct clarifying question or a
+  chain-passing-but-low-quality result). Judge-model-agnostic; the developer runner grades on-target
+  cases via the local model or `claude -p` (Opus). Unit-tested and blind to arm/skill.
+
 ## 0.6.0
 
 Internal/testbed release — no user-facing behavior change.
