@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here.
 
+## 0.7.0
+
+### Added
+- **`native_finish` tool-calling mode** (opt-in, `TOOL_CALLING_MODE=native_finish`) — native
+  tool-calling with `tool_choice=required` plus a synthetic `final_answer` tool, so the model must emit
+  a structured tool-or-finish decision every turn. This makes plain-prose "slips" impossible and lets a
+  guided-decoding backend (vLLM) produce valid tool-call JSON, while keeping server-side parsing. A
+  third option alongside `native` (default) and `manual`; `chat()` now accepts a `tool_choice` param
+  (defaults to `auto`, unchanged for the other modes).
+
 ## 0.6.1
 
 Internal/testbed release — no user-facing behavior change.
