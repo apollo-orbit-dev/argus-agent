@@ -44,3 +44,19 @@ def test_empty_expectation_is_not_a_pass():
     # a predicate with no recognized keys proves nothing
     r = score_case({}, {"tools": ["create_table"], "activated_skill": "design_table"})
     assert r["chain_correct"] is False
+
+
+def test_schema_has_json_column_passes():
+    cap = {"tools": ["create_table"], "activated_skill": "design_table",
+           "create_table_args": [{"name": "recipes",
+                                  "columns": ["name:text:key", "ingredients:json", "steps:json"]}]}
+    r = score_case({"tools_in_order": ["create_table"], "schema_has": ["json"]}, cap)
+    assert r["chain_correct"] is True
+
+
+def test_schema_has_json_column_fails_on_all_text():
+    cap = {"tools": ["create_table"], "activated_skill": "design_table",
+           "create_table_args": [{"name": "recipes",
+                                  "columns": ["name:text", "ingredients:text", "steps:text"]}]}
+    r = score_case({"schema_has": ["json"]}, cap)
+    assert r["chain_correct"] is False

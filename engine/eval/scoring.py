@@ -13,10 +13,24 @@ def _is_subsequence(needles: list, hay: list) -> bool:
     return all(n in it for n in needles)
 
 
+def _all_column_specs(create_table_args: list) -> list[str]:
+    """Flatten every column spec string across all create_table calls in a run."""
+    out: list[str] = []
+    for a in create_table_args or []:
+        for col in (a or {}).get("columns") or []:
+            out.append(str(col))
+    return out
+
+
 def score_case(expect: dict, captured: dict) -> dict:
-    """expect: any of tools_in_order / min_counts / activates / skill_not.
-    captured: {"tools": [ordered tool names], "activated_skill": name|None}.
-    Returns {"chain_correct": bool, "checks": {name: bool}, "reasons": [str]}."""
+    """expect: any of tools_in_order / min_counts / activates / skill_not / schema_has.
+    captured: {"tools": [ordered tool names], "activated_skill": name|None,
+               "create_table_args": [{"name":..., "columns":[...]}]}.
+    Returns {"chain_correct": bool, "checks": {name: bool}, "reasons": [str]}.
+
+    `schema_has` inspects the create_table ARGUMENTS (not the tool sequence): a list of substrings
+    each of which must appear in at least one created column spec (e.g. ["json"] verifies a json/list
+    column was actually declared — the design_table instinct a bare "create_table fired" can't detect)."""
     tools = list(captured.get("tools") or [])
     skill = captured.get("activated_skill")
     checks: dict[str, bool] = {}
@@ -45,6 +59,14 @@ def score_case(expect: dict, captured: dict) -> dict:
         checks["skill_not"] = ok
         if not ok:
             reasons.append(f"over-fired: {skill!r} in {expect['skill_not']}")
+
+    if "schema_has" in expect:
+        specs = _all_column_specs(captured.get("create_table_args"))
+        joined = " ".join(specs).lower()
+        ok = all(sub.lower() in joined for sub in expect["schema_has"])
+        checks["schema_has"] = ok
+        if not ok:
+            reasons.append(f"schema {specs} missing {expect['schema_has']}")
 
     return {"chain_correct": all(checks.values()) if checks else False,
             "checks": checks, "reasons": reasons}
