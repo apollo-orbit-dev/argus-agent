@@ -17,10 +17,14 @@ content: read the source, THEN design the schema below, THEN `create_table` and 
 record. Don't design a schema in the abstract when the real data — and its actual shape — is one tool
 call away.
 
-**1. Grain — decide what ONE row is.** One recipe. One expense. One contact. One workout. Say it to
-yourself before naming a single column; every other decision (which fields are scalar, which repeat,
-what's unique) follows from this. A table with no clear grain ends up with unrelated facts crammed into
-one row, or one fact smeared across many.
+**1. Grain — decide what ONE row is. Decide it YOURSELF; don't interrogate the user.** One recipe. One
+expense. One contact. One workout. INFER the grain from the request and pick a sensible default — every
+other decision (which fields are scalar, which repeat, what's unique) follows from it. For a clear-enough
+request ("track my daily coffee" → one row per day; "my book collection" → one row per book) just build
+the table; do NOT stop and ask the user how to structure it. Reserve a single focused clarifying question
+for when the request is genuinely ambiguous AND guessing wrong would waste real work — otherwise a
+reasonable table the user can adjust later beats an interrogation. A table with no clear grain ends up
+with unrelated facts crammed into one row, or one fact smeared across many.
 
 **2. Typed columns, not all-`text`.** Pick the real type per column:
 - `integer` — counts, quantities, ages, whole-number ids.
@@ -75,6 +79,9 @@ list/dict fields passed as real lists/dicts, not stringified.
   `servings` can't be summed, and there's no key so re-adding a recipe creates a duplicate row.
 
 Rules of thumb:
+- Act, don't interrogate — infer the grain and sensible defaults yourself and build the table; ask a
+  clarifying question only when the request is genuinely ambiguous. A reasonable table beats a question
+  for a simple request.
 - Grain first — if you can't say what one row is, you're not ready to name columns.
 - A `json` column beats both a text blob and a wall of `item1..itemN` columns.
 - Split only when you'll query the items across rows; otherwise embedding is simpler and correct.
