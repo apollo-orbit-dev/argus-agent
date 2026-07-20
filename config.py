@@ -11,7 +11,7 @@ from typing import Annotated, Literal, Optional
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-ToolCallingMode = Literal["native", "manual"]
+ToolCallingMode = Literal["native", "manual", "native_finish"]
 SkillSelectionMode = Literal["model_driven", "explicit", "hybrid"]
 SemanticRecall = Literal["auto", "on", "off"]
 # "global": one shared memory bank keyed on memory_user_id, so facts follow the

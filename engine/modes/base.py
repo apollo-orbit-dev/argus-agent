@@ -44,7 +44,11 @@ def get_mode(name: str, registry: "ToolRegistry | None" = None) -> ToolCallingMo
     from engine.modes.manual import ManualMode
     if name == "native":
         return NativeMode()
+    if name == "native_finish":
+        from engine.modes.native_finish import NativeFinishMode
+        return NativeFinishMode()
     if name == "manual":
         known = set(registry.names()) if registry is not None else None
         return ManualMode(known_tools=known)
-    raise ValueError(f"unknown tool_calling_mode: {name!r} (expected 'native' or 'manual')")
+    raise ValueError(f"unknown tool_calling_mode: {name!r} "
+                     "(expected 'native', 'native_finish', or 'manual')")

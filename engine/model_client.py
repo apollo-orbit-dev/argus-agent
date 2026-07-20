@@ -86,7 +86,8 @@ class ModelClient:
                    max_tokens: Optional[int] = None,
                    temperature: Optional[float] = None,
                    think: Optional[bool] = None,
-                   reasoning: Optional[str] = None) -> ModelResponse:
+                   reasoning: Optional[str] = None,
+                   tool_choice: Optional[str] = None) -> ModelResponse:
         payload: dict = {
             "model": self.model,
             "messages": messages,
@@ -106,7 +107,7 @@ class ModelClient:
             payload["presence_penalty"] = self.presence_penalty
         if tools:
             payload["tools"] = tools
-            payload["tool_choice"] = "auto"
+            payload["tool_choice"] = tool_choice or "auto"   # native_finish forces "required"
         # Reasoning control, translated to the active backend's wire format. Priority:
         #  1. an explicit per-call `reasoning` level (the adaptive router sets this per turn),
         #  2. think=False -> "off" (auxiliary calls; also stops the local model from deliberating
