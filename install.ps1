@@ -42,7 +42,12 @@ if ((Test-Path "main.py") -and (Test-Path "pyproject.toml")) {
     Info "Already inside an Argus checkout - skipping clone."
 } else {
     if (Test-Path $DirName) { Warn "./$DirName already exists - using it instead of cloning again." }
-    else { Info "Cloning $RepoUrl ..."; git clone $RepoUrl $DirName; Ok "cloned into ./$DirName" }
+    else {
+        Info "Cloning $RepoUrl ..."; git clone $RepoUrl $DirName; Ok "cloned into ./$DirName"
+        # Pin to the latest released version (a stable tag), not the moving main branch.
+        $LatestTag = (git -C $DirName tag -l 'v*' --sort=-v:refname | Select-Object -First 1)
+        if ($LatestTag) { git -C $DirName -c advice.detachedHead=false checkout -q $LatestTag; Ok "checked out latest release $LatestTag" }
+    }
     Set-Location $DirName
 }
 $ProjectDir = (Get-Location).Path
