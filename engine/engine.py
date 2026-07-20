@@ -242,7 +242,7 @@ SKILL_CREATION_DIRECTIVE = (
 GATED_BUILTIN_NAMES = {"web_search", "fetch_page", "map_site", "crawl_site", "extract_data"}
 
 
-def build_base_registry(config: Config) -> ToolRegistry:
+def build_base_registry(config: Config, data_dir: Path) -> ToolRegistry:
     reg = ToolRegistry()
     # core
     reg.register(CalculatorTool())
@@ -281,12 +281,12 @@ def build_base_registry(config: Config) -> ToolRegistry:
     if config.enable_datastore:
         from engine.tools.datastore import DataStore, DataStoreTool
         reg.register(DataStoreTool(DataStore(
-            str(Path(__file__).resolve().parents[1] / "datastore.db"))))
+            str(data_dir / "datastore.db"))))
     if config.enable_artifacts:
         from engine.tools.artifacts import BuildWebPageTool, InspectArtifactTool
         from engine.tools.files import FileWorkspace
-        _art_dir = str(Path(__file__).resolve().parents[1] / "artifacts")
-        _ws = FileWorkspace(str(Path(__file__).resolve().parents[1] / "workspace"))
+        _art_dir = str(data_dir / "artifacts")
+        _ws = FileWorkspace(str(data_dir / "workspace"))
         reg.register(BuildWebPageTool(_art_dir, workspace=_ws))
         reg.register(InspectArtifactTool(_art_dir))
         if config.enable_pdf:
@@ -309,18 +309,19 @@ def new_run_id() -> str:
 class Engine:
     def __init__(self, config: Config, data_dir: Optional[str] = None):
         self._config = config
-        # Where per-feature databases/files live. Defaults to the repo root (unchanged behavior for
-        # every existing store); tests can point THIS at a tmp dir so a throwaway Engine doesn't write
-        # into the repo. Only newly-added stores should be routed through this — existing stores keep
-        # resolving their own paths off `Path(__file__).resolve().parents[1]` directly.
+        # Where ALL per-feature databases/files live. Defaults to the repo root (byte-identical
+        # behavior for every store when data_dir is None); pass a tmp dir and a throwaway Engine writes
+        # NOTHING into the repo — the isolation the skill-eval harness and tests rely on. Every
+        # persistent store below resolves through `root` (= self._data_dir); only shared CODE (the
+        # shipped skills/library dir) still resolves off the module path.
         self._data_dir = Path(data_dir) if data_dir else Path(__file__).resolve().parents[1]
+        root = self._data_dir
         self.events = EventBus()
         self.store = SessionStore()
-        self.registry = build_base_registry(config)
+        self.registry = build_base_registry(config, self._data_dir)
         self._bg_tasks: set = set()   # keep background tasks (autoextract) alive from GC
         self._running: dict = {}      # session_id -> the in-flight run's task (for /stop)
         self._turn_tools: dict = {}   # session_id -> recent turns' tool-sets (repetition detector)
-        root = Path(__file__).resolve().parents[1]
         self._system_prompt_file = root / "system_prompt.md"
         self._system_prompt_legacy = root / "system_prompt.txt"   # migrate old .txt
         self.system_prompt = self._load_system_prompt()
@@ -329,16 +330,16 @@ class Engine:
         self.skill_registry = SkillRegistry()
         self.skill_registry.load_dir(str(Path(__file__).resolve().parent / "skills" / "library"))
         # runtime-created skills persist in their own dir (loaded on startup too)
-        self._created_skills_dir = str(Path(__file__).resolve().parents[1] / "created_skills")
+        self._created_skills_dir = str(root / "created_skills")
         self.skill_registry.load_dir(self._created_skills_dir)
         # persisted runtime-created tools (reloaded on startup; available when tool creation is on)
-        self._artifacts_dir = str(Path(__file__).resolve().parents[1] / "artifacts")
-        self._created_tools_dir = str(Path(__file__).resolve().parents[1] / "created_tools")
+        self._artifacts_dir = str(root / "artifacts")
+        self._created_tools_dir = str(root / "created_tools")
         # approval-gated dependency store (approved packages the sandbox may import)
         from engine.experimental.dep_store import DepStore
-        self.deps = DepStore(str(Path(__file__).resolve().parents[1] / "dep_approvals.json"))
+        self.deps = DepStore(str(root / "dep_approvals.json"))
         from engine.experimental.trust_store import TrustStore
-        self.trust = TrustStore(str(Path(__file__).resolve().parents[1] / "trusted_tools.json"))
+        self.trust = TrustStore(str(root / "trusted_tools.json"))
         # interactive approvals: durable request log + per-gate policy + the broker tools call
         # through to gate a sensitive action (dep installs, SOUL edits, ...). Routed through
         # self._data_dir so tests get isolated storage; the broker itself is inert (nothing calls
@@ -359,10 +360,10 @@ class Engine:
         from engine.model_presets import ModelPresetStore
         self._env_path = Path(__file__).resolve().parents[1] / ".env"
         self.model_presets_store = ModelPresetStore(
-            str(Path(__file__).resolve().parents[1] / "model_presets.json"))
+            str(root / "model_presets.json"))
         self._ensure_model_roles(config)   # seed/reconcile chat + embedding connections & roles
         from engine.custom_commands import CustomCommandStore
-        self.commands = CustomCommandStore(str(Path(__file__).resolve().parents[1] / "custom_commands.yaml"))
+        self.commands = CustomCommandStore(str(root / "custom_commands.yaml"))
         from engine.experimental.tool_creation import load_persisted_tools
         self._created_tools = load_persisted_tools(
             self._created_tools_dir, timeout=config.created_tool_timeout,
@@ -373,13 +374,13 @@ class Engine:
         from engine.memory.embeddings import EmbeddingClient
         from engine.memory.manager import Memory
         self.memory = Memory(
-            MemoryStore(str(Path(__file__).resolve().parents[1] / "memory.db")),
+            MemoryStore(str(root / "memory.db")),
             EmbeddingClient(config.embedding_base_url, config.embedding_model,
                             config.embedding_api_key, timeout=config.request_timeout),
             config.semantic_recall)
         # task scheduler (started by main.py; deliver callback wired there too)
         self.scheduler = Scheduler(
-            str(Path(__file__).resolve().parents[1] / "scheduled_jobs.json"), self.run_task)
+            str(root / "scheduled_jobs.json"), self.run_task)
 
         # ---- vetted built-ins: file workspace, document reader, knowledge base, watcher ----
         from engine.tools.files import (DeleteFileTool, DownloadFileTool, FileWorkspace,

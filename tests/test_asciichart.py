@@ -15,6 +15,12 @@ def _mk(**over):
     return Config(**base)
 
 
+def _reg(**over):
+    import tempfile
+    from pathlib import Path
+    return build_base_registry(_mk(**over), Path(tempfile.mkdtemp()))
+
+
 # ── library: every chart renders, and every content line is flush-left (no stray indent) ──
 def _no_leading_indent(chart: str, *, allow=()):
     """Every line is flush-left except explicitly allowed axis rows (scatter's x-axis)."""
@@ -106,11 +112,11 @@ def test_tool_caps_dimensions():
 
 # ── registration ──
 def test_registered_when_enabled():
-    assert "ascii_chart" in build_base_registry(_mk(enable_ascii_charts=True)).names()
+    assert "ascii_chart" in _reg(enable_ascii_charts=True).names()
 
 
 def test_absent_when_disabled():
-    assert "ascii_chart" not in build_base_registry(_mk(enable_ascii_charts=False)).names()
+    assert "ascii_chart" not in _reg(enable_ascii_charts=False).names()
 
 
 # ── loop delivery guarantee (echo_result) ──
