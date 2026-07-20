@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented here.
 
+## 0.7.2
+
+### Added
+- **Update-available indicator** — the dashboard now checks whether a newer release is published on
+  GitHub and shows an "↑ vX.Y.Z" badge next to the version in the footer (backed by a `/updates`
+  endpoint; cached, and it degrades silently if GitHub is unreachable).
+- **Clarification choice buttons** — when the agent asks a clarifying question with options
+  (`ask_user` with `options`), the dashboard renders them as one-tap buttons; clicking one sends it as
+  your next message instead of making you type it.
+
+### Changed
+- **Install scripts pin to the latest release** — `install.sh` / `install.ps1` now check out the latest
+  release tag after cloning, rather than landing on the moving `main` branch, so a fresh install is a
+  stable versioned release.
+
 ## 0.7.1
 
 ### Changed
