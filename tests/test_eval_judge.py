@@ -24,6 +24,17 @@ def test_parse_garbage_is_none():
     assert parse_judge_reply("no number here at all")["score"] is None
 
 
+def test_parse_ignores_dates_in_prose():
+    # regression: a date/year in the reasoning must NOT be read as the score and clamped up to 3
+    assert parse_judge_reply("Looking at the request dated 2026-07-01, I rate this a 2.")["score"] == 2
+    assert parse_judge_reply("The table covers 2026 data. Score: 1/3, missing typed columns.")["score"] == 1
+
+
+def test_parse_large_number_only_is_none():
+    # a stray multi-digit number with no standalone 0-3 is unparseable, not a 3
+    assert parse_judge_reply("rated 2026 overall")["score"] is None
+
+
 def test_prompt_includes_request_outcome_rubric():
     case = {"prompt": "make a recipes table", "skill": "design_table",
             "rubric": ["json column for ingredients", "one row per recipe"]}

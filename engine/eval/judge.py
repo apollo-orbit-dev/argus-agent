@@ -65,12 +65,10 @@ def parse_judge_reply(text: str) -> dict:
     except Exception:
         pass
     if score is None:
-        m = re.search(r"-?\d+", s)
-        if m:
-            try:
-                score = int(m.group())
-            except ValueError:
-                score = None
+        # Strict JSON failed — fall back to a STANDALONE single digit 0-3 (\b…\b), so a date/year in
+        # the reasoning ("dated 2026-07-01 … a 2") can't be mistaken for the score and clamped up.
+        m = re.search(r"\b[0-3]\b", s)
+        score = int(m.group()) if m else None
         why = s[:200]
     if score is not None:
         score = max(0, min(3, score))
