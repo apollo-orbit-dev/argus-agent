@@ -53,6 +53,12 @@ else
         info "Cloning $REPO_URL ..."
         git clone "$REPO_URL" "$DIR_NAME"
         ok "cloned into ./$DIR_NAME"
+        # Pin to the latest released version (a stable tag), not the moving main branch.
+        LATEST_TAG="$(git -C "$DIR_NAME" tag -l 'v*' --sort=-v:refname | head -n 1)"
+        if [ -n "$LATEST_TAG" ]; then
+            git -C "$DIR_NAME" -c advice.detachedHead=false checkout -q "$LATEST_TAG"
+            ok "checked out latest release $LATEST_TAG"
+        fi
     fi
     cd "$DIR_NAME"
     PROJECT_DIR="$(pwd)"

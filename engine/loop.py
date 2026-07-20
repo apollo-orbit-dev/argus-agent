@@ -274,7 +274,14 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
         # A terminal tool (e.g. ask_user/clarify) ends the turn: its result IS the answer.
         if getattr(tool_obj, "terminal", False):
             deps.store.append_message(session_id, {"role": "assistant", "content": result})
-            await emit(step, "final", {"answer": result})
+            final_data = {"answer": result}
+            # A clarifying question with choices: surface the options so the channel can offer them
+            # as one-tap buttons (the user's click becomes their next message).
+            if call.tool == "ask_user" and isinstance(call.args, dict):
+                opts = call.args.get("options")
+                if isinstance(opts, list) and opts:
+                    final_data["options"] = [str(o) for o in opts]
+            await emit(step, "final", final_data)
             return result
 
         for m in deps.mode.tool_result_messages(resp, call, result):

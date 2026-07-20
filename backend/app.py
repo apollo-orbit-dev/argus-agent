@@ -51,6 +51,12 @@ def create_app(engine: Engine) -> FastAPI:
         from engine.version import get_version
         return {"version": get_version()}
 
+    @app.get("/updates")
+    async def updates():
+        # Is there a newer published release on GitHub? Cached ~30 min; never raises.
+        from engine.version import check_for_update
+        return await check_for_update()
+
     # ---- server logs (dashboard "Logs" page) — admin-gated; consume /logs/stream via fetch so the
     # admin-token header is sent (EventSource can't set headers). ----
     def _log_path() -> str:

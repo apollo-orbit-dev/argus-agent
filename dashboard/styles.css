@@ -681,3 +681,11 @@
     .toast{ animation:none; }
     * { scroll-behavior:auto !important; }
   }
+
+/* Clarification choice buttons (ask_user options) + update-available badge */
+.clarify-opts{ display:flex; flex-wrap:wrap; gap:8px; }
+.clarify-opts .clarify-opt{ cursor:pointer; }
+.update-badge{ margin-left:8px; font-size:10px; font-weight:600; letter-spacing:.02em;
+  color:var(--amber); text-decoration:none; padding:1px 6px; border:1px solid var(--amber);
+  border-radius:6px; white-space:nowrap; }
+.update-badge:hover{ background:var(--amber); color:var(--bg); }

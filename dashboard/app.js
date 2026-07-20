@@ -341,6 +341,10 @@
     }
     if (typeof data.answer === 'string')
       parts.push(field('answer', '<div class="callout callout-answer">' + esc(data.answer) + '</div>'));
+    if (Array.isArray(data.options) && data.options.length)
+      parts.push(field('choose', '<div class="clarify-opts">' + data.options.map(function(o){
+        return '<button class="btn btn-sm clarify-opt" data-clarify-opt="' + esc(o) + '">' + esc(o) + '</button>';
+      }).join('') + '</div>'));
     if (typeof data.text === 'string' && data.text !== '')
       parts.push(field('text', esc(data.text)));
     if (typeof data.message === 'string' && data.message !== '')
@@ -627,6 +631,9 @@
     var skill = (skillSel && !skillSel.disabled && skillSel.value) ? skillSel.value : null;
 
     runBtn.disabled = true;
+    // any clarify-option buttons from a prior turn are now stale — retire them so a scrolled-back
+    // old choice can't be sent as this turn's answer.
+    document.querySelectorAll('.clarify-opt').forEach(function(b){ b.disabled = true; });
     runStatus.textContent = 'running…';
     runStatus.style.color = 'var(--cyan)';
     var started = performance.now();
@@ -655,6 +662,14 @@
   runnerInput.addEventListener('keydown', function(e){
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!runBtn.disabled) runTask(); }
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); if (!runBtn.disabled) runTask(); }
+  });
+  // Clarification choice buttons: clicking an option sends it as the user's next message.
+  document.addEventListener('click', function(e){
+    var opt = e.target.closest('[data-clarify-opt]');
+    if (!opt || runBtn.disabled) return;
+    runnerInput.value = opt.getAttribute('data-clarify-opt');
+    autosizeRunnerInput();
+    runTask();
   });
 
   /* ---- new session: reset the engine-side session and the local trace state ---- */
@@ -2544,6 +2559,20 @@
   pollStatus();
   setInterval(pollStatus, 5000);
   fetch('/version').then(function(r){ return r.json(); })
-    .then(function(v){ $('railFooter').textContent = 'Argus v' + (v.version || '?'); })
-    .catch(function(){ $('railFooter').textContent = 'Argus'; });
+    .then(function(v){
+      $('railFooter').textContent = 'Argus v' + (v.version || '?');
+      return fetch('/updates').then(function(r){ return r.json(); });
+    })
+    .then(function(u){
+      if (u && u.update_available && u.latest){
+        var a = document.createElement('a');
+        a.className = 'update-badge';
+        a.href = u.url || 'https://github.com/apollo-orbit-dev/argus-agent/releases';
+        a.target = '_blank'; a.rel = 'noopener';
+        a.title = 'A newer release (' + u.latest + ') is available — click for the release notes';
+        a.textContent = '↑ ' + u.latest;
+        $('railFooter').appendChild(a);
+      }
+    })
+    .catch(function(){ if (!$('railFooter').textContent) $('railFooter').textContent = 'Argus'; });
 })();

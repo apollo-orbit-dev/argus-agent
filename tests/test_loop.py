@@ -53,6 +53,25 @@ def native_tool_call(expr, cid="c1"):
         {"id": cid, "function": {"name": "calculator", "arguments": f'{{"expression": "{expr}"}}'}}])
 
 
+async def test_ask_user_options_surface_in_final_event():
+    # a clarifying question with choices must carry its options in the `final` event so the
+    # dashboard can render one-tap buttons.
+    import json
+
+    from engine.tools.clarify import AskUserTool
+    model = FakeModel([ModelResponse(content=None, tool_calls=[
+        {"id": "c1", "function": {"name": "ask_user",
+         "arguments": json.dumps({"question": "Which chart?", "options": ["bar", "line"]})}}])])
+    reg = ToolRegistry()
+    reg.register(AskUserTool())
+    d = LoopDeps(mode=NativeMode(), registry=reg, model_client=model,
+                 store=SessionStore(), events=EventBus(), max_steps=6)
+    out = await run_loop(d, "s", "r", "make me a chart")
+    assert "Which chart?" in out                       # terminal: the question is the answer
+    fin = next(e for e in d.events.recent("s") if e.kind == "final")
+    assert fin.data.get("options") == ["bar", "line"]
+
+
 async def test_native_single_tool_then_final():
     model = FakeModel([native_tool_call("47*89"), ModelResponse(content="It is 4183")])
     d = deps_with(model, NativeMode())
