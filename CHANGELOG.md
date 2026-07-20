@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here.
 
+## 0.6.0
+
+Internal/testbed release — no user-facing behavior change.
+
+### Changed
+- **Full store isolation via `data_dir`** — every persistent store (tables, memory, knowledge,
+  workspace, artifacts, created tools/skills, watches, routines, scheduled jobs, model presets, …) now
+  resolves through the engine's `data_dir` argument instead of hardcoding the project root. Production
+  is byte-identical (the default is the project root); passing a `data_dir` isolates an entire Engine
+  in-process. Fixes latent test pollution and is the foundation for the skill-eval harness.
+
+### Added
+- **Deterministic skill-eval scorer** (`engine/eval/scoring.py`) — a pure, chain-based scorer
+  (`tools_in_order` / `min_counts` / `activates` / `skill_not` / `schema_has`) used by the internal
+  `pass^k` A/B harness that validates skills across models. (The harness runner itself is developer
+  tooling and ships outside the package.)
+
 ## 0.5.0
 
 ### Added
