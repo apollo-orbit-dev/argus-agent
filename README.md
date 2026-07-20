@@ -1,4 +1,9 @@
-# Argus
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/argus-logo-dark.png">
+    <img alt="Argus" src="docs/argus-logo-light.png" width="440">
+  </picture>
+</p>
 
 A harness that makes a small (or modest) LLM reliably run multi-step agentic tasks — tools,
 skills, memory, scheduling — with a live-trace control dashboard so you can watch, and steer,
@@ -10,7 +15,7 @@ tool contracts, deterministic execution paths where it matters, and a verifier w
 over-claiming — to be dependable. Point it at a frontier model over an API and it works great too;
 point it at a 3B model on your own GPU and the harness is what keeps it honest.
 
-![Argus dashboard screenshot placeholder](docs/screenshot.png)
+![The Argus dashboard — the live trace after a calculator tool call](docs/screenshot.png)
 
 ## Features
 
@@ -20,6 +25,9 @@ point it at a 3B model on your own GPU and the harness is what keeps it honest.
   conversions, time, calculator, and more), plus an experimental `create_tool` that lets the model
   author new tools at runtime inside a soft, AST-gated sandbox with an SSRF egress guard (see
   [SECURITY.md](SECURITY.md)).
+- **Human-in-the-loop approvals** — every tool has an Allow / Ask / Deny policy; an *Ask* action
+  pauses the turn and waits for your approval (inline in the dashboard trace or via Telegram buttons)
+  before it runs, so sensitive actions never happen unattended.
 - **Skills + deterministic execution** — markdown-defined procedural knowledge layered on top of
   tools; a skill can embed a structured `steps` block that runs deterministically through the
   routines engine instead of relying on free-form generation every time.
@@ -31,16 +39,25 @@ point it at a 3B model on your own GPU and the harness is what keeps it honest.
 - **Memory** — persistent facts about the user, with keyword or semantic (embedding-based) recall,
   auto-extraction from conversation, and configurable global (cross-interface) or per-session
   scoping.
+- **Standing behavioral rules** — durable "how to behave" directives ("always confirm before
+  deleting", "never use emoji") that persist across sessions and every interface — a distinct layer
+  from factual memory and persona, auto-captured from your corrections or managed on the dashboard.
 - **Routines and scheduling** — named, ordered multi-step sequences runnable on command or on a
   schedule, so a recurring task's plan stays pinned instead of being re-derived every time.
 - **Watches** — poll a URL or feed and get alerted when it changes, with a model-written summary
   of what's new.
 - **Knowledge base (RAG)** — add documents/notes to an embedded chunk store and search them by
   meaning, not just keyword.
+- **Documents, charts & artifacts** — read PDF/DOCX/XLSX (with optional OCR for scanned pages), draw
+  charts (PNG/SVG, or dependency-free ASCII for chat), and build self-contained HTML pages that can
+  export to PDF.
 - **Telegram + email/push** — talk to Argus from Telegram, and let it reach you (the owner) via
   SMTP email or [ntfy](https://ntfy.sh) push for scheduled results and watch alerts.
 - **Multi-model roles** — separate model connections for chat vs. embeddings, targeting
   OpenRouter, any OpenAI-compatible API, or a local vLLM/Ollama server.
+- **Built for tuning small models** — A/B-switchable tool-calling (native vs. manual), a passive
+  reliability instrument that scores per-tool success, latency, and loop health on a dashboard page,
+  and per-turn adaptive reasoning — the knobs for making a small local model run the loop well.
 
 ## Quickstart
 
@@ -67,14 +84,10 @@ argus start
 
 Open http://localhost:8700.
 
-> **Optional extras** (imported lazily — the base install runs fine without them): PDF export
-> (`pip install -e ".[pdf]"`, needs native GTK/Pango/cairo) and OCR of scanned PDFs
-> (`pip install -e ".[ocr]"`, needs the Tesseract binary). Skip unless you want those features.
-
 ### Manual install
 
 ```bash
-git clone https://github.com/apollo-orbit-dev/argus-agent
+git clone https://github.com/apollo-orbit-dev/argus-agent argus
 cd argus
 python -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
@@ -85,6 +98,17 @@ argus start
 ```
 
 Then open http://localhost:8700.
+
+### Optional extras
+
+Two features rely on **native prerequisites** and are **not** installed by default. Their Python
+dependencies are imported lazily, so the base install runs fine without them — install an extra only if
+you want that feature:
+
+| Feature | Install | Native prerequisite |
+|---------|---------|---------------------|
+| **PDF export** (agent-built reports → PDF) | `pip install -e ".[pdf]"` | GTK / Pango / cairo (WeasyPrint) |
+| **OCR** (read scanned PDFs) | `pip install -e ".[ocr]"` | the Tesseract binary |
 
 ## CLI
 
