@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here.
 
+## 0.7.1
+
+### Changed
+- **`design_table` skill acts instead of interrogating** — on a clear-enough request ("track my daily
+  coffee in a table") it now infers a sensible schema and builds the table, rather than stopping to ask
+  the user how to structure it; a focused clarifying question is reserved for genuinely ambiguous
+  requests. (Measured: the previously over-asking cases now build a well-designed table, with schema
+  quality held.)
+
+### Added
+- **`native_finish` on the dashboard tool-calling-mode toggle** — the mode is now selectable in the UI
+  (`native` / `manual` / `finish`), not just via `.env`/API.
+
 ## 0.7.0
 
 ### Added
