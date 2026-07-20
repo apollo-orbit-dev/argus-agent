@@ -1136,9 +1136,11 @@ class Engine:
         if _rules_block:
             system_prompt = system_prompt + "\n\n" + _rules_block
 
-        # Tool/skill creation are native-only (manual mode can't carry code/multiline payloads).
-        tool_creation_on = c.enable_tool_creation and c.tool_calling_mode == "native"
-        skill_creation_on = c.enable_skill_creation and c.tool_calling_mode == "native"
+        # Tool/skill creation need structured tool-call args (manual mode can't carry code/multiline
+        # payloads); native and native_finish both can — only manual is excluded.
+        _native_args = c.tool_calling_mode in ("native", "native_finish")
+        tool_creation_on = c.enable_tool_creation and _native_args
+        skill_creation_on = c.enable_skill_creation and _native_args
         scheduler_on = c.enable_scheduler
         watch_on = c.enable_watch
 
@@ -1747,7 +1749,7 @@ class Engine:
         they aren't.
         """
         c = self._config
-        native = c.tool_calling_mode == "native"
+        native = c.tool_calling_mode in ("native", "native_finish")  # both carry structured args
 
         def group(flag: bool, *entries: tuple[str, str]) -> list[dict]:
             return [{"name": n, "description": d} for n, d in entries] if flag else []

@@ -52,6 +52,21 @@ def test_real_tool_call_stays_a_tool_call():
     assert parsed.tool == "calculator" and parsed.args == {"expression": "6*7"}
 
 
+def test_final_answer_null_or_missing_is_parse_failure():
+    # a null/omitted answer must NOT become the literal string "None" — reprompt instead
+    assert isinstance(NativeFinishMode().parse_response(_tc("final_answer", {"answer": None})), ParseFailure)
+    assert isinstance(NativeFinishMode().parse_response(_tc("final_answer", {})), ParseFailure)
+
+
+def test_empty_tool_calls_falls_back_to_native():
+    # under required this shouldn't happen, but if it does, inherit native's content->FinalAnswer path
+    m = NativeFinishMode()
+    got = m.parse_response(ModelResponse(content="here is the answer", tool_calls=[]))
+    assert isinstance(got, FinalAnswer) and got.text == "here is the answer"
+    nothing = m.parse_response(ModelResponse(content="", tool_calls=[]))
+    assert isinstance(nothing, ParseFailure)
+
+
 def test_malformed_args_is_parse_failure():
     resp = ModelResponse(content="", tool_calls=[
         {"id": "c", "type": "function", "function": {"name": "calculator", "arguments": "{bad json"}}])

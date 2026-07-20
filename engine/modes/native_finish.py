@@ -10,7 +10,7 @@ docs/superpowers/specs/2026-07-20-native-finish-mode-design.md.
 from __future__ import annotations
 
 from engine.modes.native import NativeMode
-from engine.protocol import FinalAnswer, ModelResponse, ParseResult, ToolCall
+from engine.protocol import FinalAnswer, ModelResponse, ParseFailure, ParseResult, ToolCall
 from engine.tools.base import ToolRegistry
 
 FINAL_ANSWER_TOOL = {
@@ -49,5 +49,11 @@ class NativeFinishMode(NativeMode):
         parsed = super().parse_response(resp)
         # A `final_answer` tool call is the terminal turn — unwrap it to a FinalAnswer.
         if isinstance(parsed, ToolCall) and parsed.tool == "final_answer":
-            return FinalAnswer(text=str(parsed.args.get("answer", "")))
+            ans = parsed.args.get("answer")
+            # `answer` is schema-required, but non-guided backends can still emit null/omit it — don't
+            # deliver a stringified None ("None") as the answer; reprompt for a real string instead.
+            if not isinstance(ans, str):
+                return ParseFailure(reason='final_answer requires a string "answer" field',
+                                    raw=parsed.raw or "")
+            return FinalAnswer(text=ans)
         return parsed
