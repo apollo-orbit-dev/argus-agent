@@ -114,6 +114,34 @@ def create_app(engine: Engine) -> FastAPI:
         engine.new_session(sid)
         return {"ok": True, "session_id": sid}
 
+    @app.get("/sessions")
+    async def list_sessions():
+        return engine.list_sessions()
+
+    @app.post("/sessions")
+    async def create_session(body: dict, request: Request):
+        _require_admin(request)
+        return {"id": engine.create_session((body or {}).get("name"))}
+
+    @app.patch("/sessions/{session_id}")
+    async def rename_session(session_id: str, body: dict, request: Request):
+        _require_admin(request)
+        name = (body or {}).get("name")
+        if not name:
+            raise HTTPException(400, "name is required")
+        engine.rename_session(session_id, name)
+        return {"ok": True, "id": session_id, "name": name}
+
+    @app.delete("/sessions/{session_id}")
+    async def delete_session(session_id: str, request: Request):
+        _require_admin(request)
+        engine.delete_session(session_id)
+        return {"ok": True, "id": session_id}
+
+    @app.get("/sessions/{session_id}/messages")
+    async def session_messages(session_id: str, limit: int = 200, offset: int = 0):
+        return engine.session_messages(session_id, limit, offset)
+
     @app.get("/events")
     async def events(session_id: Optional[str] = None):
         async def gen():
