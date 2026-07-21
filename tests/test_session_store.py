@@ -72,3 +72,26 @@ def test_conversation_read_does_not_create_row(tmp_path):
     assert "never-touched" not in _session_ids(s)
     s2 = SessionStore(p)
     assert "never-touched" not in _session_ids(s2)
+
+
+def test_session_crud(tmp_path):
+    p = str(tmp_path / "sessions.db")
+    s = SessionStore(p)
+    sid = s.create_session("morning-ops")
+    assert sid.startswith("sess-")
+    s.append_message(sid, {"role": "user", "content": "hi"})
+    listed = {r["id"]: r for r in s.list_sessions()}
+    assert listed[sid]["name"] == "morning-ops" and listed[sid]["message_count"] == 1
+    s.rename_session(sid, "renamed")
+    assert {r["id"]: r["name"] for r in s.list_sessions()}[sid] == "renamed"
+    s.delete_session(sid)
+    assert sid not in {r["id"] for r in s.list_sessions()}
+    assert s.session_messages(sid)["total"] == 0           # log rows gone too
+
+
+def test_list_excludes_ephemeral(tmp_path):
+    s = SessionStore(str(tmp_path / "sessions.db"))
+    s.append_message("dashboard", {"role": "user", "content": "a"})
+    s.append_message("__routine__:x", {"role": "user", "content": "scratch"})
+    ids = {r["id"] for r in s.list_sessions()}
+    assert "dashboard" in ids and "__routine__:x" not in ids

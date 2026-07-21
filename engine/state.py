@@ -156,3 +156,41 @@ class SessionStore:
             messages = [dict(r) for r in cur.fetchall()]
         return {"session_id": session_id, "total": total,
                 "messages": messages, "limit": limit, "offset": offset}
+
+    def list_sessions(self) -> list[dict]:
+        if self._db is None:
+            return [{"id": sid, "name": sid, "origin": None, "updated": None, "message_count": 0}
+                    for sid in self._sessions if not _is_ephemeral(sid)]
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT s.id, s.name, s.origin, s.updated, "
+                "  (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS message_count "
+                "FROM sessions s WHERE s.archived = 0 ORDER BY s.updated DESC")
+            return [dict(r) for r in rows]
+
+    def create_session(self, name: str | None = None) -> str:
+        sid = "sess-" + uuid.uuid4().hex[:12]
+        with self._lock:
+            self._sessions[sid] = Session(session_id=sid)
+            if self._db is not None:
+                self._db.execute(
+                    "INSERT INTO sessions (id, name, origin, working_set, runs, created, updated) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (sid, name or f"Session {_now()[:10]}", "dashboard", "[]", "[]", _now(), _now()))
+                self._db.commit()
+        return sid
+
+    def rename_session(self, session_id: str, name: str) -> None:
+        with self._lock:
+            if self._db is not None:
+                self._db.execute("UPDATE sessions SET name=?, updated=? WHERE id=?",
+                                 (name, _now(), session_id))
+                self._db.commit()
+
+    def delete_session(self, session_id: str) -> None:
+        with self._lock:
+            self._sessions.pop(session_id, None)
+            if self._db is not None:
+                self._db.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
+                self._db.execute("DELETE FROM sessions WHERE id=?", (session_id,))
+                self._db.commit()
