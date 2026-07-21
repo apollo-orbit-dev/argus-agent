@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## 0.7.5
 
 ### Added
 - **`evolve_table` skill** — guidance so a small model *reaches for* the table-mutation tools when
