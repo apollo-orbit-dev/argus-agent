@@ -78,7 +78,7 @@ def test_session_crud(tmp_path):
     p = str(tmp_path / "sessions.db")
     s = SessionStore(p)
     sid = s.create_session("morning-ops")
-    assert sid.startswith("sess-")
+    assert sid.startswith("ses_")
     s.append_message(sid, {"role": "user", "content": "hi"})
     listed = {r["id"]: r for r in s.list_sessions()}
     assert listed[sid]["name"] == "morning-ops" and listed[sid]["message_count"] == 1
@@ -87,6 +87,14 @@ def test_session_crud(tmp_path):
     s.delete_session(sid)
     assert sid not in {r["id"] for r in s.list_sessions()}
     assert s.session_messages(sid)["total"] == 0           # log rows gone too
+
+
+def test_default_session_name_is_the_id(tmp_path):
+    # with no name given, the default display label is the ses_<id> itself (renameable later)
+    s = SessionStore(str(tmp_path / "sessions.db"))
+    sid = s.create_session()
+    assert sid.startswith("ses_")
+    assert {r["id"]: r["name"] for r in s.list_sessions()}[sid] == sid
 
 
 def test_list_excludes_ephemeral(tmp_path):

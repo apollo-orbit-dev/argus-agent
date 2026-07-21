@@ -172,14 +172,16 @@ class SessionStore:
             return [dict(r) for r in rows]
 
     def create_session(self, name: str | None = None) -> str:
-        sid = "sess-" + uuid.uuid4().hex[:12]
+        # id-style label like a run id (ses_<hex>); a real title can be set later via rename_session
+        # (or the future auto-title feature). Default display name IS the id until renamed.
+        sid = "ses_" + uuid.uuid4().hex[:10]
         with self._lock:
             self._sessions[sid] = Session(session_id=sid)
             if self._db is not None:
                 self._db.execute(
                     "INSERT INTO sessions (id, name, origin, working_set, runs, created, updated) "
                     "VALUES (?,?,?,?,?,?,?)",
-                    (sid, name or f"Session {_now()[:10]}", "dashboard", "[]", "[]", _now(), _now()))
+                    (sid, name or sid, "dashboard", "[]", "[]", _now(), _now()))
                 self._db.commit()
         return sid
 
