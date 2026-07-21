@@ -130,6 +130,42 @@ class TableStore:
             self._rw.commit()
         return f"added column '{name}' ({sqltype}) to {t}"
 
+    def rename_column(self, table: str, old: str, new: str) -> str:
+        t = _ident(table); o = _ident(old); n = _ident(new)
+        if not self._table_exists(t):
+            raise TableError(f"no table '{t}'")
+        if o not in self._columns(t):
+            raise TableError(f"no column '{o}' on {t}")
+        with self._lock:
+            self._rw.execute(f"ALTER TABLE {t} RENAME COLUMN {o} TO {n}")
+            self._rw.commit()
+        return f"renamed column '{o}' → '{n}' on {t}"
+
+    def drop_column(self, table: str, column: str) -> str:
+        t = _ident(table); c = _ident(column)
+        if not self._table_exists(t):
+            raise TableError(f"no table '{t}'")
+        if c not in self._columns(t):
+            raise TableError(f"no column '{c}' on {t}")
+        with self._lock:
+            try:
+                self._rw.execute(f"ALTER TABLE {t} DROP COLUMN {c}")
+            except sqlite3.OperationalError as e:
+                raise TableError(f"cannot drop column '{c}': {e}")     # PK/indexed/unique column
+            self._rw.commit()
+        return f"dropped column '{c}' from {t}"
+
+    def rename_table(self, old: str, new: str) -> str:
+        o = _ident(old); n = _ident(new)
+        if not self._table_exists(o):
+            raise TableError(f"no table '{o}'")
+        if self._table_exists(n):
+            raise TableError(f"a table named '{n}' already exists")
+        with self._lock:
+            self._rw.execute(f"ALTER TABLE {o} RENAME TO {n}")
+            self._rw.commit()
+        return f"renamed table {o} → {n}"
+
     def insert(self, name: str, values: dict) -> None:
         t = _ident(name)
         if not values:
@@ -284,6 +320,65 @@ class AddColumnTool(Tool):
             return self.store.add_column(args.table, args.column)
         except (TableError, sqlite3.Error) as e:
             return f"add_column error: {e}"
+
+
+class RenameColumnTool(Tool):
+    name = "rename_column"
+    description = ("Rename a column on an existing table (data preserved). Args: table, old, new. "
+                  "Example: rename_column('sleep_log', 'score', 'restful_score').")
+
+    class Params(BaseModel):
+        table: str = Field(..., description="the table")
+        old: str = Field(..., description="current column name")
+        new: str = Field(..., description="new column name")
+
+    def __init__(self, store: TableStore):
+        self.store = store
+
+    async def run(self, args: "RenameColumnTool.Params") -> str:
+        try:
+            return self.store.rename_column(args.table, args.old, args.new)
+        except (TableError, sqlite3.Error) as e:
+            return f"rename_column error: {e}"
+
+
+class DropColumnTool(Tool):
+    name = "drop_column"
+    description = ("Delete a column and its data from a table. Args: table, column. This is "
+                  "irreversible. A primary-key or indexed column cannot be dropped. "
+                  "Example: drop_column('sleep_log', 'old_notes').")
+
+    class Params(BaseModel):
+        table: str = Field(..., description="the table")
+        column: str = Field(..., description="column to delete")
+
+    def __init__(self, store: TableStore):
+        self.store = store
+
+    async def run(self, args: "DropColumnTool.Params") -> str:
+        try:
+            return self.store.drop_column(args.table, args.column)
+        except (TableError, sqlite3.Error) as e:
+            return f"drop_column error: {e}"
+
+
+class RenameTableTool(Tool):
+    name = "rename_table"
+    description = ("Rename a whole table (its rows are kept). Args: old, new. The new name must "
+                  "not already be in use. Example: rename_table('sleep_log', 'sleep_archive').")
+
+    class Params(BaseModel):
+        old: str = Field(..., description="current table name")
+        new: str = Field(..., description="new table name")
+
+    def __init__(self, store: TableStore):
+        self.store = store
+
+    async def run(self, args: "RenameTableTool.Params") -> str:
+        try:
+            return self.store.rename_table(args.old, args.new)
+        except (TableError, sqlite3.Error) as e:
+            return f"rename_table error: {e}"
 
 
 class InsertRowTool(Tool):

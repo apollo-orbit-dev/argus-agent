@@ -3,8 +3,9 @@ import asyncio
 
 import pytest
 
-from engine.tools.tables import (AddColumnTool, CreateTableTool, DropTableTool, InsertRowTool,
-                                  ListTablesTool, QueryTableTool, TableError, TableStore)
+from engine.tools.tables import (AddColumnTool, CreateTableTool, DropColumnTool, DropTableTool,
+                                  InsertRowTool, ListTablesTool, QueryTableTool, RenameColumnTool,
+                                  RenameTableTool, TableError, TableStore)
 
 
 def _store(tmp_path):
@@ -228,3 +229,67 @@ def test_add_column_tool(tmp_path):
     tool = AddColumnTool(s)
     out = asyncio.run(tool.run(tool.Params(table="t", column="note:text")))
     assert "note" in out and "error" not in out.lower()
+
+
+# ---- rename_column / drop_column / rename_table ----
+
+def test_rename_column_preserves_data(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["a:integer"])
+    s.insert("t", {"a": 7})
+    s.rename_column("t", "a", "b")
+    assert s._columns("t") == ["b"]
+    assert s.query("SELECT b FROM t")[0]["b"] == 7
+
+
+def test_rename_column_missing_column(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["a:integer"])
+    with pytest.raises(TableError):
+        s.rename_column("t", "nope", "b")
+
+
+def test_drop_column_removes_it(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["a:integer", "b:text"])
+    s.drop_column("t", "b")
+    assert s._columns("t") == ["a"]
+
+
+def test_drop_column_pk_surfaces_error(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["a:integer:key", "b:text"])
+    with pytest.raises(TableError):
+        s.drop_column("t", "a")            # dropping a PK column -> sqlite error -> TableError
+    assert "a" in s._columns("t")          # still there
+
+
+def test_rename_table(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("old", ["x:integer"])
+    s.rename_table("old", "new")
+    names = {t["name"] for t in s.tables()}
+    assert names == {"new"}
+
+
+def test_rename_table_collision(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("a", ["x:integer"]); s.create_table("b", ["y:integer"])
+    with pytest.raises(TableError):
+        s.rename_table("a", "b")           # target already exists
+
+
+def test_alter_injection_rejected(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["x:integer"])
+    with pytest.raises(TableError):
+        s.rename_table("t", "n; DROP TABLE t")   # invalid identifier rejected before any SQL
+    assert {tt["name"] for tt in s.tables()} == {"t"}
+
+
+def test_alter_tools(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["a:integer", "b:text"])
+    assert "renamed" in asyncio.run(RenameColumnTool(s).run(RenameColumnTool(s).Params(table="t", old="a", new="c")))
+    assert "dropped" in asyncio.run(DropColumnTool(s).run(DropColumnTool(s).Params(table="t", column="b")))
+    assert "renamed" in asyncio.run(RenameTableTool(s).run(RenameTableTool(s).Params(old="t", new="t2")))
