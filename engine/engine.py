@@ -466,6 +466,21 @@ class Engine:
                 retention_days=config.reliability_raw_retention_days)
             self.events.add_sink(ReliabilityCollector(self._reliability).record)
 
+        # Event-trace persistence (#42): durable SQLite record of the run trace so a restart doesn't
+        # wipe the in-memory replay buffer. Also consumes the event stream via a sink.
+        self._trace = None
+        if config.enable_trace_persistence:
+            from engine.trace.store import TraceStore
+            self._trace = TraceStore(str(self._data_dir / "events.db"),
+                                     event_max_bytes=config.trace_event_max_bytes,
+                                     replay_runs=config.trace_replay_runs,
+                                     retention_mode=config.trace_retention_mode,
+                                     retention_days=config.trace_retention_days,
+                                     keep_runs_per_session=config.trace_keep_runs_per_session)
+            self.events.add_sink(self._trace.record)
+            self._trace.prune(config.trace_retention_mode, config.trace_retention_days,
+                              config.trace_keep_runs_per_session)   # prune once at startup
+
     def _owner_session_id(self) -> str:
         """The owner's primary Telegram chat id — the delivery identity for scheduled routines that
         have no originating chat. '' when Telegram isn't configured (email/push still work)."""
@@ -937,7 +952,18 @@ class Engine:
         return self.events.subscribe(session_id)
 
     def recent(self, session_id: str) -> list[StepEvent]:
-        return self.events.recent(session_id)
+        live = self.events.recent(session_id)
+        if self._trace is None:
+            return live
+        seen = {(e.run_id, e.step, e.kind, e.ts) for e in live}      # in-memory wins on collision
+        merged = list(live)
+        for d in self._trace.recent(session_id):
+            key = (d["run_id"], d["step"], d["kind"], d["ts"])
+            if key not in seen:
+                merged.append(StepEvent(run_id=d["run_id"], session_id=d["session_id"],
+                                        step=d["step"], kind=d["kind"], data=d["data"], ts=d["ts"]))
+        merged.sort(key=lambda e: e.ts)
+        return merged
 
     async def emit(self, run_id: str, session_id: str, step: int, kind: str, data: dict) -> None:
         await self.events.publish(StepEvent(run_id, session_id, step, kind, data, now()))
@@ -2203,4 +2229,5 @@ class Engine:
             c.embedding_base_url, c.embedding_model)
         checks["tool_calling_mode"] = c.tool_calling_mode
         checks["skill_selection_mode"] = c.skill_selection_mode
+        checks["trace_persistence"] = self._trace is not None
         return checks
