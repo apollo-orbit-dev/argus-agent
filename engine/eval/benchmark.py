@@ -94,6 +94,8 @@ def resolve_config(model_spec: str, mode: str | None):
 
 def _dep_available(requires: str, cfg) -> bool:
     if requires == "pdf":
+        if not getattr(cfg, "enable_pdf", True):
+            return False
         try:
             import weasyprint  # noqa: F401
             return True
@@ -144,7 +146,10 @@ async def _run_task(cfg, judge_fn, task: dict, k: int, timeout: float) -> dict:
                   f"{r.get('chain_correct', '-')!s:<5} judge={js if js is not None else '-'} {cap['tools']}"
                   + (f" ERR {cap['error']}" if cap["error"] else ""), flush=True)
         except Exception as e:              # noqa: BLE001 - a bad build must not abort the run
-            runs.append({"error": f"{type(e).__name__}: {e}", "tools": []})
+            cell = {"error": f"{type(e).__name__}: {e}", "tools": []}
+            if "expect" in task:            # a crashed cell is a real chain failure, not a silent drop
+                cell["chain_correct"] = False
+            runs.append(cell)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
     v = task_verdict(runs, k)
@@ -171,7 +176,7 @@ async def run_model(model_spec: str, params: int, mode: str | None, k: int, judg
 
 def _write_result(result: dict) -> Path:
     RESULTS.mkdir(parents=True, exist_ok=True)
-    stamp = result["date"].replace(":", "").replace("-", "")[:13]
+    stamp = result["date"].replace(":", "").replace("-", "")[:15]   # to the second (avoid overwrites)
     out = RESULTS / f"{result['model']}-{result['battery_version']}-{stamp}.json"
     out.write_text(json.dumps(result, indent=2, default=str))
     # update the index
@@ -200,15 +205,19 @@ def render_report(battery_version: str) -> tuple[str, bool]:
              "Judge = Opus quality mean (0–3). A tier's line falling off below some size is the shelf.", "",
              "| model | params (B) | mode | " + " | ".join(f"T{t} chain / judge" for t in tiers) + " | overall |",
              "|-------|-----------|------|" + "|".join(["---"] * (len(tiers) + 1)) + "|"]
+    def _pct(x):
+        return "—" if x is None else f"{x:.0%}"
+
+    def _q(x):
+        return "—" if x is None else f"{x:.1f}"
+
     for r in results:
         cells = []
         for t in tiers:
             pt = r.get("per_tier", {}).get(t, {})
-            cp, jm = pt.get("chain_pass"), pt.get("judge_mean")
-            cells.append(f"{'—' if cp is None else f'{cp:.0%}'} / {'—' if jm is None else f'{jm:.1f}'}")
+            cells.append(f"{_pct(pt.get('chain_pass'))} / {_q(pt.get('judge_mean'))}")
         ov = r.get("overall", {})
-        cells.append(f"{'—' if ov.get('chain_pass') is None else f'{ov['chain_pass']:.0%}'} / "
-                     f"{'—' if ov.get('judge_mean') is None else f'{ov['judge_mean']:.1f}'}")
+        cells.append(f"{_pct(ov.get('chain_pass'))} / {_q(ov.get('judge_mean'))}")
         lines.append(f"| {r['model']} | {r['params']} | {r.get('mode', '?')} | " + " | ".join(cells) + " |")
     return "\n".join(lines) + "\n", True
 

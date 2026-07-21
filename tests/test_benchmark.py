@@ -50,6 +50,20 @@ def test_build_series_groups_by_params_sorted():
     assert s["3"] == [(3, 0.1, 0.5), (35, 0.8, 2.5)]
 
 
+async def test_run_task_crashed_build_counts_as_chain_failure(monkeypatch):
+    # a crashed run cell of a task WITH an `expect` must count as a chain failure, not silently drop
+    from engine.eval import benchmark as B
+
+    class _Boom:
+        def __init__(self, *a, **k):
+            raise RuntimeError("engine build failed")
+
+    monkeypatch.setattr("engine.engine.Engine", _Boom)
+    task = {"id": "x", "tier": 1, "expect": {"tools_in_order": ["calculator"]}, "rubric": ["r"]}
+    r = await B._run_task(cfg=None, judge_fn=None, task=task, k=2, timeout=1)
+    assert r["skipped"] is False and r["chain_pass"] is False   # not None (silent drop)
+
+
 def test_resolve_config_overrides():
     c = resolve_config("fast=http://host:8001/v1|qwen", "manual")
     assert c.model_base_url == "http://host:8001/v1" and c.model_name == "qwen"
