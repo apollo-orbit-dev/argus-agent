@@ -434,3 +434,23 @@ def test_update_rows_tool(tmp_path):
     tool = UpdateRowsTool(s)
     out = asyncio.run(tool.run(tool.Params(table="t", set={"status": "done"}, match={"id": 1})))
     assert "1" in out and "error" not in out.lower()
+
+
+def test_new_table_tools_registered(tmp_path):
+    from config import Config
+    from engine.engine import Engine
+    eng = Engine(Config(model_base_url="http://x/v1", model_name="m", telegram_bot_token=""),
+                 data_dir=str(tmp_path))
+    names = set(eng.registry.names())
+    for n in ("add_column", "rename_column", "drop_column", "rename_table",
+              "copy_table", "update_rows"):
+        assert n in names
+
+
+def test_new_table_tool_approval_defaults():
+    from engine.approvals.types import default_for
+    # default_for returns lowercase "allow"/"ask"
+    assert default_for("add_column") == "allow"
+    assert default_for("copy_table") == "allow"
+    for n in ("drop_column", "rename_column", "rename_table", "update_rows"):
+        assert default_for(n) == "ask"
