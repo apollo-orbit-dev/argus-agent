@@ -18,6 +18,7 @@ SemanticRecall = Literal["auto", "on", "off"]
 # person across every interface (dashboard, Telegram). "session": legacy per-session
 # isolation — each conversation (each Telegram chat, the dashboard) has its own memory.
 MemoryScope = Literal["global", "session"]
+TraceRetentionMode = Literal["age", "runs", "age+runs", "off"]
 
 
 class Config(BaseSettings):
@@ -141,7 +142,7 @@ class Config(BaseSettings):
     reliability_raw_retention_days: int = 30
     # Event trace persistence: save event stream to durable storage for replay/audit.
     enable_trace_persistence: bool = True
-    trace_retention_mode: str = "age+runs"      # age | runs | age+runs | off
+    trace_retention_mode: TraceRetentionMode = "age+runs"
     trace_retention_days: int = 30
     trace_keep_runs_per_session: int = 200
     trace_event_max_bytes: int = 16384

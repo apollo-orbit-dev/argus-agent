@@ -66,8 +66,7 @@ def test_approval_flags():
 
 
 def test_trace_persistence_config_defaults_and_env_roundtrip():
-    from config import Config
-    c = Config()
+    c = _mk()
     assert c.enable_trace_persistence is True
     assert c.trace_retention_mode == "age+runs"
     assert c.trace_retention_days == 30 and c.trace_keep_runs_per_session == 200
@@ -78,3 +77,9 @@ def test_trace_persistence_config_defaults_and_env_roundtrip():
         assert f in c._ENV_FIELDS
     pairs = dict(c.env_pairs())
     assert "TRACE_RETENTION_MODE" in pairs or "trace_retention_mode" in {k.lower() for k in pairs}
+
+
+def test_trace_retention_mode_rejects_invalid():
+    c = _mk()
+    with pytest.raises(Exception):
+        c.patch({"trace_retention_mode": "bogus"})
