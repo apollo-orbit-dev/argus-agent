@@ -58,3 +58,17 @@ def test_in_memory_mode_still_works(tmp_path):
     s.append_message("x", {"role": "user", "content": "a"})
     assert s.conversation("x") == [{"role": "user", "content": "a"}]
     assert s.session_messages("x")["total"] == 0           # no db, no log
+
+
+def _session_ids(store):
+    return {r["id"] for r in store._db.execute("SELECT id FROM sessions").fetchall()}
+
+
+def test_conversation_read_does_not_create_row(tmp_path):
+    p = str(tmp_path / "sessions.db")
+    s = SessionStore(p)
+    assert s.conversation("never-touched") == []
+    # a pure read must not have persisted a phantom session
+    assert "never-touched" not in _session_ids(s)
+    s2 = SessionStore(p)
+    assert "never-touched" not in _session_ids(s2)

@@ -124,7 +124,13 @@ class SessionStore:
             self._persist(s)
 
     def conversation(self, session_id: str) -> list[dict]:
-        return list(self.get_or_create(session_id).conversation)
+        # Pure read: load-if-exists (and cache), but never create/persist a row.
+        s = self._sessions.get(session_id)
+        if s is None:
+            s = self._load(session_id)           # from DB if it exists, else None
+            if s is not None:
+                self._sessions[session_id] = s   # cache; do NOT create/persist a row
+        return list(s.conversation) if s else []
 
     def record_run(self, session_id: str, run_id: str) -> None:
         s = self.get_or_create(session_id)
@@ -142,9 +148,11 @@ class SessionStore:
         if self._db is None:
             return {"session_id": session_id, "total": 0, "messages": [], "limit": limit, "offset": offset}
         limit = max(1, min(int(limit), 1000)); offset = max(0, int(offset))
-        total = self._db.execute("SELECT COUNT(*) c FROM messages WHERE session_id=?",
-                                 (session_id,)).fetchone()["c"]
-        cur = self._db.execute("SELECT seq, role, content, ts FROM messages WHERE session_id=? "
-                               "ORDER BY seq LIMIT ? OFFSET ?", (session_id, limit, offset))
+        with self._lock:
+            total = self._db.execute("SELECT COUNT(*) c FROM messages WHERE session_id=?",
+                                     (session_id,)).fetchone()["c"]
+            cur = self._db.execute("SELECT seq, role, content, ts FROM messages WHERE session_id=? "
+                                   "ORDER BY seq LIMIT ? OFFSET ?", (session_id, limit, offset))
+            messages = [dict(r) for r in cur.fetchall()]
         return {"session_id": session_id, "total": total,
-                "messages": [dict(r) for r in cur.fetchall()], "limit": limit, "offset": offset}
+                "messages": messages, "limit": limit, "offset": offset}
