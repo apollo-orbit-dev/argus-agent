@@ -629,6 +629,20 @@
      server-side; they go through plain fetch() because window.fetch is monkey-patched above
      to inject X-Admin-Token on every request (and prompt-and-retry on 401) — that IS this
      dashboard's admin-fetch helper, the same one Rules/Reliability/Routines POSTs rely on. ---- */
+  // Render Argus's (assistant) message markdown safely: marked parses, DOMPurify sanitizes the HTML.
+  // Falls back to escaped literal text if the vendored libs didn't load.
+  var _mdInit = false;
+  function renderAssistantMd(text){
+    var raw = (text == null) ? '' : String(text);
+    if (window.marked && window.DOMPurify){
+      try {
+        if (!_mdInit){ marked.setOptions({ gfm: true, breaks: true }); _mdInit = true; }
+        return DOMPurify.sanitize(marked.parse(raw));
+      } catch(e){ /* fall through to literal */ }
+    }
+    return esc(raw);
+  }
+
   async function loadTranscript(id){
     try {
       var data = await (await fetch('/sessions/' + encodeURIComponent(id) + '/messages?limit=1000')).json();
@@ -652,13 +666,15 @@
       // Chat/messaging view: user right, assistant left, tool output as a muted note.
       viewerBody.innerHTML = '<div class="chat">' + msgs.map(function(m){
         var role = m.role || '?';
-        var content = esc(m.content == null ? '' : String(m.content));
+        var raw = m.content == null ? '' : String(m.content);
         if (role === 'tool'){
           return '<div class="chat-tool"><span class="chat-tool-label">tool</span>' +
-                   '<div class="chat-tool-body">' + content + '</div></div>';
+                   '<div class="chat-tool-body">' + esc(raw) + '</div></div>';
         }
         var side = (role === 'user') ? 'me' : 'them';
-        return '<div class="chat-row ' + side + '"><div class="chat-bubble ' + side + '">' + content + '</div></div>';
+        // user text stays literal; Argus's replies render markdown (bold, lists, tables, code).
+        var body = (role === 'user') ? esc(raw) : ('<div class="md">' + renderAssistantMd(raw) + '</div>');
+        return '<div class="chat-row ' + side + '"><div class="chat-bubble ' + side + '">' + body + '</div></div>';
       }).join('') + '</div>';
       viewerBody.scrollTop = viewerBody.scrollHeight;
     } catch(e){ toast('Failed to load transcript: ' + e.message, 'err'); }
