@@ -2,7 +2,7 @@
 (function(){
   var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var $ = function(id){ return document.getElementById(id); };
-  var SESSION = "dashboard";
+  var SESSION = (function(){ try { return localStorage.getItem('argus.session') || "dashboard"; } catch(e){ return "dashboard"; } })();
 
   // ---- escaping / formatting helpers ----
   function esc(s){
@@ -596,16 +596,141 @@
   setInterval(renderRunsList, 5000); // keep relative/elapsed time labels fresh
 
   var es = null;
-  function connectSSE(){
-    if (es) { try { es.close(); } catch(e){} }
-    es = new EventSource("/events?session_id=" + encodeURIComponent(SESSION));
-    es.onmessage = function(m){
+  function wireEventHandlers(source){
+    source.onmessage = function(m){
       var ev; try { ev = JSON.parse(m.data); } catch(e){ return; }
       processEvent(ev);
     };
-    es.onerror = function(){ /* EventSource auto-reconnects; `seen` dedupes the ring-buffer replay */ };
+    source.onerror = function(){ /* EventSource auto-reconnects; `seen` dedupes the ring-buffer replay */ };
+  }
+  function reopenEvents(){
+    if (es) { try { es.close(); } catch(e){} }
+    es = new EventSource("/events?session_id=" + encodeURIComponent(SESSION));
+    wireEventHandlers(es);
   }
   renderRunsList();
+
+  /* ---- session switching: create/rename/delete/list durable sessions (Task 4's /sessions
+     endpoints), and re-scope the console (runs list + live trace + persisted transcript) to
+     whichever one is active. Mutating calls (/sessions POST|PATCH|DELETE) are admin-gated
+     server-side; they go through plain fetch() because window.fetch is monkey-patched above
+     to inject X-Admin-Token on every request (and prompt-and-retry on 401) — that IS this
+     dashboard's admin-fetch helper, the same one Rules/Reliability/Routines POSTs rely on. ---- */
+  async function loadTranscript(id){
+    try {
+      var data = await (await fetch('/sessions/' + encodeURIComponent(id) + '/messages?limit=1000')).json();
+      var msgs = data.messages || [];
+      if (!msgs.length){
+        viewerHead.innerHTML = '';
+        viewerBody.innerHTML = EMPTY_RUNS_HTML;
+        return;
+      }
+      viewerHead.innerHTML =
+        '<span class="vh-id num">transcript</span><span class="vh-sep">·</span>' +
+        '<span class="vh-session">' + esc(id) + '</span><span class="vh-sep">·</span>' +
+        '<span class="vh-steps num">' + msgs.length + ' messages</span>';
+      // Reuse the trace viewer's own node/callout building blocks (step-node/step-gutter/step-dot/
+      // step-body/tag-pill/callout) rather than inventing a second rendering style — a live run
+      // that starts on this session will naturally take over the same viewerBody afterwards.
+      viewerBody.innerHTML = msgs.map(function(m){
+        var isUser = m.role === 'user';
+        var c = isUser ? 'var(--cyan)' : 'var(--ok)';
+        return '<div class="step-node">' +
+            '<div class="step-gutter"><span class="step-dot" style="border-color:' + c + ';"></span><span class="step-connector"></span></div>' +
+            '<div class="step-body">' +
+              '<div class="step-head"><span class="tag-pill" style="color:' + c + '; background:color-mix(in srgb, ' + c + ' 15%, transparent); border-color:color-mix(in srgb, ' + c + ' 32%, transparent);">' + esc(m.role || '?') + '</span></div>' +
+              '<div class="callout' + (isUser ? '' : ' callout-answer') + '">' + esc(m.content || '') + '</div>' +
+            '</div>' +
+          '</div>';
+      }).join('');
+      viewerBody.scrollTop = viewerBody.scrollHeight;
+    } catch(e){ toast('Failed to load transcript: ' + e.message, 'err'); }
+  }
+
+  async function renderSessionList(){
+    var list;
+    try { list = await (await fetch('/sessions')).json(); } catch(e){ return; }
+    var ul = $('sessionList');
+    if (!ul) return;
+    if (!Array.isArray(list) || !list.length){
+      ul.innerHTML = '<li class="empty">No sessions yet</li>';
+      return;
+    }
+    ul.innerHTML = list.map(function(s){
+      var active = s.id === SESSION;
+      var name = s.name || s.id;
+      return '<li class="session-row' + (active ? ' active' : '') + '" data-id="' + esc(s.id) + '">' +
+          '<span class="session-row-name" title="' + esc(name) + '">' + esc(name) + '</span>' +
+          '<span class="session-row-count num">' + nfmt(s.message_count || 0) + '</span>' +
+          '<span class="session-row-actions">' +
+            '<button class="act-btn" data-session-rename title="Rename">✎</button>' +
+            '<button class="act-btn danger" data-session-delete title="Delete">✕</button>' +
+          '</span>' +
+        '</li>';
+    }).join('');
+  }
+
+  function setSession(id){
+    SESSION = id;
+    try { localStorage.setItem('argus.session', id); } catch(e){}
+    // runs/seen/live-tracking are all per-session — drop the old session's before re-subscribing
+    // (also resets followingLive so a live run on the new session is auto-tracked even if the
+    // user had scrolled back into a past run on the previous session).
+    runs.clear(); seen.clear(); liveRunId = null; selectedRunId = null; followingLive = true;
+    reopenEvents();          // re-subscribe /events at the new session — replays its recent ring buffer
+    loadTranscript(id);      // load persisted messages into the console as a fallback view
+    renderRunsList();
+    renderSessionList();
+  }
+
+  async function renameSession(id){
+    var name = prompt('Rename session:');
+    if (!name) return;
+    try {
+      await fetch('/sessions/' + encodeURIComponent(id), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name })
+      });
+      renderSessionList();
+      toast('Renamed session', 'ok');
+    } catch(e){ toast('Rename failed: ' + e.message, 'err'); }
+  }
+
+  function deleteSessionPrompt(id){
+    confirmDelete({
+      title: 'Delete session',
+      message: "Delete this session? This can't be undone.",
+      onConfirm: async function(){
+        try { await fetch('/sessions/' + encodeURIComponent(id), { method: 'DELETE' }); }
+        catch(e){ toast('Delete failed: ' + e.message, 'err'); return; }
+        toast('Session deleted', 'ok');
+        if (id === SESSION) setSession('dashboard');   // fall back to the default session
+        else renderSessionList();
+      }
+    });
+  }
+
+  var sessionListEl = $('sessionList');
+  if (sessionListEl) sessionListEl.addEventListener('click', function(e){
+    var row = e.target.closest('.session-row');
+    if (!row) return;
+    var id = row.getAttribute('data-id');
+    if (e.target.closest('[data-session-rename]')) { renameSession(id); return; }
+    if (e.target.closest('[data-session-delete]')) { deleteSessionPrompt(id); return; }
+    if (id && id !== SESSION) setSession(id);
+  });
+
+  var sessionNewBtn = $('sessionNewBtn');
+  if (sessionNewBtn) sessionNewBtn.addEventListener('click', async function(){
+    sessionNewBtn.disabled = true;
+    try {
+      var r = await (await fetch('/sessions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({})
+      })).json();
+      setSession(r.id);
+      toast('New session created', 'ok');
+    } catch(e){ toast('Failed to create session: ' + e.message, 'err'); }
+    finally { sessionNewBtn.disabled = false; }
+  });
   /* ================= CONSOLE: run / slash-commands / usage / config / skills / status ================= */
   var runnerInput = $('runnerInput');
   var runBtn = $('runBtn');
@@ -2352,7 +2477,7 @@
       tries += 1;
       try {
         var r = await fetch('/status', { cache: 'no-store' });
-        if (r.ok){ connectSSE(); loadConfig(); loadSystemPrompt(); loadEnv(); pollStatus(); toast('Server back online', 'ok'); return; }
+        if (r.ok){ reopenEvents(); loadConfig(); loadSystemPrompt(); loadEnv(); pollStatus(); toast('Server back online', 'ok'); return; }
       } catch(e){ /* still down */ }
       if (tries < 20) setTimeout(tick, 800);
       else toast('Server did not come back — try reloading', 'err');
@@ -2552,7 +2677,9 @@
   var startPage = (function(){ try { return localStorage.getItem('argus_page') || 'console'; } catch(e){ return 'console'; } })();
   switchPage(startPage);
 
-  connectSSE();
+  reopenEvents();
+  loadTranscript(SESSION);   // restore the persisted transcript for whichever session was active on last visit
+  renderSessionList();
   loadConfig();
   loadSkills();
   loadUsage();

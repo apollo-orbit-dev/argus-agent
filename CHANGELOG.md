@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+- **Durable sessions** — conversations now persist to a SQLite-backed `SessionStore` (raw message
+  log + working set) instead of living only in process memory, so a restart no longer discards
+  history. New `/sessions` endpoints back it: `GET /sessions` (list, with per-session message
+  counts), `POST /sessions` / `PATCH /sessions/{id}` / `DELETE /sessions/{id}` (admin-gated
+  create/rename/delete), and `GET /sessions/{id}/messages` (paginated transcript read). Ephemeral
+  (`__`-prefixed) sessions are excluded from the store and never appear in the list.
+- **Dashboard Sessions sidebar** — the Console page now has a sessions rail (left of Runs) to
+  create, switch, rename, and delete durable sessions. Switching a session re-subscribes the live
+  trace (`/events?session_id=`) and reloads that session's persisted transcript into the trace
+  viewer, so the runs list, live trace, and history all scope to whichever session is selected;
+  the active session persists across reloads via `localStorage`. The implicit `"dashboard"`
+  session remains the default, and it's the fallback if the active session is deleted.
+
 ## 0.7.5
 
 ### Added

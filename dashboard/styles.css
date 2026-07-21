@@ -376,6 +376,27 @@
   /* master / detail */
   .console-master{ display:flex; gap:14px; flex:1; min-height:0; }
 
+  /* sessions sidebar — sits left of Runs, same panel look */
+  .session-sidebar{
+    width:172px; flex-shrink:0; min-height:0; display:flex; flex-direction:column;
+    background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden;
+  }
+  .session-sidebar-head{ display:flex; align-items:center; justify-content:space-between; gap:6px; }
+  .session-sidebar-head .btn{ padding:3px 8px; font-size:10.5px; }
+  .session-list{ flex:1; min-height:0; overflow-y:auto; list-style:none; margin:0; padding:0; }
+  .session-list .empty{ padding:12px; font-size:11.5px; color:var(--muted); }
+  .session-row{
+    display:flex; align-items:center; gap:6px; padding:7px 9px; border-bottom:1px solid var(--border);
+    cursor:pointer; border-left:2px solid transparent;
+  }
+  .session-row:hover{ background:rgba(255,255,255,.03); }
+  .session-row.active{ background:rgba(56,214,224,.09); border-left-color:var(--cyan); }
+  .session-row-name{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11.5px; color:var(--ink); }
+  .session-row.active .session-row-name{ color:var(--cyan); font-weight:600; }
+  .session-row-count{ font-family:var(--font-mono); font-size:10px; color:var(--faint); flex-shrink:0; }
+  .session-row-actions{ display:flex; gap:1px; flex-shrink:0; }
+  .session-row-actions .act-btn{ padding:2px 4px; font-size:11px; }
+
   .runs-panel{
     width:224px; flex-shrink:0; min-height:0; display:flex; flex-direction:column;
     background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden;
