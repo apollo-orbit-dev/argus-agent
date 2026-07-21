@@ -57,3 +57,14 @@ def test_prune_off_is_noop(tmp_path):
     s.record(_ev("sess", "r", 0, "final", ts=time.time() - 999 * 86400))
     s.prune("off", days=1, keep_runs=1)
     assert len(s.recent("sess")) == 1
+
+
+def test_prune_runs_is_per_session_even_if_run_ids_collide(tmp_path):
+    s = TraceStore(str(tmp_path / "events.db"), replay_runs=100)
+    # same run_id "dup" used by two different sessions
+    s.record(_ev("s1", "dup", 0, "final", ts=1000))
+    s.record(_ev("s1", "newer", 0, "final", ts=2000))
+    s.record(_ev("s2", "dup", 0, "final", ts=1500))
+    s.prune("runs", days=30, keep_runs=1)          # s1 keeps "newer" only
+    assert [e["run_id"] for e in s.recent("s1")] == ["newer"]
+    assert [e["run_id"] for e in s.recent("s2")] == ["dup"]   # s2 untouched

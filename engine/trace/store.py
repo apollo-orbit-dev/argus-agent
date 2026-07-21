@@ -106,11 +106,14 @@ class TraceStore:
             if mode in ("age", "age+runs"):
                 self._rw.execute("DELETE FROM events WHERE ts < ?", (time.time() - days * 86400,))
             if mode in ("runs", "age+runs"):
-                # run_id is globally unique; delete events of runs beyond the newest keep_runs per session
+                # run_id is only 40 bits (engine.py mints uuid4().hex[:10]) from one pool shared by all
+                # sessions, so collisions across sessions are plausible over a long-lived deployment —
+                # match on the (session_id, run_id) pair so the delete stays scoped per-session.
                 self._rw.execute(
-                    "DELETE FROM events WHERE run_id IN ("
-                    "  SELECT run_id FROM ("
-                    "    SELECT run_id, ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY m DESC) rn"
+                    "DELETE FROM events WHERE (session_id, run_id) IN ("
+                    "  SELECT session_id, run_id FROM ("
+                    "    SELECT session_id, run_id,"
+                    "           ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY m DESC) rn"
                     "    FROM (SELECT session_id, run_id, MAX(ts) m FROM events GROUP BY session_id, run_id)"
                     "  ) WHERE rn > ?)", (keep_runs,))
             self._rw.commit()
