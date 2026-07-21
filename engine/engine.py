@@ -466,6 +466,26 @@ class Engine:
                 retention_days=config.reliability_raw_retention_days)
             self.events.add_sink(ReliabilityCollector(self._reliability).record)
 
+        # Event-trace persistence (#42): durable SQLite record of the run trace so a restart doesn't
+        # wipe the in-memory replay buffer. Also consumes the event stream via a sink.
+        self._trace = None
+        if config.enable_trace_persistence:
+            from engine.trace.store import TraceStore
+            self._trace = TraceStore(str(self._data_dir / "events.db"),
+                                     event_max_bytes=config.trace_event_max_bytes,
+                                     replay_runs=config.trace_replay_runs,
+                                     retention_mode=config.trace_retention_mode,
+                                     retention_days=config.trace_retention_days,
+                                     keep_runs_per_session=config.trace_keep_runs_per_session)
+            self.events.add_sink(self._trace.record)
+            try:
+                self._trace.prune(config.trace_retention_mode, config.trace_retention_days,
+                                  config.trace_keep_runs_per_session)   # prune once at startup
+            except Exception:
+                # A bad events.db (e.g. left corrupt by an unclean shutdown) must not stop the whole
+                # process from booting — worse than dropping one turn's trace.
+                log.exception("startup trace prune failed; continuing without pruning")
+
     def _owner_session_id(self) -> str:
         """The owner's primary Telegram chat id — the delivery identity for scheduled routines that
         have no originating chat. '' when Telegram isn't configured (email/push still work)."""
@@ -937,7 +957,25 @@ class Engine:
         return self.events.subscribe(session_id)
 
     def recent(self, session_id: str) -> list[StepEvent]:
-        return self.events.recent(session_id)
+        live = self.events.recent(session_id)
+        if self._trace is None:
+            return live
+        try:
+            seen = {(e.run_id, e.step, e.kind, e.ts) for e in live}  # in-memory wins on collision
+            merged = list(live)
+            for d in self._trace.recent(session_id):
+                key = (d["run_id"], d["step"], d["kind"], d["ts"])
+                if key not in seen:
+                    merged.append(StepEvent(run_id=d["run_id"], session_id=d["session_id"],
+                                            step=d["step"], kind=d["kind"], data=d["data"], ts=d["ts"]))
+            merged.sort(key=lambda e: e.ts)
+            return merged
+        except Exception:
+            # A broken trace store (disk I/O, WAL corruption, permissions) must degrade to today's
+            # in-memory-only behavior, not swallow a turn that already succeeded (callers like
+            # telegram_bot.py and the /events SSE stream call recent() after the answer is produced).
+            log.exception("trace read failed in recent(); falling back to in-memory events only")
+            return live
 
     async def emit(self, run_id: str, session_id: str, step: int, kind: str, data: dict) -> None:
         await self.events.publish(StepEvent(run_id, session_id, step, kind, data, now()))
@@ -1492,14 +1530,29 @@ class Engine:
 
     def delete_session(self, session_id: str) -> None:
         self.store.delete_session(session_id)
+        self.events.clear(session_id)   # drop the in-memory replay buffer too (same as new_session)
+        if self._trace is not None:
+            try:
+                self._trace.delete_session(session_id)
+            except Exception:
+                log.exception("trace delete_session failed for %s; conversation was deleted, "
+                               "trace may be orphaned", session_id)
 
     def session_messages(self, session_id: str, limit: int = 200, offset: int = 0) -> dict:
         return self.store.session_messages(session_id, limit, offset)
 
     def new_session(self, session_id: str) -> None:
-        """Start fresh: clear the session's conversation AND its event replay buffer."""
+        """Start fresh: clear the session's conversation AND its event replay buffer (both the
+        in-memory EventBus buffer and the persisted trace — recent() merges from disk, so leaving
+        the persisted side alone would make the runs reappear on the next /events connect)."""
         self.store.reset(session_id)
         self.events.clear(session_id)
+        if self._trace is not None:
+            try:
+                self._trace.delete_session(session_id)
+            except Exception:
+                log.exception("trace delete_session failed for %s during new_session; conversation "
+                               "was cleared, trace may be orphaned", session_id)
 
     def _recent_context(self, session_id: str, exclude_last_user: str = "", turns: int = 8) -> str:
         """Recent conversation turns to give autoextract context — so a reference like 'my project'
@@ -2203,4 +2256,5 @@ class Engine:
             c.embedding_base_url, c.embedding_model)
         checks["tool_calling_mode"] = c.tool_calling_mode
         checks["skill_selection_mode"] = c.skill_selection_mode
+        checks["trace_persistence"] = self._trace is not None
         return checks

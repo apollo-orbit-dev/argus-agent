@@ -63,3 +63,35 @@ def test_approval_flags():
     assert "approval_window_seconds" in c._ENV_FIELDS
     pairs = dict(c.env_pairs())
     assert "ENABLE_INTERACTIVE_APPROVALS" in pairs and "APPROVAL_WINDOW_SECONDS" in pairs
+
+
+def test_trace_persistence_config_defaults_and_env_roundtrip():
+    c = _mk()
+    assert c.enable_trace_persistence is True
+    assert c.trace_retention_mode == "age+runs"
+    assert c.trace_retention_days == 30 and c.trace_keep_runs_per_session == 200
+    assert c.trace_event_max_bytes == 16384 and c.trace_replay_runs == 50
+    # the six fields are env-round-tripped (matches the existing style in this file: c._ENV_FIELDS)
+    for f in ("enable_trace_persistence", "trace_retention_mode", "trace_retention_days",
+              "trace_keep_runs_per_session", "trace_event_max_bytes", "trace_replay_runs"):
+        assert f in c._ENV_FIELDS
+    pairs = dict(c.env_pairs())
+    assert "TRACE_RETENTION_MODE" in pairs
+
+
+def test_trace_retention_mode_rejects_invalid():
+    c = _mk()
+    with pytest.raises(Exception):
+        c.patch({"trace_retention_mode": "bogus"})
+
+
+def test_trace_retention_days_rejects_zero():
+    c = _mk()
+    with pytest.raises(Exception):
+        c.patch({"trace_retention_days": 0})
+
+
+def test_trace_keep_runs_per_session_rejects_zero():
+    c = _mk()
+    with pytest.raises(Exception):
+        c.patch({"trace_keep_runs_per_session": 0})

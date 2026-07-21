@@ -1,0 +1,92 @@
+import sqlite3
+
+from config import Config
+from engine.engine import Engine
+
+
+def _engine(tmp_path, on=True):
+    return Engine(Config(model_base_url="http://x/v1", model_name="m", telegram_bot_token="",
+                         enable_trace_persistence=on), data_dir=str(tmp_path))
+
+
+def test_off_no_store_no_db(tmp_path):
+    e = _engine(tmp_path, on=False)
+    assert e._trace is None
+    import asyncio
+    asyncio.run(e.emit("run1", "sess", 0, "tool_call", {"tool": "calculator"}))
+    assert not (tmp_path / "events.db").exists()
+
+
+def test_persist_and_restart_hydration(tmp_path):
+    import asyncio
+    e = _engine(tmp_path, on=True)
+    async def go():
+        await e.emit("run1", "sess", 0, "tool_call", {"tool": "calculator"})
+        await e.emit("run1", "sess", 1, "final", {"answer": "4"})
+    asyncio.run(go())
+    assert (tmp_path / "events.db").exists()
+    # a fresh engine on the same data_dir (in-memory buffer empty) still replays the run
+    e2 = _engine(tmp_path, on=True)
+    evs = e2.recent("sess")
+    assert [ev.kind for ev in evs] == ["tool_call", "final"]
+    assert evs[0].data["tool"] == "calculator"
+
+
+def test_recent_merges_without_duplicates(tmp_path):
+    import asyncio
+    e = _engine(tmp_path, on=True)
+    asyncio.run(e.emit("run1", "sess", 0, "tool_call", {"tool": "calc"}))
+    evs = e.recent("sess")                     # in-memory + persisted, deduped
+    assert sum(1 for ev in evs if ev.kind == "tool_call") == 1
+
+
+def test_recent_falls_back_to_live_when_trace_read_fails(tmp_path):
+    import asyncio
+    e = _engine(tmp_path, on=True)
+    asyncio.run(e.emit("run1", "sess", 0, "tool_call", {"tool": "calc"}))
+
+    def boom(_session_id):
+        raise sqlite3.OperationalError("disk I/O error")
+    e._trace.recent = boom                      # simulate a broken trace store
+
+    evs = e.recent("sess")                      # must NOT raise
+    assert [ev.kind for ev in evs] == ["tool_call"]     # falls back to in-memory
+
+
+def test_startup_prune_failure_does_not_block_boot(tmp_path, monkeypatch):
+    from engine.trace.store import TraceStore
+    def boom(self, *a, **kw):
+        raise sqlite3.OperationalError("corrupt db")
+    monkeypatch.setattr(TraceStore, "prune", boom)
+    e = _engine(tmp_path, on=True)              # must construct without raising
+    assert e._trace is not None
+
+
+def test_new_session_clears_persisted_trace(tmp_path):
+    import asyncio
+    e = _engine(tmp_path, on=True)
+    asyncio.run(e.emit("run1", "sess", 0, "info", {"text": "secret prompt"}))
+    assert e.recent("sess")                      # sanity: something persisted first
+    e.new_session("sess")
+    assert e.recent("sess") == []                 # nothing replays from disk after a clear
+
+
+def test_delete_session_clears_persisted_trace(tmp_path):
+    import asyncio
+    e = _engine(tmp_path, on=True)
+    asyncio.run(e.emit("run1", "sess", 0, "info", {"text": "secret prompt"}))
+    e.delete_session("sess")
+    # bypass e's own in-memory buffer (delete_session, unlike new_session, isn't expected to be
+    # queried again in-process) — a fresh engine on the same data_dir proves the disk side is gone
+    e2 = _engine(tmp_path, on=True)
+    assert e2.recent("sess") == []
+
+
+def test_new_session_leaves_other_sessions_intact(tmp_path):
+    import asyncio
+    e = _engine(tmp_path, on=True)
+    asyncio.run(e.emit("run1", "a", 0, "info", {"text": "a's data"}))
+    asyncio.run(e.emit("run2", "b", 0, "info", {"text": "b's data"}))
+    e.new_session("a")
+    assert e.recent("a") == []
+    assert [ev.kind for ev in e.recent("b")] == ["info"]
