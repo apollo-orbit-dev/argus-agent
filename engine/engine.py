@@ -101,7 +101,8 @@ TOOL_CREATION_DIRECTIVE = (
     "weather, wikipedia, dictionary, currency_convert, crypto_price, unit_convert, get_current_time, "
     "time_in_zone, random_tool, text_tools, fetch_page, map_site, crawl_site, extract_data, "
     "datastore, create_table, insert_row, query_table, "
-    "list_tables, drop_table, read_soul, update_soul, build_web_page, inspect_artifact, make_pdf, convert_to_pdf, write_file, "
+    "list_tables, drop_table, add_column, rename_column, drop_column, rename_table, copy_table, update_rows, "
+    "read_soul, update_soul, build_web_page, inspect_artifact, make_pdf, convert_to_pdf, write_file, "
     "read_file, list_files, delete_file, download_file, read_document, add_to_knowledge, search_knowledge, "
     "list_knowledge, forget_knowledge, watch, list_watches, unwatch, make_chart, ascii_chart, notify, "
     "run_routine, list_routines), it is a CREATED tool you can delete on request. "
@@ -405,13 +406,15 @@ class Engine:
             self.registry.register(SearchKnowledgeTool(self.knowledge))
             self.registry.register(ListKnowledgeTool(self.knowledge))
             self.registry.register(ForgetKnowledgeTool(self.knowledge))
-        from engine.tools.tables import (AskDataTool, CreateTableTool, DeleteRowTool, DropTableTool,
-                                         InsertRowTool, ListTablesTool, QueryRowsTool, QueryTableTool,
-                                         TableStore)
+        from engine.tools.tables import (AddColumnTool, AskDataTool, CopyTableTool, CreateTableTool,
+                                         DeleteRowTool, DropColumnTool, DropTableTool, InsertRowTool,
+                                         ListTablesTool, QueryRowsTool, QueryTableTool, RenameColumnTool,
+                                         RenameTableTool, TableStore, UpdateRowsTool)
         self.tables = TableStore(str(root / "tables.db"))
         if config.enable_tables:
             for T in (CreateTableTool, InsertRowTool, QueryTableTool, QueryRowsTool, ListTablesTool,
-                      DeleteRowTool, DropTableTool):
+                      DeleteRowTool, DropTableTool, AddColumnTool, RenameColumnTool, DropColumnTool,
+                      RenameTableTool, CopyTableTool, UpdateRowsTool):
                 self.registry.register(T(self.tables))
             # NL->SQL front door: writes and runs the SQL for you, grounded in the live schema, with
             # error-driven self-repair. Uses the aux (utility/chat) model to generate the query.

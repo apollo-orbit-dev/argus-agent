@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+- **Table-mutation tools** — six new validated table tools so in-place schema changes and bulk data
+  moves no longer degenerate into hundreds of one-row `insert_row` calls (which could overflow the
+  step budget and crash the turn):
+  - **`add_column`** — add a column (`name:type`, e.g. `sleep_start:text`) to an existing table
+    without recreating it; existing rows get `NULL` there.
+  - **`rename_column`**, **`drop_column`**, **`rename_table`** — the rest of the ALTER family.
+  - **`copy_table`** — copy rows from one table into another in a single call: it creates the
+    destination (mirroring the source's columns, types, and primary key) when it doesn't exist, or
+    copies the shared columns into an existing one; an optional `where` filter copies just a subset.
+    Whole-table copies run as one server-side statement (no row cap); filtered copies run the filter
+    on the read-only connection and then parameterized-insert the results, so no SQL fragment ever
+    touches a write path.
+  - **`update_rows`** — set columns on every row matching an equality filter, fully parameterized;
+    an empty match (which would rewrite the whole table) is refused.
+  The four destructive operations (`drop_column`, `rename_column`, `rename_table`, `update_rows`)
+  default to **Ask** in the per-tool approval matrix; `add_column`/`copy_table` default to Allow.
+
 ## 0.7.3
 
 Internal/testbed release — a new developer instrument, no user-facing behavior change.

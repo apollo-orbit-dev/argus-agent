@@ -3,8 +3,10 @@ import asyncio
 
 import pytest
 
-from engine.tools.tables import (CreateTableTool, DropTableTool, InsertRowTool, ListTablesTool,
-                                  QueryTableTool, TableError, TableStore)
+from engine.tools.tables import (AddColumnTool, CopyTableTool, CreateTableTool, DropColumnTool,
+                                  DropTableTool, InsertRowTool, ListTablesTool, QueryTableTool,
+                                  RenameColumnTool, RenameTableTool, TableError, TableStore,
+                                  UpdateRowsTool)
 
 
 def _store(tmp_path):
@@ -194,3 +196,270 @@ def test_delete_row_requires_match(tmp_path):
     with pytest.raises(TableError):
         s.delete_rows("readings", {})           # refuse to nuke the whole table
     assert len(s.query("SELECT * FROM readings")) == 1
+
+
+# ---- add_column ----
+
+def test_add_column_adds_typed_column(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("sleep_log", ["date:date:key", "score:integer"])
+    s.insert("sleep_log", {"date": "2026-07-15", "score": 80})
+    msg = s.add_column("sleep_log", "sleep_start:text")
+    cols = {c["name"]: c["type"] for c in s._rw.execute("PRAGMA table_info(sleep_log)")}
+    assert cols["sleep_start"] == "TEXT" and "sleep_start" in msg
+    # existing row gets NULL in the new column
+    assert s.query("SELECT sleep_start FROM sleep_log")[0]["sleep_start"] is None
+
+
+def test_add_column_rejects_key_flag(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["x:integer"])
+    with pytest.raises(TableError):
+        s.add_column("t", "y:integer:key")     # cannot add a PK to an existing table
+
+
+def test_add_column_missing_table(tmp_path):
+    s = _store(tmp_path)
+    with pytest.raises(TableError):
+        s.add_column("nope", "y:text")
+
+
+def test_add_column_tool(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["x:integer"])
+    tool = AddColumnTool(s)
+    out = asyncio.run(tool.run(tool.Params(table="t", column="note:text")))
+    assert "note" in out and "error" not in out.lower()
+
+
+# ---- rename_column / drop_column / rename_table ----
+
+def test_rename_column_preserves_data(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["a:integer"])
+    s.insert("t", {"a": 7})
+    s.rename_column("t", "a", "b")
+    assert s._columns("t") == ["b"]
+    assert s.query("SELECT b FROM t")[0]["b"] == 7
+
+
+def test_rename_column_missing_column(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["a:integer"])
+    with pytest.raises(TableError):
+        s.rename_column("t", "nope", "b")
+
+
+def test_drop_column_removes_it(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["a:integer", "b:text"])
+    s.drop_column("t", "b")
+    assert s._columns("t") == ["a"]
+
+
+def test_drop_column_pk_surfaces_error(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["a:integer:key", "b:text"])
+    with pytest.raises(TableError):
+        s.drop_column("t", "a")            # dropping a PK column -> sqlite error -> TableError
+    assert "a" in s._columns("t")          # still there
+
+
+def test_rename_table(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("old", ["x:integer"])
+    s.rename_table("old", "new")
+    names = {t["name"] for t in s.tables()}
+    assert names == {"new"}
+
+
+def test_rename_table_collision(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("a", ["x:integer"]); s.create_table("b", ["y:integer"])
+    with pytest.raises(TableError):
+        s.rename_table("a", "b")           # target already exists
+
+
+def test_alter_injection_rejected(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["x:integer"])
+    with pytest.raises(TableError):
+        s.rename_table("t", "n; DROP TABLE t")   # invalid identifier rejected before any SQL
+    assert {tt["name"] for tt in s.tables()} == {"t"}
+
+
+def test_alter_tools(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["a:integer", "b:text"])
+    assert "renamed" in asyncio.run(RenameColumnTool(s).run(RenameColumnTool(s).Params(table="t", old="a", new="c")))
+    assert "dropped" in asyncio.run(DropColumnTool(s).run(DropColumnTool(s).Params(table="t", column="b")))
+    assert "renamed" in asyncio.run(RenameTableTool(s).run(RenameTableTool(s).Params(old="t", new="t2")))
+
+
+def test_copy_table_creates_dest_mirroring_schema(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("src", ["date:date:key", "score:integer"])
+    s.insert("src", {"date": "2026-07-15", "score": 80})
+    s.insert("src", {"date": "2026-07-16", "score": 90})
+    msg = s.copy_table("src", "dst")
+    # dest created with same columns, types, and PK
+    info = {c["name"]: (c["type"], c["pk"]) for c in s._rw.execute("PRAGMA table_info(dst)")}
+    assert info["date"] == ("TEXT", 1) and info["score"] == ("INTEGER", 0)
+    assert s.query("SELECT COUNT(*) AS n FROM dst")[0]["n"] == 2 and "2" in msg
+
+
+def test_copy_table_into_existing_dest_maps_shared_columns(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("src", ["date:date:key", "score:integer"])
+    s.insert("src", {"date": "2026-07-15", "score": 80})
+    # dest has an extra column not in src
+    s.create_table("dst", ["date:date:key", "score:integer", "sleep_start:text"])
+    s.copy_table("src", "dst")
+    row = s.query("SELECT * FROM dst WHERE date='2026-07-15'")[0]
+    assert row["score"] == 80 and row["sleep_start"] is None   # extra dest column stays NULL
+
+
+def test_copy_table_copies_more_than_500_rows(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("src", ["n:integer"])
+    for i in range(561):
+        s.insert("src", {"n": i})
+    s.copy_table("src", "dst")                                  # no read-path 500-row cap
+    assert s.query("SELECT COUNT(*) AS n FROM dst")[0]["n"] == 561
+
+
+def test_copy_table_with_where_filters(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("src", ["date:text", "score:integer"])
+    for d, v in [("2026-06-30", 1), ("2026-07-01", 2), ("2026-07-02", 3)]:
+        s.insert("src", {"date": d, "score": v})
+    n_msg = s.copy_table("src", "dst", where="date >= '2026-07-01'")
+    assert s.query("SELECT COUNT(*) AS n FROM dst")[0]["n"] == 2 and "2" in n_msg
+
+
+def test_copy_table_rejects_semicolon_where(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("src", ["x:integer"]); s.insert("src", {"x": 1})
+    with pytest.raises(TableError):
+        s.copy_table("src", "dst", where="1=1; DROP TABLE src")
+    # src intact; dst not populated with junk
+    assert s.query("SELECT COUNT(*) AS n FROM src")[0]["n"] == 1
+
+
+def test_copy_table_missing_source(tmp_path):
+    s = _store(tmp_path)
+    with pytest.raises(TableError):
+        s.copy_table("nope", "dst")
+
+
+def test_copy_table_tool(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("src", ["x:integer"]); s.insert("src", {"x": 1})
+    tool = CopyTableTool(s)
+    out = asyncio.run(tool.run(tool.Params(source="src", dest="dst")))
+    assert "copied" in out.lower() and "error" not in out.lower()
+
+
+def test_copy_table_filtered_conflict_counts_actual_inserts(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("src", ["date:date:key", "score:integer"])
+    for d, v in [("2026-07-01", 1), ("2026-07-02", 2), ("2026-07-03", 3)]:
+        s.insert("src", {"date": d, "score": v})
+    # dest has a PK and a pre-existing row whose key collides with a filtered source row
+    s.create_table("dst", ["date:date:key", "score:integer"])
+    s.insert("dst", {"date": "2026-07-02", "score": 999})   # colliding key, protected by DO NOTHING
+    # filter selects the colliding key (07-02) plus a new one (07-03)
+    msg = s.copy_table("src", "dst", where="date >= '2026-07-02'")
+    # (1) reported count is only the newly-inserted row (1), not the 2 rows read
+    assert "1 row" in msg and "2 row" not in msg
+    # (2) the pre-existing colliding row is untouched (DO NOTHING protected it)
+    assert s.query("SELECT score FROM dst WHERE date='2026-07-02'")[0]["score"] == 999
+    assert s.query("SELECT COUNT(*) AS n FROM dst")[0]["n"] == 2      # the one collision + one new
+
+
+def test_copy_table_whole_conflict_counts_actual_inserts(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("src", ["date:date:key", "score:integer"])
+    s.insert("src", {"date": "2026-07-01", "score": 1})
+    s.insert("src", {"date": "2026-07-02", "score": 2})
+    s.create_table("dst", ["date:date:key", "score:integer"])
+    s.insert("dst", {"date": "2026-07-01", "score": 999})   # collides with one source row
+    msg = s.copy_table("src", "dst")                        # whole-table path
+    assert "1 row" in msg and "2 row" not in msg            # only the non-colliding row inserted
+    assert s.query("SELECT score FROM dst WHERE date='2026-07-01'")[0]["score"] == 999
+
+
+def test_copy_table_rejects_self_copy(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("src", ["n:integer"])                    # NO primary key
+    s.insert("src", {"n": 1}); s.insert("src", {"n": 2})
+    with pytest.raises(TableError):
+        s.copy_table("src", "src")                          # would double every row without the guard
+    assert s.query("SELECT COUNT(*) AS n FROM src")[0]["n"] == 2   # rows unchanged, no doubling
+
+
+# ---- update_rows ----
+
+def test_update_rows_updates_only_matching(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["id:integer:key", "status:text"])
+    s.insert("t", {"id": 1, "status": "open"})
+    s.insert("t", {"id": 2, "status": "open"})
+    n = s.update_rows("t", {"status": "closed"}, {"id": 1})
+    assert n == 1
+    rows = {r["id"]: r["status"] for r in s.query("SELECT id, status FROM t")}
+    assert rows == {1: "closed", 2: "open"}
+
+
+def test_update_rows_empty_match_refused(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["id:integer", "status:text"])
+    s.insert("t", {"id": 1, "status": "open"})
+    with pytest.raises(TableError):
+        s.update_rows("t", {"status": "closed"}, {})     # empty match would hit every row
+    assert s.query("SELECT status FROM t")[0]["status"] == "open"
+
+
+def test_update_rows_empty_set_refused(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["id:integer"])
+    s.insert("t", {"id": 1})
+    with pytest.raises(TableError):
+        s.update_rows("t", {}, {"id": 1})
+
+
+def test_update_rows_coerces_nonscalar(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["id:integer:key", "tags:json"])
+    s.insert("t", {"id": 1, "tags": ["a"]})
+    s.update_rows("t", {"tags": ["x", "y"]}, {"id": 1})       # list -> JSON text, not a bind error
+    assert "y" in s.query("SELECT tags FROM t WHERE id=1")[0]["tags"]
+
+
+def test_update_rows_tool(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["id:integer:key", "status:text"])
+    s.insert("t", {"id": 1, "status": "open"})
+    tool = UpdateRowsTool(s)
+    out = asyncio.run(tool.run(tool.Params(table="t", set={"status": "done"}, match={"id": 1})))
+    assert "1" in out and "error" not in out.lower()
+
+
+def test_new_table_tools_registered(tmp_path):
+    from config import Config
+    from engine.engine import Engine
+    eng = Engine(Config(model_base_url="http://x/v1", model_name="m", telegram_bot_token=""),
+                 data_dir=str(tmp_path))
+    names = set(eng.registry.names())
+    for n in ("add_column", "rename_column", "drop_column", "rename_table",
+              "copy_table", "update_rows"):
+        assert n in names
+
+
+def test_new_table_tool_approval_defaults():
+    from engine.approvals.types import default_for
+    # default_for returns lowercase "allow"/"ask"
+    assert default_for("add_column") == "allow"
+    assert default_for("copy_table") == "allow"
+    for n in ("drop_column", "rename_column", "rename_table", "update_rows"):
+        assert default_for(n) == "ask"

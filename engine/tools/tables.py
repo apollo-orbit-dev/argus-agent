@@ -54,6 +54,17 @@ def _coerce(v):
     return v
 
 
+def _parse_col_spec(spec) -> tuple[str, str, bool]:
+    """Parse a 'name[:type[:flag]]' column spec into (validated_name, sqltype, is_key). Shared by
+    create_table and add_column so both agree on types and the ':key' flag."""
+    parts = str(spec).split(":")
+    name = _ident(parts[0])
+    ct = parts[1].strip().lower() if len(parts) > 1 and parts[1].strip() else "text"
+    sqltype = _TYPES.get(ct, "TEXT")
+    is_key = len(parts) > 2 and parts[2].strip().lower() in ("key", "pk", "primary", "primary_key")
+    return name, sqltype, is_key
+
+
 class TableStore:
     def __init__(self, path: str):
         self.path = path
@@ -77,12 +88,9 @@ class TableStore:
         t = _ident(name)
         specs, keys = [], 0
         for c in columns or []:
-            parts = str(c).split(":")
-            cn = parts[0]
-            ct = parts[1].strip().lower() if len(parts) > 1 and parts[1].strip() else "text"
-            flag = parts[2].strip().lower() if len(parts) > 2 else ""
-            spec = f"{_ident(cn)} {_TYPES.get(ct, 'TEXT')}"
-            if flag in ("key", "pk", "primary", "primary_key"):
+            cn, sqltype, is_key = _parse_col_spec(c)
+            spec = f"{cn} {sqltype}"
+            if is_key:
                 spec += " PRIMARY KEY"    # one row per value of this column; re-insert updates it (upsert)
                 keys += 1
             specs.append(spec)
@@ -101,6 +109,144 @@ class TableStore:
             if r["pk"]:
                 return r["name"]
         return None
+
+    def _table_exists(self, t: str) -> bool:
+        return self._rw.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (t,)).fetchone() is not None
+
+    def _columns(self, t: str) -> list[str]:
+        return [r["name"] for r in self._rw.execute(f"PRAGMA table_info({t})")]
+
+    def add_column(self, table: str, column: str) -> str:
+        t = _ident(table)
+        if not self._table_exists(t):
+            raise TableError(f"no table '{t}'")
+        name, sqltype, is_key = _parse_col_spec(column)
+        if is_key:
+            raise TableError("cannot add a PRIMARY KEY column to an existing table; "
+                             "create the table with the ':key' column instead")
+        with self._lock:
+            self._rw.execute(f"ALTER TABLE {t} ADD COLUMN {name} {sqltype}")
+            self._rw.commit()
+        return f"added column '{name}' ({sqltype}) to {t}"
+
+    def rename_column(self, table: str, old: str, new: str) -> str:
+        t = _ident(table); o = _ident(old); n = _ident(new)
+        if not self._table_exists(t):
+            raise TableError(f"no table '{t}'")
+        if o not in self._columns(t):
+            raise TableError(f"no column '{o}' on {t}")
+        with self._lock:
+            self._rw.execute(f"ALTER TABLE {t} RENAME COLUMN {o} TO {n}")
+            self._rw.commit()
+        return f"renamed column '{o}' → '{n}' on {t}"
+
+    def drop_column(self, table: str, column: str) -> str:
+        t = _ident(table); c = _ident(column)
+        if not self._table_exists(t):
+            raise TableError(f"no table '{t}'")
+        if c not in self._columns(t):
+            raise TableError(f"no column '{c}' on {t}")
+        with self._lock:
+            try:
+                self._rw.execute(f"ALTER TABLE {t} DROP COLUMN {c}")
+            except sqlite3.OperationalError as e:
+                raise TableError(f"cannot drop column '{c}': {e}")     # PK/indexed/unique column
+            self._rw.commit()
+        return f"dropped column '{c}' from {t}"
+
+    def rename_table(self, old: str, new: str) -> str:
+        o = _ident(old); n = _ident(new)
+        if not self._table_exists(o):
+            raise TableError(f"no table '{o}'")
+        if self._table_exists(n):
+            raise TableError(f"a table named '{n}' already exists")
+        with self._lock:
+            self._rw.execute(f"ALTER TABLE {o} RENAME TO {n}")
+            self._rw.commit()
+        return f"renamed table {o} → {n}"
+
+    def _create_like(self, source: str, dest: str) -> None:
+        """Create dest mirroring source's columns, types, and PK. (CREATE TABLE AS SELECT is NOT
+        used because it drops declared types and the primary key.) Caller holds self._lock."""
+        specs = []
+        for r in self._rw.execute(f"PRAGMA table_info({source})"):
+            spec = f"{_ident(r['name'])} {r['type'] or 'TEXT'}"
+            if r["pk"]:
+                spec += " PRIMARY KEY"
+            specs.append(spec)
+        self._rw.execute(f"CREATE TABLE {dest} ({', '.join(specs)})")
+
+    def copy_table(self, source: str, dest: str, where: str | None = None) -> str:
+        src = _ident(source); dst = _ident(dest)
+        if not self._table_exists(src):
+            raise TableError(f"no table '{src}'")
+        if src == dst:
+            # a self-copy on a PK-less table would run INSERT INTO src SELECT … FROM src and silently
+            # double every row (no conflict to skip it); reject before any write work
+            raise TableError("source and dest must be different tables")
+        with self._lock:
+            created = not self._table_exists(dst)
+            if created:
+                self._create_like(src, dst)
+            # copy only columns present in BOTH tables, preserving source order
+            dst_cols = set(self._columns(dst))
+            cols = [c for c in self._columns(src) if c in dst_cols]
+            if not cols:
+                raise TableError(f"{src} and {dst} share no columns to copy")
+            collist = ", ".join(cols)
+            pk = self._pk_col(dst)
+            conflict = f" ON CONFLICT({pk}) DO NOTHING" if pk else ""
+            if where is None:
+                # whole-table copy: one server-side statement, no row cap, no materialization.
+                # "WHERE 1=1" is required when an ON CONFLICT tail follows: SQLite's parser would
+                # otherwise read a bare "FROM src ON CONFLICT(...)" as a join's ON-clause and choke
+                # on the following DO — a real grammar ambiguity, not a style choice.
+                tail = f" WHERE 1=1{conflict}" if conflict else ""
+                cur = self._rw.execute(
+                    f"INSERT INTO {dst} ({collist}) SELECT {collist} FROM {src}{tail}")
+                n = cur.rowcount
+            else:
+                w = (where or "").strip()
+                if not w or ";" in w:
+                    raise TableError("invalid where filter: a single boolean expression, no ';'")
+                # Read matching rows on the READ-ONLY connection (mode=ro + single-statement rule
+                # make injection a non-issue), then parameterized bulk-insert. No SQL fragment ever
+                # reaches a write connection. Batched so a huge result set is not held all at once.
+                read = self._ro.execute(f"SELECT {collist} FROM {src} WHERE {w}")
+                ph = ", ".join("?" for _ in cols)
+                insert_sql = f"INSERT INTO {dst} ({collist}) VALUES ({ph}){conflict}"
+                n = 0
+                while True:
+                    batch = read.fetchmany(1000)
+                    if not batch:
+                        break
+                    cur = self._rw.executemany(insert_sql, [tuple(r[c] for c in cols) for r in batch])
+                    n += cur.rowcount     # actual inserts (rows a DO NOTHING conflict skipped are excluded)
+            self._rw.commit()
+        verb = "created dest and copied" if created else "copied"
+        return f"{verb} {n} row(s) from {src} → {dst} (columns: {collist})"
+
+    def update_rows(self, table: str, set_values: dict, match: dict) -> int:
+        """Set columns on all rows matching ALL of `match`. Refuses an empty match (that would
+        hit every row) and an empty set. Fully parameterized — no SQL fragment from the caller."""
+        t = _ident(table)
+        if not self._table_exists(t):
+            raise TableError(f"no table '{t}'")
+        if not set_values:
+            raise TableError("update_rows needs at least one column=value to set")
+        if not match:
+            raise TableError("update_rows needs at least one column=value to match "
+                             "(an empty match would update every row)")
+        set_cols = [_ident(k) for k in set_values]
+        match_cols = [_ident(k) for k in match]
+        set_clause = ", ".join(f"{c}=?" for c in set_cols)
+        where_clause = " AND ".join(f"{c}=?" for c in match_cols)
+        params = [_coerce(v) for v in set_values.values()] + [_coerce(v) for v in match.values()]
+        with self._lock:
+            cur = self._rw.execute(f"UPDATE {t} SET {set_clause} WHERE {where_clause}", params)
+            self._rw.commit()
+            return cur.rowcount
 
     def insert(self, name: str, values: dict) -> None:
         t = _ident(name)
@@ -232,6 +378,141 @@ class CreateTableTool(Tool):
         except TableError as e:
             return f"create_table error: {e}"
         return f"create_table: table '{t}' is ready with columns {args.columns}. Add rows with insert_row."
+
+
+class AddColumnTool(Tool):
+    name = "add_column"
+    description = (
+        "Add a new column to an EXISTING table WITHOUT recreating it or copying data. Use this "
+        "instead of making a new table when someone wants extra fields on a table they already have. "
+        "Args: table, and column — a 'name:type' spec like 'sleep_start:text' or 'score:integer' "
+        "(type: text, integer, real, date, or json). Existing rows get NULL in the new column. "
+        "You cannot add a primary-key column this way. Example: add_column('sleep_log', 'sleep_start:text')."
+    )
+
+    class Params(BaseModel):
+        table: str = Field(..., description="the existing table to alter")
+        column: str = Field(..., description="a 'name:type' column spec, e.g. 'sleep_start:text'")
+
+    def __init__(self, store: TableStore):
+        self.store = store
+
+    async def run(self, args: "AddColumnTool.Params") -> str:
+        try:
+            return self.store.add_column(args.table, args.column)
+        except (TableError, sqlite3.Error) as e:
+            return f"add_column error: {e}"
+
+
+class RenameColumnTool(Tool):
+    name = "rename_column"
+    description = ("Rename a column on an existing table (data preserved). Args: table, old, new. "
+                  "Example: rename_column('sleep_log', 'score', 'restful_score').")
+
+    class Params(BaseModel):
+        table: str = Field(..., description="the table")
+        old: str = Field(..., description="current column name")
+        new: str = Field(..., description="new column name")
+
+    def __init__(self, store: TableStore):
+        self.store = store
+
+    async def run(self, args: "RenameColumnTool.Params") -> str:
+        try:
+            return self.store.rename_column(args.table, args.old, args.new)
+        except (TableError, sqlite3.Error) as e:
+            return f"rename_column error: {e}"
+
+
+class DropColumnTool(Tool):
+    name = "drop_column"
+    description = ("Delete a column and its data from a table. Args: table, column. This is "
+                  "irreversible. A primary-key or indexed column cannot be dropped. "
+                  "Example: drop_column('sleep_log', 'old_notes').")
+
+    class Params(BaseModel):
+        table: str = Field(..., description="the table")
+        column: str = Field(..., description="column to delete")
+
+    def __init__(self, store: TableStore):
+        self.store = store
+
+    async def run(self, args: "DropColumnTool.Params") -> str:
+        try:
+            return self.store.drop_column(args.table, args.column)
+        except (TableError, sqlite3.Error) as e:
+            return f"drop_column error: {e}"
+
+
+class RenameTableTool(Tool):
+    name = "rename_table"
+    description = ("Rename a whole table (its rows are kept). Args: old, new. The new name must "
+                  "not already be in use. Example: rename_table('sleep_log', 'sleep_archive').")
+
+    class Params(BaseModel):
+        old: str = Field(..., description="current table name")
+        new: str = Field(..., description="new table name")
+
+    def __init__(self, store: TableStore):
+        self.store = store
+
+    async def run(self, args: "RenameTableTool.Params") -> str:
+        try:
+            return self.store.rename_table(args.old, args.new)
+        except (TableError, sqlite3.Error) as e:
+            return f"rename_table error: {e}"
+
+
+class CopyTableTool(Tool):
+    name = "copy_table"
+    description = (
+        "Copy rows from one table into another IN ONE CALL — use this instead of reading rows and "
+        "insert_row'ing them one at a time. If dest doesn't exist it is created with the same "
+        "columns, types, and primary key as source. If dest already exists, only columns shared by "
+        "both are copied (extra dest columns stay empty). Args: source, dest, and optional where — "
+        "a boolean filter to copy just some rows, e.g. \"date >= '2026-07-01'\" (a single expression, "
+        "no semicolons). Example: copy_table('sleep_log', 'sleep_backup')."
+    )
+
+    class Params(BaseModel):
+        source: str = Field(..., description="table to copy from")
+        dest: str = Field(..., description="table to copy into (created if missing)")
+        where: str | None = Field(None, description="optional boolean filter, e.g. \"date >= '2026-07-01'\"")
+
+    def __init__(self, store: TableStore):
+        self.store = store
+
+    async def run(self, args: "CopyTableTool.Params") -> str:
+        try:
+            return self.store.copy_table(args.source, args.dest, args.where)
+        except (TableError, sqlite3.Error) as e:
+            return f"copy_table error: {e}"
+
+
+class UpdateRowsTool(Tool):
+    name = "update_rows"
+    description = (
+        "Change column values on EXISTING rows that match a filter — updates every row matching "
+        "ALL of `match` at once. Args: table, set (a dict of column -> new value), and match (a "
+        "dict of column -> value; only rows matching ALL pairs are changed). An empty match is "
+        "refused (it would rewrite every row). Example: "
+        "update_rows('tasks', {'status':'archived'}, {'year':2025})."
+    )
+
+    class Params(BaseModel):
+        table: str = Field(..., description="the table")
+        set: dict = Field(..., description="column -> new value")
+        match: dict = Field(..., description="column -> value; rows matching ALL pairs are updated")
+
+    def __init__(self, store: TableStore):
+        self.store = store
+
+    async def run(self, args: "UpdateRowsTool.Params") -> str:
+        try:
+            n = self.store.update_rows(args.table, args.set, args.match)
+        except (TableError, sqlite3.Error) as e:
+            return f"update_rows error: {e}"
+        return f"update_rows: updated {n} row(s) in '{args.table}'."
 
 
 class InsertRowTool(Tool):
