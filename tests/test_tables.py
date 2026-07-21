@@ -389,6 +389,15 @@ def test_copy_table_whole_conflict_counts_actual_inserts(tmp_path):
     assert s.query("SELECT score FROM dst WHERE date='2026-07-01'")[0]["score"] == 999
 
 
+def test_copy_table_rejects_self_copy(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("src", ["n:integer"])                    # NO primary key
+    s.insert("src", {"n": 1}); s.insert("src", {"n": 2})
+    with pytest.raises(TableError):
+        s.copy_table("src", "src")                          # would double every row without the guard
+    assert s.query("SELECT COUNT(*) AS n FROM src")[0]["n"] == 2   # rows unchanged, no doubling
+
+
 # ---- update_rows ----
 
 def test_update_rows_updates_only_matching(tmp_path):

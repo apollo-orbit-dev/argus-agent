@@ -181,6 +181,10 @@ class TableStore:
         src = _ident(source); dst = _ident(dest)
         if not self._table_exists(src):
             raise TableError(f"no table '{src}'")
+        if src == dst:
+            # a self-copy on a PK-less table would run INSERT INTO src SELECT … FROM src and silently
+            # double every row (no conflict to skip it); reject before any write work
+            raise TableError("source and dest must be different tables")
         with self._lock:
             created = not self._table_exists(dst)
             if created:
