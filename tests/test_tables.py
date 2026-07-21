@@ -3,8 +3,8 @@ import asyncio
 
 import pytest
 
-from engine.tools.tables import (CreateTableTool, DropTableTool, InsertRowTool, ListTablesTool,
-                                  QueryTableTool, TableError, TableStore)
+from engine.tools.tables import (AddColumnTool, CreateTableTool, DropTableTool, InsertRowTool,
+                                  ListTablesTool, QueryTableTool, TableError, TableStore)
 
 
 def _store(tmp_path):
@@ -194,3 +194,37 @@ def test_delete_row_requires_match(tmp_path):
     with pytest.raises(TableError):
         s.delete_rows("readings", {})           # refuse to nuke the whole table
     assert len(s.query("SELECT * FROM readings")) == 1
+
+
+# ---- add_column ----
+
+def test_add_column_adds_typed_column(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("sleep_log", ["date:date:key", "score:integer"])
+    s.insert("sleep_log", {"date": "2026-07-15", "score": 80})
+    msg = s.add_column("sleep_log", "sleep_start:text")
+    cols = {c["name"]: c["type"] for c in s._rw.execute("PRAGMA table_info(sleep_log)")}
+    assert cols["sleep_start"] == "TEXT" and "sleep_start" in msg
+    # existing row gets NULL in the new column
+    assert s.query("SELECT sleep_start FROM sleep_log")[0]["sleep_start"] is None
+
+
+def test_add_column_rejects_key_flag(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["x:integer"])
+    with pytest.raises(TableError):
+        s.add_column("t", "y:integer:key")     # cannot add a PK to an existing table
+
+
+def test_add_column_missing_table(tmp_path):
+    s = _store(tmp_path)
+    with pytest.raises(TableError):
+        s.add_column("nope", "y:text")
+
+
+def test_add_column_tool(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["x:integer"])
+    tool = AddColumnTool(s)
+    out = asyncio.run(tool.run(tool.Params(table="t", column="note:text")))
+    assert "note" in out and "error" not in out.lower()

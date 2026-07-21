@@ -54,6 +54,17 @@ def _coerce(v):
     return v
 
 
+def _parse_col_spec(spec) -> tuple[str, str, bool]:
+    """Parse a 'name[:type[:flag]]' column spec into (validated_name, sqltype, is_key). Shared by
+    create_table and add_column so both agree on types and the ':key' flag."""
+    parts = str(spec).split(":")
+    name = _ident(parts[0])
+    ct = parts[1].strip().lower() if len(parts) > 1 and parts[1].strip() else "text"
+    sqltype = _TYPES.get(ct, "TEXT")
+    is_key = len(parts) > 2 and parts[2].strip().lower() in ("key", "pk", "primary", "primary_key")
+    return name, sqltype, is_key
+
+
 class TableStore:
     def __init__(self, path: str):
         self.path = path
@@ -77,12 +88,9 @@ class TableStore:
         t = _ident(name)
         specs, keys = [], 0
         for c in columns or []:
-            parts = str(c).split(":")
-            cn = parts[0]
-            ct = parts[1].strip().lower() if len(parts) > 1 and parts[1].strip() else "text"
-            flag = parts[2].strip().lower() if len(parts) > 2 else ""
-            spec = f"{_ident(cn)} {_TYPES.get(ct, 'TEXT')}"
-            if flag in ("key", "pk", "primary", "primary_key"):
+            cn, sqltype, is_key = _parse_col_spec(c)
+            spec = f"{cn} {sqltype}"
+            if is_key:
                 spec += " PRIMARY KEY"    # one row per value of this column; re-insert updates it (upsert)
                 keys += 1
             specs.append(spec)
@@ -101,6 +109,26 @@ class TableStore:
             if r["pk"]:
                 return r["name"]
         return None
+
+    def _table_exists(self, t: str) -> bool:
+        return self._rw.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (t,)).fetchone() is not None
+
+    def _columns(self, t: str) -> list[str]:
+        return [r["name"] for r in self._rw.execute(f"PRAGMA table_info({t})")]
+
+    def add_column(self, table: str, column: str) -> str:
+        t = _ident(table)
+        if not self._table_exists(t):
+            raise TableError(f"no table '{t}'")
+        name, sqltype, is_key = _parse_col_spec(column)
+        if is_key:
+            raise TableError("cannot add a PRIMARY KEY column to an existing table; "
+                             "create the table with the ':key' column instead")
+        with self._lock:
+            self._rw.execute(f"ALTER TABLE {t} ADD COLUMN {name} {sqltype}")
+            self._rw.commit()
+        return f"added column '{name}' ({sqltype}) to {t}"
 
     def insert(self, name: str, values: dict) -> None:
         t = _ident(name)
@@ -232,6 +260,30 @@ class CreateTableTool(Tool):
         except TableError as e:
             return f"create_table error: {e}"
         return f"create_table: table '{t}' is ready with columns {args.columns}. Add rows with insert_row."
+
+
+class AddColumnTool(Tool):
+    name = "add_column"
+    description = (
+        "Add a new column to an EXISTING table WITHOUT recreating it or copying data. Use this "
+        "instead of making a new table when someone wants extra fields on a table they already have. "
+        "Args: table, and column — a 'name:type' spec like 'sleep_start:text' or 'score:integer' "
+        "(type: text, integer, real, date, or json). Existing rows get NULL in the new column. "
+        "You cannot add a primary-key column this way. Example: add_column('sleep_log', 'sleep_start:text')."
+    )
+
+    class Params(BaseModel):
+        table: str = Field(..., description="the existing table to alter")
+        column: str = Field(..., description="a 'name:type' column spec, e.g. 'sleep_start:text'")
+
+    def __init__(self, store: TableStore):
+        self.store = store
+
+    async def run(self, args: "AddColumnTool.Params") -> str:
+        try:
+            return self.store.add_column(args.table, args.column)
+        except (TableError, sqlite3.Error) as e:
+            return f"add_column error: {e}"
 
 
 class InsertRowTool(Tool):
