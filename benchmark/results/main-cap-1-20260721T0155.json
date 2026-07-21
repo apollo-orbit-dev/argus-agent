@@ -1,0 +1,1154 @@
+{
+  "model": "main",
+  "params": 35,
+  "mode": "native",
+  "battery_version": "cap-1",
+  "k": 3,
+  "date": "2026-07-21T01:55:57+00:00",
+  "per_tier": {
+    "1": {
+      "chain_pass": 0.8571428571428571,
+      "judge_mean": 2.761904761904762,
+      "n": 7,
+      "skipped": 0
+    },
+    "2": {
+      "chain_pass": 0.8,
+      "judge_mean": 3.0,
+      "n": 6,
+      "skipped": 0
+    },
+    "3": {
+      "chain_pass": 0.8571428571428571,
+      "judge_mean": 2.333333333333333,
+      "n": 7,
+      "skipped": 0
+    },
+    "4": {
+      "chain_pass": 1.0,
+      "judge_mean": 2.523809523809524,
+      "n": 7,
+      "skipped": 0
+    }
+  },
+  "overall": {
+    "chain_pass": 0.875,
+    "judge_mean": 2.641975308641975,
+    "n": 27,
+    "skipped": 0
+  },
+  "tasks": [
+    {
+      "id": "t1_calc",
+      "tier": 1,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "It\u2019s **549,471**.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "2,847 \u00d7 193 = **549,471**.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "549,471.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_sqrt",
+      "tier": 1,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "The square root of 4096 is **64**.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "The square root of 4096 is **64**.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "The square root of 4096 is **64**.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_time",
+      "tier": 1,
+      "category": "time",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "time_in_zone"
+          ],
+          "error": null,
+          "final": "It's 10:16 AM in Tokyo (JST, UTC+9).",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "time_in_zone"
+          ],
+          "error": null,
+          "final": "It\u2019s currently **10:16 AM** in Tokyo (JST+0900).",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "time_in_zone"
+          ],
+          "error": null,
+          "final": "It\u2019s 10:16 AM in Tokyo (JST).",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_unit",
+      "tier": 1,
+      "category": "convert",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "unit_convert"
+          ],
+          "error": null,
+          "final": "5 miles is equal to **8.05 kilometers**.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "unit_convert"
+          ],
+          "error": null,
+          "final": "5 miles is approximately **8.05 kilometers**.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "unit_convert"
+          ],
+          "error": null,
+          "final": "5 miles is equal to **8.05 kilometers**.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_datastore",
+      "tier": 1,
+      "category": "memory",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 2.0,
+      "runs": [
+        {
+          "tools": [
+            "datastore"
+          ],
+          "error": null,
+          "final": "I've saved `'teal'` under the key `'favorite_color'` in the `user_prefs` collection.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "datastore"
+          ],
+          "error": null,
+          "final": "Done. The value 'teal' is now stored under the key 'favorite_color' in the 'preferences' collection. If you want to retrieve it later, just ask me to get it from the datastore.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [],
+          "error": null,
+          "final": "I can help with that. Before I proceed, I need to clarify: do you want to store this as a **fact about you** (in memory, so I remember your favorite color in future conversations), or as a **named value** in the datastore (like a technical key-value pair)?\n\n- **Memory**: Best for personal preferences and facts about you.\n- **Datastore**: Better for one-off values, tokens, or settings that aren't about you personally.\n\nWhich would you prefer?",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t1_wordproblem",
+      "tier": 1,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [],
+          "error": null,
+          "final": "17 \u00d7 24 = 408 items total.",
+          "chain_correct": false,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "You have **408 items** total.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [],
+          "error": null,
+          "final": "408 items total.",
+          "chain_correct": false,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_dict",
+      "tier": 1,
+      "category": "lookup",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 2.3333333333333335,
+      "runs": [
+        {
+          "tools": [
+            "wikipedia"
+          ],
+          "error": null,
+          "final": "**Ephemeral** means lasting for a very short time\u2014something that\u2019s fleeting, temporary, or transitory.\n\nThink of a sunset, a mayfly\u2019s life, or a sparkler\u2019s glow: beautiful, but it fades quickly.\n\nUnderstanding ephemerality helps us appreciate the present moment and accept that some experiences are meant to be brief.\n\n*Source: Wikipedia*",
+          "chain_correct": false,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "dictionary",
+            "wikipedia"
+          ],
+          "error": null,
+          "final": "\"Ephemeral\" describes something that lasts for a very short time \u2014 like a sunset, a fleeting thought, or a mayfly's day. It's the quality of being transitory, existing only briefly before passing away. This matters because it reminds us to appreciate the moments that seem too good (or too fragile) to last.\n\nSource: Wikipedia on Ephemerality.",
+          "chain_correct": true,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "dictionary"
+          ],
+          "error": null,
+          "final": "\"Ephemeral\" means lasting for a very short time. As an adjective, it describes something fleeting\u2014like a sunset, a snowflake, or a mayfly. As a noun, it can refer to such a thing itself.  \n\nSource: dictionary.com",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_readfile",
+      "tier": 2,
+      "category": "files",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "list_files",
+            "read_file"
+          ],
+          "error": null,
+          "final": "According to notes.txt, the Q3 revenue was **$48,200**.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "list_files",
+            "read_file"
+          ],
+          "error": null,
+          "final": "According to notes.txt, Q3 revenue was **$48,200**.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "list_files",
+            "read_file"
+          ],
+          "error": null,
+          "final": "According to notes.txt, Q3 revenue was **$48,200**.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_countrows",
+      "tier": 2,
+      "category": "files",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "list_files",
+            "read_file"
+          ],
+          "error": null,
+          "final": "There are **3 expense rows** in `expenses.csv` (excluding the header).",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "list_files",
+            "read_file"
+          ],
+          "error": null,
+          "final": "There are **3** expense rows in `expenses.csv` (excluding the header).",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "list_files",
+            "read_file"
+          ],
+          "error": null,
+          "final": "There are **3 expense rows** in expenses.csv (excluding the header).",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_writefile",
+      "tier": 2,
+      "category": "files",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "write_file"
+          ],
+          "error": null,
+          "final": "Done! I've created `todo.txt` in your workspace with those three tasks. Let me know if you'd like to add more or do anything else with it.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "error": null,
+          "final": "Done! I've created `todo.txt` in your workspace with those three tasks.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "error": null,
+          "final": "Done! I've created `todo.txt` with those three tasks. Let me know if you need to add more items or do anything else with it.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_knowledge",
+      "tier": 2,
+      "category": "knowledge",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "remember"
+          ],
+          "error": null,
+          "final": "Your gate code is **4471**.",
+          "chain_correct": false,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "remember"
+          ],
+          "error": null,
+          "final": "The gate code is 4471.",
+          "chain_correct": false,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "remember"
+          ],
+          "error": null,
+          "final": "Got it \u2014 I've saved your gate code: **4471**.",
+          "chain_correct": false,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_chart",
+      "tier": 2,
+      "category": "chart",
+      "skipped": false,
+      "chain_pass": null,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "make_chart"
+          ],
+          "error": null,
+          "final": "I've created a bar chart of those scores:\n\n- **Alice**: 90\n- **Bob**: 75  \n- **Cara**: 85\n\nThe chart is saved as `test-scores.png` in your workspace. You can view it directly in Telegram, or access it via the Artifacts panel.",
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "make_chart"
+          ],
+          "error": null,
+          "final": "Here\u2019s your bar chart showing the scores for Alice (90), Bob (75), and Cara (85).\n\nThe chart has been saved as `scores-alice-bob-cara.png` and `scores-alice-bob-cara.svg` in your workspace. You can view the image directly in your chat, or download the SVG to embed it elsewhere.",
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "make_chart"
+          ],
+          "error": null,
+          "final": "Here's your bar chart showing the scores:\n\n- Alice: 90\n- Bob: 75\n- Cara: 85\n\nIt's been saved as `student-scores.png` and `student-scores.svg` in your workspace. You can view it in the Artifacts panel or open it directly via the `/artifacts` link.\n\nLet me know if you'd like any tweaks\u2014different colors, a different chart type, or added annotations.",
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_table_pasted",
+      "tier": 2,
+      "category": "structured",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Done! I've created a table called `fruit_counts` with one row per fruit. The `fruit_name` column is the key so adding the same fruit again updates it rather than duplicating. I've added apples (3), bananas (5), and cherries (12).",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "query_table",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "Done. I created a table called `fruit_inventory` with the structure:\n\n- `fruit` (text, unique key) \u2014 the fruit name\n- `quantity` (integer) \u2014 the count\n\nAll three items are in there:\n\n```\nfruit     | quantity\n----------|----------\napples    | 3\nbananas   | 5\ncherries  | 12\n```\n\nThe `fruit` column is marked as the key, so if you add the same fruit again, it'll update the quantity instead of creating a duplicate row.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Done! I've created a `fruit_inventory` table with two columns:\n- `fruit` (text, key) - so you can re-insert by fruit name and it will update instead of duplicate\n- `quantity` (integer) - so you can sum, average, or filter quantities later\n\nAnd I've added all three fruits with their quantities. You can query it later if you want, like `SELECT fruit, SUM(quantity) FROM fruit_inventory`.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t3_csv_table",
+      "tier": 3,
+      "category": "structured",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 2.3333333333333335,
+      "runs": [
+        {
+          "tools": [
+            "list_files",
+            "read_file",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Done! I've loaded your sales.csv into a table called `sales` with the following structure:\n\n- **region** (text)\n- **revenue** (integer)  \n- **units** (integer)\n\nI inserted **4 rows** - one for each region (North, South, East, West) with their respective revenue and units data.\n\nYou can now query the table, for example:\n- `query_table(\"SELECT * FROM sales\")` to view all records\n- `query_table(\"SELECT SUM(revenue), SUM(units) FROM sales\")` for totals\n- `query_table(\"SELECT region, revenue FROM sales WHERE units > 100\")` to filter\n\nWould you like me to show you some sample queries or create a summary chart?",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "read_file",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "create_table",
+            "list_tables",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Perfect! I've successfully loaded the sales.csv file into a table. Here's what I did:\n\n1. **Read the file** - sales.csv contains 4 rows with columns: region, revenue, units\n2. **Created table** - `sales` with typed columns:\n   - `region` (TEXT)\n   - `revenue` (INTEGER) \n   - `units` (INTEGER)\n3. **Inserted all 4 rows** from the CSV data\n\nThe table is now ready with:\n- North: $4,200 revenue, 120 units\n- South: $3,100 revenue, 90 units  \n- East: $5,600 revenue, 210 units\n- West: $2,800 revenue, 75 units\n\n**Next steps you could take:**\n- Query the data (e.g., find total revenue by region, average units sold)\n- Create a chart showing regional performance\n- Add more data to the table\n- Filter for specific regions or revenue ranges\n\nWould you like me to help you with any of these or run a query on the sales data?",
+          "chain_correct": true,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "list_files",
+            "read_file",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Done! I've successfully loaded sales.csv into a table. Here's what I did:\n\n- **Table name:** `sales`\n- **Columns:**\n  - `region` (text)\n  - `revenue` (integer)\n  - `units` (integer)\n- **Rows inserted:** 4\n\nThe table is ready for querying. Would you like me to:\n- Show you the data with `query_table`?\n- Create a summary chart?\n- Run some specific analysis on it?",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t3_csv_aggregate",
+      "tier": 3,
+      "category": "structured",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "runs": [
+        {
+          "tools": [
+            "list_files",
+            "read_file"
+          ],
+          "error": null,
+          "final": "Looking at the sales.csv file, I can see the revenue by region:\n\n- North: $4,200\n- South: $3,100\n- East: $5,600\n- West: $2,800\n\n**Total revenue across all regions: $15,700**",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "list_files",
+            "read_file",
+            "calculator"
+          ],
+          "error": null,
+          "final": "The total revenue across all regions is **$15,700**.\n\nHere's the breakdown:\n- North: $4,200\n- South: $3,100\n- East: $5,600\n- West: $2,800\n\n**Total: $15,700**",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "list_files",
+            "read_file"
+          ],
+          "error": null,
+          "final": "The total revenue across all regions is **$15,700**.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_extract_invoice",
+      "tier": 3,
+      "category": "extraction",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "list_files",
+            "read_file",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Done! I've extracted the line items from `invoice.txt` into a table called `invoice_items` with these columns:\n\n| Column | Type |\n|--------|------|\n| product | text |\n| quantity | integer |\n| unit_price | real |\n| total | real |\n| invoice_number | text |\n\n**3 rows inserted** (Widget, Gadget, Gizmo) for Invoice #4471.\n\nWant to query the data or see a summary chart?",
+          "chain_correct": false,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "read_file",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Done! I've extracted the line items from `invoice.txt` into a table called `invoice_line_items` with the following columns:\n\n- `invoice_number` (text) \u2014 invoice ID\n- `item_name` (text) \u2014 product name\n- `quantity` (integer) \u2014 how many\n- `unit_price` (real) \u2014 price per unit\n\nI inserted **3 rows** covering all the line items:\n1. Widget \u00d7 4 @ $2.50\n2. Gadget \u00d7 2 @ $9.99\n3. Gizmo \u00d7 7 @ $1.25\n\nWhat would you like to do next? I can:\n- Show you the data with `query_table`\n- Calculate totals or averages\n- Make a chart if that would help",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "read_file",
+            "list_tables",
+            "create_table",
+            "calculator",
+            "insert_row",
+            "calculator",
+            "insert_row",
+            "calculator",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Done! I've extracted the line items from `invoice.txt` into a table called `invoice_items`. Here's what I stored:\n\n| invoice_number | item_name | quantity | unit_price | total |\n|----------------|-----------|----------|------------|-------|\n| 4471 | Widget | 4 | $2.50 | $10.00 |\n| 4471 | Gadget | 2 | $9.99 | $19.98 |\n| 4471 | Gizmo | 7 | $1.25 | $8.75 |\n\n**3 rows inserted.**\n\nWould you like to:\n- **Query** the data (e.g., \"show me items over $10\", \"calculate the total invoice amount\")?\n- **Create a chart** (like a pie chart of costs by item)?\n- Something else?",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t3_table_chart",
+      "tier": 3,
+      "category": "structured",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "make_chart"
+          ],
+          "error": null,
+          "final": "Done! I've created an `expenses` table with your three entries:\n\n| Category | Amount |\n|----------|--------|\n| groceries | 40 |\n| gas | 55 |\n| dining | 30 |\n\nAnd here's the bar chart visualizing your expenses by category:\n\n![Expenses by Category](expenses-by-category.png)\n\nGas is your biggest expense at $55, followed by groceries at $40 and dining at $30.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "query_table",
+            "insert_row",
+            "query_table",
+            "make_chart"
+          ],
+          "error": null,
+          "final": "Done! I set up an `expenses` table with columns for category and amount, then added your three entries:\n\n- **Gas**: $55\n- **Groceries**: $40\n- **Dining**: $30\n\nI also made a bar chart showing the expenses by category. You can view the chart image `expenses-by-category.png` in your workspace.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "make_chart"
+          ],
+          "error": null,
+          "final": "Done! I've created an `expenses` table and added your three items:\n\n| category | amount |\n|----------|--------|\n| groceries | $40.00 |\n| gas | $55.00 |\n| dining | $30.00 |\n\nI've also generated a bar chart showing expenses by category. It's been sent to you in Telegram, and both PNG and SVG versions are saved in your workspace for reference.\n\nGas came out to be the highest expense at $55, followed by groceries at $40 and dining at $30. Let me know if you'd like to add more expenses or do anything else with this data!",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t3_data_summary",
+      "tier": 3,
+      "category": "structured",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "read_file",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "I've loaded the data.csv into a table called **scores** with columns:\n- `name` (text)\n- `score` (integer)\n\nI inserted 4 rows (Alice, Bob, Cara, Dan) and calculated the average score.\n\n**The average score is 87.5.**\n\nWant me to show you the table or do any other queries on it?",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "list_files",
+            "read_file",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "I've loaded data.csv into a table called **scores** with columns `name:text` and `score:integer`. \n\nI inserted all 4 rows and calculated the average score: **87.5**\n\nWould you like to see the full table or any other analysis?",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "read_file",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "Loaded `data.csv` into a table called **scores** with columns:\n- `name:text`\n- `score:integer`\n\nInserted 4 rows (Alice, Bob, Cara, Dan).\n\nThe average score is **87.5**.\n\nWant to do anything else with the data? I can filter, sort, or make a chart if you like.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t3_notes_knowledge",
+      "tier": 3,
+      "category": "knowledge",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 2.0,
+      "runs": [
+        {
+          "tools": [
+            "read_file",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "Done. I've added the key facts from notes.txt to my knowledge base. You can now ask me about things like \"what was Q3 revenue?\" or \"when is the project deadline?\" and I'll be able to find the answers.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "list_files",
+            "read_file",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I\u2019ve added **notes.txt** to your knowledge base. Here are the key facts it contains:\n\n- Q3 revenue: **$48,200**\n- Project deadline: **August 15**\n- Mascot: **a falcon**\n\nYou can now ask me questions about this content (e.g., \u201cWhat\u2019s the Q3 revenue?\u201d) and I\u2019ll search the knowledge base to answer.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "read_file",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "Done! I've added the key facts from `notes.txt` to your knowledge base. The file contained:\n\n- Q3 revenue: $48,200\n- Project deadline: August 15\n- Company mascot: falcon\n\nYou can now ask me questions about these facts, like \"What's our Q3 revenue?\" or \"What's the project deadline?\" and I'll search the knowledge base for the answers.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t3_table_pdf",
+      "tier": 3,
+      "category": "structured",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table",
+            "make_pdf"
+          ],
+          "error": null,
+          "final": "Done! I've created a `books` table with columns for title and year, added your three books, and exported it as a PDF.\n\nThe PDF **books-table.pdf** is saved in your workspace. You can download it from there, or I can email it to you if you'd like \u2014 just let me know.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "make_pdf"
+          ],
+          "error": null,
+          "final": "Done! I've created a table with your three books:\n\n- **Dune** (1965)\n- **Neuromancer** (1984)  \n- **Snow Crash** (1992)\n\nAnd exported it as a PDF called `book-collection-pdf.pdf`. It's in your workspace and ready to download.\n\nThe table structure I used:\n- `title:text` - the book title\n- `year:integer` - the publication year\n\nThis makes the data queryable later if you want to add more books or filter by year.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "make_pdf"
+          ],
+          "error": null,
+          "final": "Done! I've created a table with your three books and exported it as a PDF. The PDF includes a clean table with columns for Title and Year.\n\n**The table:**\n- Dune (1965)\n- Neuromancer (1984)\n- Snow Crash (1992)\n\n**PDF file:** `book-collection-pdf.pdf` is ready in your workspace \u2014 you can download it directly. Let me know if you'd like me to email it to you or make any changes!",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t4_ambiguous",
+      "tier": 4,
+      "category": "judgment",
+      "skipped": false,
+      "chain_pass": null,
+      "judge_mean": 1.6666666666666667,
+      "runs": [
+        {
+          "tools": [],
+          "error": null,
+          "final": "Titan could refer to several things. Could you clarify which one you're interested in?\n\n1. **Titan** - Saturn's largest moon (the most famous one)\n2. **Titan rockets** - The family of space launch vehicles\n3. **Titan (mythology)** - The Greek Titans from mythology\n4. **Titan** - A fictional creature or character from movies, games, or books\n5. **Titan** - The supercomputer or other systems\n\nLet me know which Titan you'd like to learn about!",
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "wikipedia"
+          ],
+          "error": null,
+          "final": "**Titan** is Saturn\u2019s biggest moon and the second-largest moon in the whole Solar System (after Jupiter\u2019s Ganymede). Here\u2019s what makes it special:\n\n- **Size & mass:** It\u2019s about 48% larger in diameter than Earth\u2019s Moon and 80% more massive\u2014bigger than the planet Mercury, yet it orbits a gas giant.\n- **Dense atmosphere:** Titan is the only moon with a thick, nitrogen-rich atmosphere (even denser than Earth\u2019s), plus haze layers that obscure its surface from visible light.\n- **Liquid on the surface:** Besides Earth, it\u2019s the only place we know where stable bodies of liquid exist on the surface\u2014though instead of water, they\u2019re lakes and seas of liquid methane and ethane.\n- **Active geology:** It has rivers, shorelines, dunes, and possibly cryovolcanoes that spew ice and water instead of lava.\n- **Potential for life:** Its organic chemistry and liquid hydrocarbons make it a prime target in the search for exotic, non-water-based life.\n\nIn short, Titan is a world that feels both familiar and alien\u2014a planet-like moon with lakes, weather, and a complex chemistry that scientists are eager to explore further.",
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "web_search",
+            "wikipedia"
+          ],
+          "error": null,
+          "final": "**Titan** is Saturn's largest moon and one of the most fascinating worlds in our solar system. Here are the key facts:\n\n## Basic Overview\n- **Size:** Second-largest moon in the solar system (after Jupiter's Ganymede). It's 48% larger in diameter than Earth's Moon and 80% more massive\u2014actually larger than the planet Mercury.\n- **Discovery:** Found by Christiaan Huygens in 1655.\n- **Name:** Named after the Titans from Greek mythology.\n\n## What Makes Titan Unique\n- **Dense Atmosphere:** The only moon known to have a substantial atmosphere\u2014denser than Earth's. It's mostly nitrogen (about 95%) with some methane and other hydrocarbons.\n- **Surface Liquid:** The only body besides Earth with clear evidence of stable bodies of liquid on its surface. However, these aren't water\u2014Titan has lakes and rivers of liquid methane and ethane.\n- **Weather System:** It has a active weather cycle involving methane rain, clouds, and seasonal changes, making it the only other world besides Earth with a liquid cycle (methane instead of water).\n\n## Surface & Environment\n- **Temperature:** Extremely cold\u2014around -179\u00b0C (-290\u00b0F).\n- **Surface Features:** Ice mountains, dunes made of organic compounds, and impact craters. The surface is obscured by a thick orange haze of hydrocarbons.\n- **Composition:** A rocky core surrounded by layers of ice and a surface of water ice and organic materials.\n\n## Exploration\n- **Cassini-Huygens Mission:** NASA's Cassini orbiter studied Saturn and Titan from 2004 to 2017. The Huygens probe successfully landed on Titan in January 2005, returning the first images from the surface.\n\nTitan is often described as \"planet-like\" due to its atmosphere, liquid cycle, and complex geology\u2014making it a prime target in the search for potentially habitable environments, even if its biology (if any) would be radically different from Earth life.",
+          "judge_score": 1
+        }
+      ]
+    },
+    {
+      "id": "t4_act_dont_ask",
+      "tier": 4,
+      "category": "judgment",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "list_tables"
+          ],
+          "error": null,
+          "final": "I'll set up a table for tracking your daily water intake. Each row will represent one day, and I'll use the date as the key so re-logging the same day updates the entry rather than creating duplicates.\n\n```sql\ncreate_table('water_intake', ['date:date:key', 'amount:real', 'notes:text'])\n```\n\n**Why this shape:**\n- **date** as `date` type lets you filter by date ranges and sort chronologically.\n- **amount** as `real` so you can sum, average, or calculate totals across days.\n- **notes** as `text` for any extra details (e.g., \"felt dehydrated,\" \"had extra at the gym\").\n- `date:key` makes this idempotent \u2014 log the same day again and it updates, not duplicates.\n\nWant me to add a sample entry, or do you have today's intake to log?",
+          "chain_correct": false,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "create_table"
+          ],
+          "error": null,
+          "final": "Done! Your water intake table is ready with:\n\n- **date** (date) \u2014 the day, unique so re-adding a day updates that row instead of duplicating\n- **amount** (real) \u2014 total ounces or liters you drank\n- **notes** (text) \u2014 optional reminders like \"forgot to track\" or \"extra glass after workout\"\n\nYou can start by adding a row like:\n\n```\ninsert_row('daily_water_intake', {\n  'date': '2024-12-19',\n  'amount': 64,\n  'notes': 'Goal met!'\n})\n```\n\nOr just tell me: \"I drank 3 liters today\" and I'll add it for you.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "list_tables",
+            "create_table"
+          ],
+          "error": null,
+          "final": "Done! Here's the table I've created for tracking your daily water intake:\n\n**Table: `water_intake`**\n- `date` (date, key) \u2014 the day you're tracking\n- `amount` (real) \u2014 how much water you drank\n- `unit` (text) \u2014 e.g., \"liters\", \"cups\", \"ounces\"\n- `notes` (text) \u2014 any extra details (e.g., \"extra on hike\", \"felt dehydrated\")\n\nI picked a date as the key so you can update past entries if you want. Want to add today's entry? Just tell me how much you drank and the unit.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t4_days_until",
+      "tier": 4,
+      "category": "reasoning",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 2.0,
+      "runs": [
+        {
+          "tools": [
+            "get_current_time",
+            "calculator"
+          ],
+          "error": null,
+          "final": "There are **157 days** until December 25th this year (from July 21, 2026).",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "get_current_time",
+            "calculator"
+          ],
+          "error": null,
+          "final": "There are **157 days** until December 25th of this year.\n\nBreaking it down:\n- July 21\u201331: 10 days\n- August: 31 days\n- September: 30 days\n- October: 31 days\n- November: 30 days\n- December 1\u201325: 25 days\n\nTotal: 157 days \ud83c\udf84",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "get_current_time"
+          ],
+          "error": null,
+          "final": "There are **157 days** until December 25th, 2026.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t4_compare_math",
+      "tier": 4,
+      "category": "reasoning",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 2.0,
+      "runs": [
+        {
+          "tools": [
+            "calculator",
+            "calculator"
+          ],
+          "error": null,
+          "final": "15% of 340 is 51, while 40 \u00f7 0.8 is 50. So **15% of 340 is larger**.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator",
+            "calculator"
+          ],
+          "error": null,
+          "final": "15% of 340 is 51, and 40 divided by 0.8 is 50.\n\nSo **15% of 340 is larger**.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [],
+          "error": null,
+          "final": "Let me calculate both:\n\n1. **15% of 340**: 0.15 \u00d7 340 = **51**\n2. **40 divided by 0.8**: 40 / 0.8 = **50**\n\n**15% of 340 is larger** \u2014 it's 51 compared to 50.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_avoid_search",
+      "tier": 4,
+      "category": "tool-selection",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [],
+          "error": null,
+          "final": "2 to the power of 10 is 1024.",
+          "chain_correct": false,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator",
+            "calculator"
+          ],
+          "error": null,
+          "final": "2 to the power of 10 is **1024**.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "2 to the power of 10 is **1024**.\n\nIt\u2019s the number behind the binary kilobyte (1024 bytes), so you\u2019ll see it pop up in computing quite a bit.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t4_synthesize",
+      "tier": 4,
+      "category": "reasoning",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "read_file",
+            "read_file"
+          ],
+          "error": null,
+          "final": "Team Alpha had higher revenue at **$120,000** compared to Team Beta's **$95,000**.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "list_files",
+            "read_file",
+            "read_file"
+          ],
+          "error": null,
+          "final": "Based on the files:\n\n- **Team Alpha** (a.txt): $120,000\n- **Team Beta** (b.txt): $95,000\n\n**Team Alpha had higher revenue** this quarter, with $25,000 more than Team Beta.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file"
+          ],
+          "error": null,
+          "final": "Team Alpha had higher revenue this quarter: $120,000 vs. Team Beta's $95,000.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t4_no_fabricate",
+      "tier": 4,
+      "category": "honesty",
+      "skipped": false,
+      "chain_pass": null,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "ask_data",
+            "list_tables"
+          ],
+          "error": null,
+          "final": "I don't have any sales data tables set up yet, so I can't pull those figures for you. \n\nWould you like to:\n1. **Set up a sales table** \u2013 I can help you create a table structure (date, product, quantity, revenue, etc.) and you can input your quarterly data.\n2. **Provide the data** \u2013 If you have the numbers handy (maybe from a spreadsheet or report), you can paste them and I'll organize them for you.\n3. **Clarify what you're looking for** \u2013 Are you asking about a specific product, region, or total revenue?\n\nLet me know how you'd like to proceed!",
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "list_tables"
+          ],
+          "error": null,
+          "final": "I don't have any tables set up in my workspace yet, so I can't pull your sales figures directly. \n\nDo you have your sales data stored in a specific table that I can query? Or would you like help creating a table to track your sales data going forward? If you have the data in a document or file, I can help you get it into a queryable format.",
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "ask_data"
+          ],
+          "error": null,
+          "final": "I don't have any sales data in my tables yet. If you'd like me to analyze your sales figures, you can either:\n\n1. **Provide the data directly** - paste the sales numbers, dates, and any relevant details\n2. **Create a table** - I can help you set up a table to store and track your sales data going forward\n\nWould you like to do either of these?",
+          "judge_score": 3
+        }
+      ]
+    }
+  ]
+}
