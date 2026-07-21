@@ -478,8 +478,13 @@ class Engine:
                                      retention_days=config.trace_retention_days,
                                      keep_runs_per_session=config.trace_keep_runs_per_session)
             self.events.add_sink(self._trace.record)
-            self._trace.prune(config.trace_retention_mode, config.trace_retention_days,
-                              config.trace_keep_runs_per_session)   # prune once at startup
+            try:
+                self._trace.prune(config.trace_retention_mode, config.trace_retention_days,
+                                  config.trace_keep_runs_per_session)   # prune once at startup
+            except Exception:
+                # A bad events.db (e.g. left corrupt by an unclean shutdown) must not stop the whole
+                # process from booting — worse than dropping one turn's trace.
+                log.exception("startup trace prune failed; continuing without pruning")
 
     def _owner_session_id(self) -> str:
         """The owner's primary Telegram chat id — the delivery identity for scheduled routines that
@@ -955,15 +960,22 @@ class Engine:
         live = self.events.recent(session_id)
         if self._trace is None:
             return live
-        seen = {(e.run_id, e.step, e.kind, e.ts) for e in live}      # in-memory wins on collision
-        merged = list(live)
-        for d in self._trace.recent(session_id):
-            key = (d["run_id"], d["step"], d["kind"], d["ts"])
-            if key not in seen:
-                merged.append(StepEvent(run_id=d["run_id"], session_id=d["session_id"],
-                                        step=d["step"], kind=d["kind"], data=d["data"], ts=d["ts"]))
-        merged.sort(key=lambda e: e.ts)
-        return merged
+        try:
+            seen = {(e.run_id, e.step, e.kind, e.ts) for e in live}  # in-memory wins on collision
+            merged = list(live)
+            for d in self._trace.recent(session_id):
+                key = (d["run_id"], d["step"], d["kind"], d["ts"])
+                if key not in seen:
+                    merged.append(StepEvent(run_id=d["run_id"], session_id=d["session_id"],
+                                            step=d["step"], kind=d["kind"], data=d["data"], ts=d["ts"]))
+            merged.sort(key=lambda e: e.ts)
+            return merged
+        except Exception:
+            # A broken trace store (disk I/O, WAL corruption, permissions) must degrade to today's
+            # in-memory-only behavior, not swallow a turn that already succeeded (callers like
+            # telegram_bot.py and the /events SSE stream call recent() after the answer is produced).
+            log.exception("trace read failed in recent(); falling back to in-memory events only")
+            return live
 
     async def emit(self, run_id: str, session_id: str, step: int, kind: str, data: dict) -> None:
         await self.events.publish(StepEvent(run_id, session_id, step, kind, data, now()))

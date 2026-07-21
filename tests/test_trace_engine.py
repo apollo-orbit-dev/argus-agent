@@ -1,3 +1,5 @@
+import sqlite3
+
 from config import Config
 from engine.engine import Engine
 
@@ -36,3 +38,25 @@ def test_recent_merges_without_duplicates(tmp_path):
     asyncio.run(e.emit("run1", "sess", 0, "tool_call", {"tool": "calc"}))
     evs = e.recent("sess")                     # in-memory + persisted, deduped
     assert sum(1 for ev in evs if ev.kind == "tool_call") == 1
+
+
+def test_recent_falls_back_to_live_when_trace_read_fails(tmp_path):
+    import asyncio
+    e = _engine(tmp_path, on=True)
+    asyncio.run(e.emit("run1", "sess", 0, "tool_call", {"tool": "calc"}))
+
+    def boom(_session_id):
+        raise sqlite3.OperationalError("disk I/O error")
+    e._trace.recent = boom                      # simulate a broken trace store
+
+    evs = e.recent("sess")                      # must NOT raise
+    assert [ev.kind for ev in evs] == ["tool_call"]     # falls back to in-memory
+
+
+def test_startup_prune_failure_does_not_block_boot(tmp_path, monkeypatch):
+    from engine.trace.store import TraceStore
+    def boom(self, *a, **kw):
+        raise sqlite3.OperationalError("corrupt db")
+    monkeypatch.setattr(TraceStore, "prune", boom)
+    e = _engine(tmp_path, on=True)              # must construct without raising
+    assert e._trace is not None
