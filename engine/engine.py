@@ -1530,6 +1530,7 @@ class Engine:
 
     def delete_session(self, session_id: str) -> None:
         self.store.delete_session(session_id)
+        self.events.clear(session_id)   # drop the in-memory replay buffer too (same as new_session)
         if self._trace is not None:
             try:
                 self._trace.delete_session(session_id)
