@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+- **Durable run traces** — the tool/step trace behind the Runs card now persists to a SQLite-backed
+  `events.db` sink when `enable_trace_persistence` is on (default), so runs survive a server restart
+  instead of vanishing with process memory. `model_request` events are excluded from the sink to keep
+  it lean. Retention is config-driven via `trace_retention_mode` (`age+runs` / `age` / `runs` / `off`),
+  `trace_retention_days`, and `trace_keep_runs_per_session`; `/status` now reports `trace_persistence`
+  so clients can tell whether the current process has it wired up.
+- **Dashboard: trace-persistence controls** — a new "Run trace persistence" card on the Developer
+  page exposes the on/off switch (labelled as applying on restart, since the sink registers at
+  startup), the retention-mode select, and the retention-days / keep-runs-per-session number fields,
+  all reflecting from and PATCHing `/config` like the other runtime toggles. The Runs card's
+  empty-state copy is now conditional on `/status`'s `trace_persistence`: "No runs yet" when
+  persistence is on (runs really do survive a restart), the existing "not kept across a restart"
+  wording when it's off.
+
 ## 0.8.0
 
 ### Added

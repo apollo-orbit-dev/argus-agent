@@ -418,13 +418,18 @@
   }
 
   var EMPTY_RUNS_HTML = '<div class="empty"><span class="empty-title">No runs yet</span>run a task above and watch it stream here.</div>';
-  var EMPTY_RUNSLIST_HTML = '<div class="empty"><span class="empty-title">No runs to show</span>the transcript above is the record; runs aren\'t kept across a restart.</div>';
+  var tracePersist = false; // set from /status ('trace_persistence'); flips the empty-runs copy below
+  function emptyRunsHtml(){
+    return tracePersist
+      ? '<div class="empty"><span class="empty-title">No runs yet</span>run a task above and watch it stream here.</div>'
+      : '<div class="empty"><span class="empty-title">No runs to show</span>the transcript above is the record; runs aren\'t kept across a restart.</div>';
+  }
 
   function renderRunsList(){
     var live = liveRun();
     runsLiveEl.innerHTML = live ? runRowHtml(live) : '';
     var past = pastRunsOrdered();
-    runsPastEl.innerHTML = past.length ? past.map(runRowHtml).join('') : (live ? '' : EMPTY_RUNSLIST_HTML);
+    runsPastEl.innerHTML = past.length ? past.map(runRowHtml).join('') : (live ? '' : emptyRunsHtml());
   }
 
   function renderViewerHeader(run){
@@ -1056,6 +1061,11 @@
     reflectBoolSwitch('swToolNetwork', cfg.tool_creation_allow_network);
     reflectBoolSwitch('swCodeInterp', cfg.enable_code_interpreter);
 
+    reflectBoolSwitch('swTracePersist', cfg.enable_trace_persistence);
+    if ($('selTraceMode')) $('selTraceMode').value = cfg.trace_retention_mode;
+    setInputVal('inTraceDays', cfg.trace_retention_days);
+    setInputVal('inTraceKeep', cfg.trace_keep_runs_per_session);
+
     var tok = $('inTgToken');
     if (tok && document.activeElement !== tok)
       tok.placeholder = cfg.telegram_bot_token === '***set***' ? 'a token is set — paste a new one to change' : 'paste new token to change';
@@ -1119,6 +1129,12 @@
   wireBoolSwitch('swToolCreation', 'enable_tool_creation');
   wireBoolSwitch('swToolNetwork', 'tool_creation_allow_network');
   wireBoolSwitch('swCodeInterp', 'enable_code_interpreter');
+  wireBoolSwitch('swTracePersist', 'enable_trace_persistence');
+  (function(){
+    var m = $('selTraceMode'); if (m) m.addEventListener('change', function(){ patchConfigKey('trace_retention_mode', m.value).catch(function(){ toast('Failed to set trace_retention_mode', 'err'); loadConfig(); }); });
+  })();
+  wireNumberField('inTraceDays', 'trace_retention_days');
+  wireNumberField('inTraceKeep', 'trace_keep_runs_per_session');
   $('observerThreshold').addEventListener('change', function(){
     var n = Number($('observerThreshold').value);
     if (Number.isFinite(n)) patchConfigKey('observer_repeat_threshold', Math.trunc(n)).catch(function(){ toast('Failed to set threshold', 'err'); });
@@ -1173,6 +1189,9 @@
       }
       $('chipTcm').textContent = s.tool_calling_mode || $('chipTcm').textContent;
       $('chipSsm').textContent = s.skill_selection_mode || $('chipSsm').textContent;
+      var wasTracePersist = tracePersist;
+      tracePersist = !!s.trace_persistence;
+      if (tracePersist !== wasTracePersist) renderRunsList();
     } catch(e){
       ['model','searxng','firecrawl','embed'].forEach(function(k){ setDot($('led-' + k), null); });
     }

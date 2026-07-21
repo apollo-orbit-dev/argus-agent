@@ -415,6 +415,32 @@
             <div id="skillsCreated"></div>
           </div>
         </div>
+
+        <div class="card" style="margin-top:16px;">
+          <div class="card-head"><span class="card-title">Run trace persistence</span></div>
+          <div class="field row-inline" style="justify-content:space-between;">
+            <label class="switch"><input type="checkbox" id="swTracePersist"><span class="track"><span class="thumb"></span></span>Persist run trace (survives restart)<span class="field-note">applies on restart — the sink registers at startup</span></label>
+          </div>
+          <div class="row-inline" style="gap:16px; align-items:flex-start;">
+            <div class="field" style="flex:1;">
+              <label class="field-label">Retention mode</label>
+              <select id="selTraceMode">
+                <option value="age+runs">age+runs</option>
+                <option value="age">age</option>
+                <option value="runs">runs</option>
+                <option value="off">off</option>
+              </select>
+            </div>
+            <div class="field" style="flex:1;">
+              <label class="field-label">Retention days</label>
+              <input type="number" id="inTraceDays">
+            </div>
+            <div class="field" style="flex:1;">
+              <label class="field-label">Keep runs / session</label>
+              <input type="number" id="inTraceKeep">
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- ================= LOGS ================= -->
