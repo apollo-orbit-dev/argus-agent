@@ -28,8 +28,16 @@ def test_session_endpoints(tmp_path):
         # messages
         msgs = (await c.get(f"/sessions/{sid}/messages")).json()
         assert msgs["total"] == 1 and msgs["messages"][0]["content"] == "hi"
+        # mutations are admin-gated: no token -> 401 (session still exists after)
+        assert (await c.patch(f"/sessions/{sid}", json={"name": "x"})).status_code == 401
+        assert (await c.delete(f"/sessions/{sid}")).status_code == 401
+        # rename requires a non-empty name -> 400
+        assert (await c.patch(f"/sessions/{sid}", json={}, headers=H)).status_code == 400
+        assert (await c.patch(f"/sessions/{sid}", json={"name": ""}, headers=H)).status_code == 400
         # rename (admin)
         assert (await c.patch(f"/sessions/{sid}", json={"name": "w2"}, headers=H)).status_code == 200
+        # rename round-trip actually took effect
+        assert any(s["id"] == sid and s["name"] == "w2" for s in (await c.get("/sessions")).json())
         # delete (admin)
         assert (await c.delete(f"/sessions/{sid}", headers=H)).status_code == 200
         assert not any(s["id"] == sid for s in (await c.get("/sessions")).json())
