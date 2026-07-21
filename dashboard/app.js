@@ -632,7 +632,12 @@
   async function loadTranscript(id){
     try {
       var data = await (await fetch('/sessions/' + encodeURIComponent(id) + '/messages?limit=1000')).json();
-      var msgs = data.messages || [];
+      // Drop empty / json-null turns: an assistant tool-call turn is stored with null content and would
+      // otherwise render as the literal "null". The raw log keeps them; the chat view hides them.
+      var msgs = (data.messages || []).filter(function(m){
+        var c = (m.content == null ? '' : String(m.content)).trim();
+        return c && c !== 'null';
+      });
       updateTranscriptMeta(msgs.length);
       if (!msgs.length){
         viewerHead.innerHTML =
@@ -644,20 +649,17 @@
         '<span class="vh-id num">transcript</span><span class="vh-sep">·</span>' +
         '<span class="vh-session">' + esc(id) + '</span><span class="vh-sep">·</span>' +
         '<span class="vh-steps num">' + msgs.length + ' messages</span>';
-      // Reuse the trace viewer's own node/callout building blocks (step-node/step-gutter/step-dot/
-      // step-body/tag-pill/callout) rather than inventing a second rendering style — a live run
-      // that starts on this session will naturally take over the same viewerBody afterwards.
-      viewerBody.innerHTML = msgs.map(function(m){
-        var isUser = m.role === 'user';
-        var c = isUser ? 'var(--cyan)' : 'var(--ok)';
-        return '<div class="step-node">' +
-            '<div class="step-gutter"><span class="step-dot" style="border-color:' + c + ';"></span><span class="step-connector"></span></div>' +
-            '<div class="step-body">' +
-              '<div class="step-head"><span class="tag-pill" style="color:' + c + '; background:color-mix(in srgb, ' + c + ' 15%, transparent); border-color:color-mix(in srgb, ' + c + ' 32%, transparent);">' + esc(m.role || '?') + '</span></div>' +
-              '<div class="callout' + (isUser ? '' : ' callout-answer') + '">' + esc(m.content || '') + '</div>' +
-            '</div>' +
-          '</div>';
-      }).join('');
+      // Chat/messaging view: user right, assistant left, tool output as a muted note.
+      viewerBody.innerHTML = '<div class="chat">' + msgs.map(function(m){
+        var role = m.role || '?';
+        var content = esc(m.content == null ? '' : String(m.content));
+        if (role === 'tool'){
+          return '<div class="chat-tool"><span class="chat-tool-label">tool</span>' +
+                   '<div class="chat-tool-body">' + content + '</div></div>';
+        }
+        var side = (role === 'user') ? 'me' : 'them';
+        return '<div class="chat-row ' + side + '"><div class="chat-bubble ' + side + '">' + content + '</div></div>';
+      }).join('') + '</div>';
       viewerBody.scrollTop = viewerBody.scrollHeight;
     } catch(e){ toast('Failed to load transcript: ' + e.message, 'err'); }
   }
