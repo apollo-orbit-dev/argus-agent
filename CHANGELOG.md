@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+- **`evolve_table` skill** — guidance so a small model *reaches for* the table-mutation tools when
+  changing a table that already exists: `add_column` in place (not rebuild-and-port), `copy_table` for a
+  bulk copy (not a `query` + `insert_row` loop), `rename_column`/`drop_column`/`rename_table` for schema
+  changes, and `update_rows` for bulk value changes. Measured A/B on the 3B model (pass^k, Opus quality
+  judge): chain-correctness 4/6 → 5/6 and judge 1.83 → 2.61 (Δ+0.78), driven mainly by the add-a-column
+  case (0/3 → 3/3), with no over-fire on off-target prompts.
+
 ## 0.7.4
 
 ### Added
