@@ -43,6 +43,11 @@ matching a condition ("mark all my 2025 tasks archived", "set status to done whe
 call `update_rows(table, set={...}, match={...})`. It updates every row matching ALL of `match` in one
 call. An empty `match` is refused (it would rewrite the whole table), so give a real filter. Don't
 `delete_row` + `insert_row` to change a value, and don't loop.
+**Infer the `set` and `match` from the request — act, don't interrogate.** "Mark all my 2025 tasks
+archived" → `update_rows('tasks', set={'status':'archived'}, match={'year':2025})`. `list_tables` to
+find the table and its columns, then just do it; the obvious `set` value ("archived", "done", "paid")
+and the obvious `match` are right there in the request. Reserve a clarifying question for when the target
+rows or the new value are genuinely ambiguous — for a clear request, a correct update beats a question.
 
 **5. Confirm what changed.** After the change, tell the user plainly what you did — the column added and
 its type, the rows a `copy_table`/`update_rows` touched (it reports the count), the column renamed. If a
@@ -56,6 +61,8 @@ its type, the rows a `copy_table`/`update_rows` touched (it reports the count), 
   `insert_row` × 561 → (often) hit the step limit and fail, having built a duplicate table.
 
 Rules of thumb:
+- Act, don't interrogate — `list_tables` to see the real shape, infer the obvious column/value/filter
+  from the request, and make the change. Ask only when the target is genuinely ambiguous.
 - The table exists — mutate it, don't rebuild it. `add_column`/`rename_column`/`drop_column`/
   `rename_table` change structure in place.
 - Moving rows is `copy_table` (one call), never a `query_table` + `insert_row` loop.
