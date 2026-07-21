@@ -687,9 +687,12 @@
     var name = prompt('Rename session:');
     if (!name) return;
     try {
-      await fetch('/sessions/' + encodeURIComponent(id), {
+      // The fetch shim resolves (not rejects) a 401 when the admin token is missing/wrong, so a
+      // failed mutation must be caught on res.ok — otherwise we'd toast success on an auth failure.
+      var res = await fetch('/sessions/' + encodeURIComponent(id), {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name })
       });
+      if (!res.ok) { toast('Rename failed (' + res.status + ')', 'err'); return; }
       renderSessionList();
       toast('Renamed session', 'ok');
     } catch(e){ toast('Rename failed: ' + e.message, 'err'); }
@@ -700,8 +703,12 @@
       title: 'Delete session',
       message: "Delete this session? This can't be undone.",
       onConfirm: async function(){
-        try { await fetch('/sessions/' + encodeURIComponent(id), { method: 'DELETE' }); }
+        var res;
+        try { res = await fetch('/sessions/' + encodeURIComponent(id), { method: 'DELETE' }); }
         catch(e){ toast('Delete failed: ' + e.message, 'err'); return; }
+        // Guard on res.ok so a 401 (no/wrong admin token) doesn't falsely report success and,
+        // worse, fall back to setSession('dashboard') when nothing was actually deleted.
+        if (!res.ok) { toast('Delete failed (' + res.status + ')', 'err'); return; }
         toast('Session deleted', 'ok');
         if (id === SESSION) setSession('dashboard');   // fall back to the default session
         else renderSessionList();
@@ -723,9 +730,15 @@
   if (sessionNewBtn) sessionNewBtn.addEventListener('click', async function(){
     sessionNewBtn.disabled = true;
     try {
-      var r = await (await fetch('/sessions', {
+      // Check res.ok BEFORE parsing/using the body: a 401 from the fetch shim has no id, and
+      // setSession(undefined) would persist SESSION="undefined" to localStorage and re-subscribe
+      // /events?session_id=undefined — real corruption. Only switch on a real id.
+      var res = await fetch('/sessions', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({})
-      })).json();
+      });
+      if (!res.ok) { toast('Failed to create session (' + res.status + ')', 'err'); return; }
+      var r = await res.json();
+      if (!r || !r.id) { toast('Failed to create session (no id returned)', 'err'); return; }
       setSession(r.id);
       toast('New session created', 'ok');
     } catch(e){ toast('Failed to create session: ' + e.message, 'err'); }
