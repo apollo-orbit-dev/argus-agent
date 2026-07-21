@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, Optional
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 ToolCallingMode = Literal["native", "manual", "native_finish"]
@@ -143,8 +143,10 @@ class Config(BaseSettings):
     # Event trace persistence: save event stream to durable storage for replay/audit.
     enable_trace_persistence: bool = True
     trace_retention_mode: TraceRetentionMode = "age+runs"
-    trace_retention_days: int = 30
-    trace_keep_runs_per_session: int = 200
+    # ge=1: a wireNumberField that lets a UI textbox go empty PATCHes 0, and a startup prune with
+    # days=0 (or keep_runs=0) would wipe the entire trace — enforce a floor here as the backstop.
+    trace_retention_days: int = Field(default=30, ge=1)
+    trace_keep_runs_per_session: int = Field(default=200, ge=1)
     trace_event_max_bytes: int = 16384
     trace_replay_runs: int = 50
     # Charts: make_chart renders bar/line/pie/scatter to PNG (view/Telegram) + SVG (embed). Safe.

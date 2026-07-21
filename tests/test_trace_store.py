@@ -59,6 +59,21 @@ def test_prune_off_is_noop(tmp_path):
     assert len(s.recent("sess")) == 1
 
 
+def test_record_skips_ephemeral_session(tmp_path):
+    s = TraceStore(str(tmp_path / "events.db"))
+    s.record(_ev("__routine__", "routine", 0, "final", {"answer": "x"}))
+    assert s.recent("__routine__") == []
+
+
+def test_delete_session_drops_only_that_session(tmp_path):
+    s = TraceStore(str(tmp_path / "events.db"))
+    s.record(_ev("a", "run1", 0, "final", {"answer": "a"}))
+    s.record(_ev("b", "run2", 0, "final", {"answer": "b"}))
+    s.delete_session("a")
+    assert s.recent("a") == []
+    assert [e["run_id"] for e in s.recent("b")] == ["run2"]
+
+
 def test_prune_runs_is_per_session_even_if_run_ids_collide(tmp_path):
     s = TraceStore(str(tmp_path / "events.db"), replay_runs=100)
     # same run_id "dup" used by two different sessions

@@ -31,6 +31,10 @@ class TraceStore:
         self._rw = sqlite3.connect(path, check_same_thread=False)
         self._rw.row_factory = sqlite3.Row
         self._rw.execute("PRAGMA journal_mode=WAL")
+        # Must be set before any table exists (sqlite only applies it at creation time), so this
+        # runs before the executescript below that creates the schema. Lets pruning actually shrink
+        # events.db on disk instead of just freeing pages for reuse.
+        self._rw.execute("PRAGMA auto_vacuum=INCREMENTAL")
         self._rw.executescript(
             """
             CREATE TABLE IF NOT EXISTS events (
@@ -48,6 +52,8 @@ class TraceStore:
     def record(self, ev) -> None:
         if ev.kind == "model_request":                       # redundant with sessions.db; the bloat
             return
+        if ev.session_id.startswith("__"):                   # ephemeral session (e.g. "__routine__"),
+            return                                             # matches the convention in engine/state.py
         try:
             data = json.dumps(ev.data or {}, default=str)
         except Exception:
@@ -97,6 +103,12 @@ class TraceStore:
             out.append({"run_id": r["run_id"], "session_id": r["session_id"], "step": r["step"],
                         "kind": r["kind"], "data": d, "ts": r["ts"]})
         return out
+
+    def delete_session(self, session_id: str) -> None:
+        """Drop a session's persisted trace (used by new_session/reset and delete_session)."""
+        with self._lock:
+            self._rw.execute("DELETE FROM events WHERE session_id=?", (session_id,))
+            self._rw.commit()
 
     # ---- retention ----
     def prune(self, mode: str, days: int, keep_runs: int) -> None:

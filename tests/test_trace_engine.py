@@ -60,3 +60,33 @@ def test_startup_prune_failure_does_not_block_boot(tmp_path, monkeypatch):
     monkeypatch.setattr(TraceStore, "prune", boom)
     e = _engine(tmp_path, on=True)              # must construct without raising
     assert e._trace is not None
+
+
+def test_new_session_clears_persisted_trace(tmp_path):
+    import asyncio
+    e = _engine(tmp_path, on=True)
+    asyncio.run(e.emit("run1", "sess", 0, "info", {"text": "secret prompt"}))
+    assert e.recent("sess")                      # sanity: something persisted first
+    e.new_session("sess")
+    assert e.recent("sess") == []                 # nothing replays from disk after a clear
+
+
+def test_delete_session_clears_persisted_trace(tmp_path):
+    import asyncio
+    e = _engine(tmp_path, on=True)
+    asyncio.run(e.emit("run1", "sess", 0, "info", {"text": "secret prompt"}))
+    e.delete_session("sess")
+    # bypass e's own in-memory buffer (delete_session, unlike new_session, isn't expected to be
+    # queried again in-process) — a fresh engine on the same data_dir proves the disk side is gone
+    e2 = _engine(tmp_path, on=True)
+    assert e2.recent("sess") == []
+
+
+def test_new_session_leaves_other_sessions_intact(tmp_path):
+    import asyncio
+    e = _engine(tmp_path, on=True)
+    asyncio.run(e.emit("run1", "a", 0, "info", {"text": "a's data"}))
+    asyncio.run(e.emit("run2", "b", 0, "info", {"text": "b's data"}))
+    e.new_session("a")
+    assert e.recent("a") == []
+    assert [ev.kind for ev in e.recent("b")] == ["info"]

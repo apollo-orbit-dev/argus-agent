@@ -1530,14 +1530,28 @@ class Engine:
 
     def delete_session(self, session_id: str) -> None:
         self.store.delete_session(session_id)
+        if self._trace is not None:
+            try:
+                self._trace.delete_session(session_id)
+            except Exception:
+                log.exception("trace delete_session failed for %s; conversation was deleted, "
+                               "trace may be orphaned", session_id)
 
     def session_messages(self, session_id: str, limit: int = 200, offset: int = 0) -> dict:
         return self.store.session_messages(session_id, limit, offset)
 
     def new_session(self, session_id: str) -> None:
-        """Start fresh: clear the session's conversation AND its event replay buffer."""
+        """Start fresh: clear the session's conversation AND its event replay buffer (both the
+        in-memory EventBus buffer and the persisted trace — recent() merges from disk, so leaving
+        the persisted side alone would make the runs reappear on the next /events connect)."""
         self.store.reset(session_id)
         self.events.clear(session_id)
+        if self._trace is not None:
+            try:
+                self._trace.delete_session(session_id)
+            except Exception:
+                log.exception("trace delete_session failed for %s during new_session; conversation "
+                               "was cleared, trace may be orphaned", session_id)
 
     def _recent_context(self, session_id: str, exclude_last_user: str = "", turns: int = 8) -> str:
         """Recent conversation turns to give autoextract context — so a reference like 'my project'
