@@ -63,3 +63,18 @@ def test_approval_flags():
     assert "approval_window_seconds" in c._ENV_FIELDS
     pairs = dict(c.env_pairs())
     assert "ENABLE_INTERACTIVE_APPROVALS" in pairs and "APPROVAL_WINDOW_SECONDS" in pairs
+
+
+def test_trace_persistence_config_defaults_and_env_roundtrip():
+    from config import Config
+    c = Config()
+    assert c.enable_trace_persistence is True
+    assert c.trace_retention_mode == "age+runs"
+    assert c.trace_retention_days == 30 and c.trace_keep_runs_per_session == 200
+    assert c.trace_event_max_bytes == 16384 and c.trace_replay_runs == 50
+    # the six fields are env-round-tripped (matches the existing style in this file: c._ENV_FIELDS)
+    for f in ("enable_trace_persistence", "trace_retention_mode", "trace_retention_days",
+              "trace_keep_runs_per_session", "trace_event_max_bytes", "trace_replay_runs"):
+        assert f in c._ENV_FIELDS
+    pairs = dict(c.env_pairs())
+    assert "TRACE_RETENTION_MODE" in pairs or "trace_retention_mode" in {k.lower() for k in pairs}
