@@ -21,14 +21,14 @@ class _FakeSummarizer:
         return ModelResponse(content=self.content, finish_reason="stop")
 
 
-def _engine():
+def _engine(tmp_path):
     cfg = Config(model_base_url="http://x/v1", model_name="main",
                  telegram_bot_token="", memory_scope="session")
-    return Engine(cfg)
+    return Engine(cfg, data_dir=str(tmp_path))
 
 
-async def test_compact_passes_think_false_and_shrinks():
-    e = _engine()
+async def test_compact_passes_think_false_and_shrinks(tmp_path):
+    e = _engine(tmp_path)
     fake = _FakeSummarizer("Notes: user tracks daily sales in daily_sales; focus is revenue.")
     e._model_client = lambda: fake
     sid = "s"
@@ -45,9 +45,9 @@ async def test_compact_passes_think_false_and_shrinks():
     assert conv[0]["content"].startswith("[Summary")
 
 
-async def test_compact_reports_empty_summary_when_model_returns_blank():
+async def test_compact_reports_empty_summary_when_model_returns_blank(tmp_path):
     # if the model still returns nothing, compact must not silently corrupt history
-    e = _engine()
+    e = _engine(tmp_path)
     e._model_client = lambda: _FakeSummarizer("")
     sid = "s"
     seed = [{"role": "user", "content": f"m{i}"} for i in range(6)]
@@ -59,9 +59,9 @@ async def test_compact_reports_empty_summary_when_model_returns_blank():
     assert len(e.store.conversation(sid)) == len(seed)  # history untouched
 
 
-async def test_compact_bounds_transcript_for_huge_history():
+async def test_compact_bounds_transcript_for_huge_history(tmp_path):
     # a very large history is head+tail sampled, not sent whole and not truncated to only the start
-    e = _engine()
+    e = _engine(tmp_path)
     fake = _FakeSummarizer("ok")
     e._model_client = lambda: fake
     sid = "s"

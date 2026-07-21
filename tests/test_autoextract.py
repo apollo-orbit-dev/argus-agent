@@ -17,7 +17,7 @@ def _engine(tmp_path, extractor_output):
     # session scope so the memory key == session_id (scoping is tested in test_memory_scope)
     cfg = Config(model_base_url="http://x/v1", model_name="main",
                  telegram_bot_token="", memory_scope="session")
-    e = Engine(cfg)
+    e = Engine(cfg, data_dir=str(tmp_path))
     e.memory = Memory(MemoryStore(str(tmp_path / "m.db")), EmbeddingClient(), "off")
     e._model_client = lambda: _FakeExtractor(extractor_output)
     return e
