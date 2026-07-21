@@ -196,11 +196,17 @@
             <ul class="session-list" id="sessionList"></ul>
           </aside>
 
-          <!-- RUNS -->
-          <div class="runs-panel">
-            <div class="runs-head">Runs</div>
-            <div class="runs-live" id="runsLive"></div>
-            <div class="runs-past" id="runsPast"></div>
+          <!-- MIDDLE: transcript selector (top) + runs (below) -->
+          <div class="console-mid">
+            <div class="transcript-card active" id="transcriptCard" role="button" tabindex="0" title="Show the full conversation for this session">
+              <div class="runs-head">Transcript</div>
+              <div class="transcript-card-meta" id="transcriptMeta">no messages yet</div>
+            </div>
+            <div class="runs-panel">
+              <div class="runs-head">Runs</div>
+              <div class="runs-live" id="runsLive"></div>
+              <div class="runs-past" id="runsPast"></div>
+            </div>
           </div>
 
           <!-- TRACE VIEWER -->

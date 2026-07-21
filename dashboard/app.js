@@ -264,6 +264,7 @@
   var liveRunId = null;       // run_id of the current in-flight run, or null
   var selectedRunId = null;   // whichever run is shown in the viewer
   var followingLive = true;
+  var currentView = 'transcript';   // 'transcript' | run_id — what the viewer is showing
   var userScrolledUp = false;
 
   function newRun(id, sessionId, firstTs){
@@ -417,12 +418,13 @@
   }
 
   var EMPTY_RUNS_HTML = '<div class="empty"><span class="empty-title">No runs yet</span>run a task above and watch it stream here.</div>';
+  var EMPTY_RUNSLIST_HTML = '<div class="empty"><span class="empty-title">No runs to show</span>the transcript above is the record; runs aren\'t kept across a restart.</div>';
 
   function renderRunsList(){
     var live = liveRun();
     runsLiveEl.innerHTML = live ? runRowHtml(live) : '';
     var past = pastRunsOrdered();
-    runsPastEl.innerHTML = past.length ? past.map(runRowHtml).join('') : (live ? '' : EMPTY_RUNS_HTML);
+    runsPastEl.innerHTML = past.length ? past.map(runRowHtml).join('') : (live ? '' : EMPTY_RUNSLIST_HTML);
   }
 
   function renderViewerHeader(run){
@@ -462,8 +464,10 @@
 
   function selectRun(id){
     if (!id || !runs.has(id)) return;
+    currentView = id;
     selectedRunId = id;
     followingLive = (id === liveRunId);
+    setTranscriptActive(false);
     renderViewerFull(runs.get(id));
     renderRunsList();
   }
@@ -476,6 +480,7 @@
       if (row) selectRun(row.getAttribute('data-id'));
     });
   });
+  (function(){ var t = $('transcriptCard'); if (t) t.addEventListener('click', showTranscript); })();
 
   /* ---- interactive approvals: the inline trace card (delegated on viewerBody, same pattern as
      runsLiveEl/runsPastEl above — the trace body itself has no prior delegated listener) ---- */
@@ -559,13 +564,20 @@
     if (isNewRun){
       runs.set(ev.run_id, newRun(ev.run_id, ev.session_id, ev.ts));
       liveRunId = ev.run_id; // the newest run seen becomes the in-flight one
-      if (followingLive) selectedRunId = ev.run_id;
+      // Only auto-follow a new run into the viewer when we're ALREADY viewing a run. When the
+      // transcript is showing, a new turn must NOT clobber it — it just appears in the Runs list.
+      if (currentView !== 'transcript' && followingLive){ currentView = ev.run_id; selectedRunId = ev.run_id; }
     }
     var run = runs.get(ev.run_id);
     updateTaskLabel(run, ev);
     run.steps.push(ev);
 
-    if (ev.kind === 'final'){ run.status = 'ok'; if (liveRunId === run.id) liveRunId = null; }
+    if (ev.kind === 'final'){
+      run.status = 'ok'; if (liveRunId === run.id) liveRunId = null;
+      // Stay-put refresh: if the transcript is the active view, reload it when this session's turn
+      // completes so the new turn appears — without ever covering the conversation.
+      if (currentView === 'transcript' && ev.session_id === SESSION) loadTranscript(SESSION);
+    }
     else if (ev.kind === 'error'){ run.status = 'error'; if (liveRunId === run.id) liveRunId = null; }
     else if (ev.kind === 'approval_resolved' && ev.data && ev.data.req_id){
       // The engine emits approval_resolved (ApprovalBroker._emit_resolved) whenever a request is
@@ -579,7 +591,8 @@
       });
     }
 
-    if (selectedRunId === run.id){
+    // Only paint run steps into the viewer when the viewer is actually showing THIS run.
+    if (currentView === run.id){
       if (isNewRun){
         renderViewerFull(run);
       } else {
@@ -620,9 +633,11 @@
     try {
       var data = await (await fetch('/sessions/' + encodeURIComponent(id) + '/messages?limit=1000')).json();
       var msgs = data.messages || [];
+      updateTranscriptMeta(msgs.length);
       if (!msgs.length){
-        viewerHead.innerHTML = '';
-        viewerBody.innerHTML = EMPTY_RUNS_HTML;
+        viewerHead.innerHTML =
+          '<span class="vh-id num">transcript</span><span class="vh-sep">·</span><span class="vh-session">' + esc(id) + '</span>';
+        viewerBody.innerHTML = '<div class="empty"><span class="empty-title">No messages yet</span>send a turn to start this conversation.</div>';
         return;
       }
       viewerHead.innerHTML =
@@ -645,6 +660,23 @@
       }).join('');
       viewerBody.scrollTop = viewerBody.scrollHeight;
     } catch(e){ toast('Failed to load transcript: ' + e.message, 'err'); }
+  }
+
+  function setTranscriptActive(on){
+    var el = $('transcriptCard');
+    if (el) el.classList.toggle('active', !!on);
+  }
+  function updateTranscriptMeta(n){
+    var el = $('transcriptMeta');
+    if (el) el.textContent = n ? (nfmt(n) + ' message' + (n === 1 ? '' : 's')) : 'no messages yet';
+  }
+  // Show the conversation transcript (the default view). Selecting a run drills into its trace instead.
+  function showTranscript(){
+    currentView = 'transcript';
+    selectedRunId = null; followingLive = false;
+    setTranscriptActive(true);
+    loadTranscript(SESSION);
+    renderRunsList();
   }
 
   async function renderSessionList(){
@@ -677,8 +709,10 @@
     // (also resets followingLive so a live run on the new session is auto-tracked even if the
     // user had scrolled back into a past run on the previous session).
     runs.clear(); seen.clear(); liveRunId = null; selectedRunId = null; followingLive = true;
+    currentView = 'transcript';   // the conversation is the default view for a session
     reopenEvents();          // re-subscribe /events at the new session — replays its recent ring buffer
-    loadTranscript(id);      // load persisted messages into the console as a fallback view
+    loadTranscript(id);      // show the persisted conversation
+    setTranscriptActive(true);
     renderRunsList();
     renderSessionList();
   }
@@ -828,8 +862,7 @@
         } catch(e){ toast('Failed to start new session: ' + e.message, 'err'); return; }
         runs.clear(); seen.clear(); liveRunId = null; selectedRunId = null; followingLive = true;
         renderRunsList();
-        viewerHead.innerHTML = '';
-        viewerBody.innerHTML = EMPTY_RUNS_HTML;
+        showTranscript();        // back to the (now context-cleared) conversation view
         loadUsage();
         toast('New session started', 'ok');
       }
@@ -866,8 +899,7 @@
       case 'reset': {
         runs.clear(); seen.clear(); liveRunId = null; selectedRunId = null; followingLive = true;
         renderRunsList();
-        viewerHead.innerHTML = '';
-        viewerBody.innerHTML = EMPTY_RUNS_HTML;
+        showTranscript();        // back to the conversation view
         toast('Trace view cleared — engine history reset is Telegram-only; the dashboard session persists', 'info');
         showCmdOut('/reset', 'Cleared the local trace view. History reset is Telegram-only; the dashboard session persists on the server.');
         break;

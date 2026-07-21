@@ -397,8 +397,20 @@
   .session-row-actions{ display:flex; gap:1px; flex-shrink:0; }
   .session-row-actions .act-btn{ padding:2px 4px; font-size:11px; }
 
+  .console-mid{ width:172px; flex-shrink:0; min-height:0; display:flex; flex-direction:column; gap:14px; }
+  .transcript-card{
+    flex-shrink:0; display:flex; flex-direction:column; cursor:pointer; overflow:hidden;
+    background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+    border-left:2px solid transparent;
+  }
+  .transcript-card:hover{ background:var(--panel-2); }
+  .transcript-card.active{ border-left-color:var(--cyan); box-shadow:0 0 0 1px rgba(56,214,224,.25); }
+  .transcript-card.active .runs-head{ color:var(--cyan); }
+  .transcript-card-meta{ padding:7px 10px; font-family:var(--font-mono); font-size:10px; color:var(--faint); }
+  .transcript-card.active .transcript-card-meta{ color:var(--muted); }
+
   .runs-panel{
-    width:172px; flex-shrink:0; min-height:0; display:flex; flex-direction:column;
+    flex:1; min-height:0; display:flex; flex-direction:column;
     background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden;
   }
   .runs-head{
@@ -667,6 +679,7 @@
     .rail-item{ justify-content:center; padding:11px; }
     #page-console.active{ display:block; height:auto; }
     .console-master{ flex-direction:column; height:auto; }
+    .console-mid{ width:100%; }
     .runs-panel{ width:100%; }
     .runs-past{ max-height:220px; }
     .trace-viewer{ height:520px; }
