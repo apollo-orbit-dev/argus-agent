@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## 0.7.4
 
 ### Added
 - **Table-mutation tools** — six new validated table tools so in-place schema changes and bulk data
