@@ -83,3 +83,15 @@ def test_prune_runs_is_per_session_even_if_run_ids_collide(tmp_path):
     s.prune("runs", days=30, keep_runs=1)          # s1 keeps "newer" only
     assert [e["run_id"] for e in s.recent("s1")] == ["newer"]
     assert [e["run_id"] for e in s.recent("s2")] == ["dup"]   # s2 untouched
+
+
+def test_not_wal_mode_so_there_are_no_sidecars_to_lose(tmp_path):
+    # Deliberate: WAL buys nothing here (single connection, lock-serialized) but its -wal/-shm
+    # sidecars are silently discarded by a deploy that rsyncs --delete, taking recent rows with them.
+    p = tmp_path / "events.db"
+    s = TraceStore(str(p))
+    mode = s._rw.execute("PRAGMA journal_mode;").fetchone()[0]
+    assert mode.lower() != "wal", f"expected a rollback journal, got {mode}"
+    s.record(_ev("sess", "r", 0, "final", {"answer": "x"}))
+    assert not (tmp_path / "events.db-wal").exists()
+    assert s.recent("sess")[0]["data"]["answer"] == "x"     # still records fine

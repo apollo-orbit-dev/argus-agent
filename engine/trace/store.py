@@ -30,7 +30,13 @@ class TraceStore:
         self._lock = threading.Lock()
         self._rw = sqlite3.connect(path, check_same_thread=False)
         self._rw.row_factory = sqlite3.Row
-        self._rw.execute("PRAGMA journal_mode=WAL")
+        # Rollback journal, NOT WAL — matching every other store in the codebase. WAL buys nothing
+        # here (one connection, every access serialized by self._lock) but costs a real failure mode:
+        # committed-but-uncheckpointed rows live in events.db-wal, and a deploy that rsyncs with
+        # --delete (or any backup that copies only the .db) silently discards them. Set explicitly
+        # rather than relying on the default so an events.db previously created in WAL mode is
+        # converted back on open and its sidecars are removed.
+        self._rw.execute("PRAGMA journal_mode=DELETE")
         # Must be set before any table exists (sqlite only applies it at creation time), so this
         # runs before the executescript below that creates the schema. Lets pruning actually shrink
         # events.db on disk instead of just freeing pages for reuse.
