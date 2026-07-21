@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## 0.8.0
 
 ### Added
 - **Durable sessions** — conversations now persist to a SQLite-backed `SessionStore` (raw message
@@ -17,6 +17,13 @@ All notable changes to this project are documented here.
   viewer, so the runs list, live trace, and history all scope to whichever session is selected;
   the active session persists across reloads via `localStorage`. The implicit `"dashboard"`
   session remains the default, and it's the fallback if the active session is deleted.
+- **Session transcript view** — the conversation is now a first-class **Transcript card** stacked
+  above the Runs card; it's the default view, and a new turn no longer clobbers it (the run streams
+  in the Runs card and the transcript refreshes when the turn completes). Click a run to drill into
+  its tool-trace, click Transcript to return. The transcript renders as a **chat/messaging view**
+  (your messages right, Argus's left, tool output as a muted note), with Argus's replies rendered as
+  **Markdown** — bold, lists, tables, code, headings, links — sanitized with DOMPurify. Empty
+  tool-call turns are hidden from the view.
 
 ## 0.7.5
 
