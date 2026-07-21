@@ -2,7 +2,7 @@
 (function(){
   var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var $ = function(id){ return document.getElementById(id); };
-  var SESSION = "dashboard";
+  var SESSION = (function(){ try { return localStorage.getItem('argus.session') || "dashboard"; } catch(e){ return "dashboard"; } })();
 
   // ---- escaping / formatting helpers ----
   function esc(s){
@@ -264,6 +264,7 @@
   var liveRunId = null;       // run_id of the current in-flight run, or null
   var selectedRunId = null;   // whichever run is shown in the viewer
   var followingLive = true;
+  var currentView = 'transcript';   // 'transcript' | run_id — what the viewer is showing
   var userScrolledUp = false;
 
   function newRun(id, sessionId, firstTs){
@@ -417,12 +418,13 @@
   }
 
   var EMPTY_RUNS_HTML = '<div class="empty"><span class="empty-title">No runs yet</span>run a task above and watch it stream here.</div>';
+  var EMPTY_RUNSLIST_HTML = '<div class="empty"><span class="empty-title">No runs to show</span>the transcript above is the record; runs aren\'t kept across a restart.</div>';
 
   function renderRunsList(){
     var live = liveRun();
     runsLiveEl.innerHTML = live ? runRowHtml(live) : '';
     var past = pastRunsOrdered();
-    runsPastEl.innerHTML = past.length ? past.map(runRowHtml).join('') : (live ? '' : EMPTY_RUNS_HTML);
+    runsPastEl.innerHTML = past.length ? past.map(runRowHtml).join('') : (live ? '' : EMPTY_RUNSLIST_HTML);
   }
 
   function renderViewerHeader(run){
@@ -462,8 +464,10 @@
 
   function selectRun(id){
     if (!id || !runs.has(id)) return;
+    currentView = id;
     selectedRunId = id;
     followingLive = (id === liveRunId);
+    setTranscriptActive(false);
     renderViewerFull(runs.get(id));
     renderRunsList();
   }
@@ -476,6 +480,7 @@
       if (row) selectRun(row.getAttribute('data-id'));
     });
   });
+  (function(){ var t = $('transcriptCard'); if (t) t.addEventListener('click', showTranscript); })();
 
   /* ---- interactive approvals: the inline trace card (delegated on viewerBody, same pattern as
      runsLiveEl/runsPastEl above — the trace body itself has no prior delegated listener) ---- */
@@ -559,13 +564,20 @@
     if (isNewRun){
       runs.set(ev.run_id, newRun(ev.run_id, ev.session_id, ev.ts));
       liveRunId = ev.run_id; // the newest run seen becomes the in-flight one
-      if (followingLive) selectedRunId = ev.run_id;
+      // Only auto-follow a new run into the viewer when we're ALREADY viewing a run. When the
+      // transcript is showing, a new turn must NOT clobber it — it just appears in the Runs list.
+      if (currentView !== 'transcript' && followingLive){ currentView = ev.run_id; selectedRunId = ev.run_id; }
     }
     var run = runs.get(ev.run_id);
     updateTaskLabel(run, ev);
     run.steps.push(ev);
 
-    if (ev.kind === 'final'){ run.status = 'ok'; if (liveRunId === run.id) liveRunId = null; }
+    if (ev.kind === 'final'){
+      run.status = 'ok'; if (liveRunId === run.id) liveRunId = null;
+      // Stay-put refresh: if the transcript is the active view, reload it when this session's turn
+      // completes so the new turn appears — without ever covering the conversation.
+      if (currentView === 'transcript' && ev.session_id === SESSION) loadTranscript(SESSION);
+    }
     else if (ev.kind === 'error'){ run.status = 'error'; if (liveRunId === run.id) liveRunId = null; }
     else if (ev.kind === 'approval_resolved' && ev.data && ev.data.req_id){
       // The engine emits approval_resolved (ApprovalBroker._emit_resolved) whenever a request is
@@ -579,7 +591,8 @@
       });
     }
 
-    if (selectedRunId === run.id){
+    // Only paint run steps into the viewer when the viewer is actually showing THIS run.
+    if (currentView === run.id){
       if (isNewRun){
         renderViewerFull(run);
       } else {
@@ -596,16 +609,193 @@
   setInterval(renderRunsList, 5000); // keep relative/elapsed time labels fresh
 
   var es = null;
-  function connectSSE(){
-    if (es) { try { es.close(); } catch(e){} }
-    es = new EventSource("/events?session_id=" + encodeURIComponent(SESSION));
-    es.onmessage = function(m){
+  function wireEventHandlers(source){
+    source.onmessage = function(m){
       var ev; try { ev = JSON.parse(m.data); } catch(e){ return; }
       processEvent(ev);
     };
-    es.onerror = function(){ /* EventSource auto-reconnects; `seen` dedupes the ring-buffer replay */ };
+    source.onerror = function(){ /* EventSource auto-reconnects; `seen` dedupes the ring-buffer replay */ };
+  }
+  function reopenEvents(){
+    if (es) { try { es.close(); } catch(e){} }
+    es = new EventSource("/events?session_id=" + encodeURIComponent(SESSION));
+    wireEventHandlers(es);
   }
   renderRunsList();
+
+  /* ---- session switching: create/rename/delete/list durable sessions (Task 4's /sessions
+     endpoints), and re-scope the console (runs list + live trace + persisted transcript) to
+     whichever one is active. Mutating calls (/sessions POST|PATCH|DELETE) are admin-gated
+     server-side; they go through plain fetch() because window.fetch is monkey-patched above
+     to inject X-Admin-Token on every request (and prompt-and-retry on 401) — that IS this
+     dashboard's admin-fetch helper, the same one Rules/Reliability/Routines POSTs rely on. ---- */
+  // Render Argus's (assistant) message markdown safely: marked parses, DOMPurify sanitizes the HTML.
+  // Falls back to escaped literal text if the vendored libs didn't load.
+  var _mdInit = false;
+  function renderAssistantMd(text){
+    var raw = (text == null) ? '' : String(text);
+    if (window.marked && window.DOMPurify){
+      try {
+        if (!_mdInit){ marked.setOptions({ gfm: true, breaks: true }); _mdInit = true; }
+        return DOMPurify.sanitize(marked.parse(raw));
+      } catch(e){ /* fall through to literal */ }
+    }
+    return esc(raw);
+  }
+
+  async function loadTranscript(id){
+    try {
+      var data = await (await fetch('/sessions/' + encodeURIComponent(id) + '/messages?limit=1000')).json();
+      // Drop empty / json-null turns: an assistant tool-call turn is stored with null content and would
+      // otherwise render as the literal "null". The raw log keeps them; the chat view hides them.
+      var msgs = (data.messages || []).filter(function(m){
+        var c = (m.content == null ? '' : String(m.content)).trim();
+        return c && c !== 'null';
+      });
+      updateTranscriptMeta(msgs.length);
+      if (!msgs.length){
+        viewerHead.innerHTML =
+          '<span class="vh-id num">transcript</span><span class="vh-sep">·</span><span class="vh-session">' + esc(id) + '</span>';
+        viewerBody.innerHTML = '<div class="empty"><span class="empty-title">No messages yet</span>send a turn to start this conversation.</div>';
+        return;
+      }
+      viewerHead.innerHTML =
+        '<span class="vh-id num">transcript</span><span class="vh-sep">·</span>' +
+        '<span class="vh-session">' + esc(id) + '</span><span class="vh-sep">·</span>' +
+        '<span class="vh-steps num">' + msgs.length + ' messages</span>';
+      // Chat/messaging view: user right, assistant left, tool output as a muted note.
+      viewerBody.innerHTML = '<div class="chat">' + msgs.map(function(m){
+        var role = m.role || '?';
+        var raw = m.content == null ? '' : String(m.content);
+        if (role === 'tool'){
+          return '<div class="chat-tool"><span class="chat-tool-label">tool</span>' +
+                   '<div class="chat-tool-body">' + esc(raw) + '</div></div>';
+        }
+        var side = (role === 'user') ? 'me' : 'them';
+        // user text stays literal; Argus's replies render markdown (bold, lists, tables, code).
+        var body = (role === 'user') ? esc(raw) : ('<div class="md">' + renderAssistantMd(raw) + '</div>');
+        return '<div class="chat-row ' + side + '"><div class="chat-bubble ' + side + '">' + body + '</div></div>';
+      }).join('') + '</div>';
+      viewerBody.scrollTop = viewerBody.scrollHeight;
+    } catch(e){ toast('Failed to load transcript: ' + e.message, 'err'); }
+  }
+
+  function setTranscriptActive(on){
+    var el = $('transcriptCard');
+    if (el) el.classList.toggle('active', !!on);
+  }
+  function updateTranscriptMeta(n){
+    var el = $('transcriptMeta');
+    if (el) el.textContent = n ? (nfmt(n) + ' message' + (n === 1 ? '' : 's')) : 'no messages yet';
+  }
+  // Show the conversation transcript (the default view). Selecting a run drills into its trace instead.
+  function showTranscript(){
+    currentView = 'transcript';
+    selectedRunId = null; followingLive = false;
+    setTranscriptActive(true);
+    loadTranscript(SESSION);
+    renderRunsList();
+  }
+
+  async function renderSessionList(){
+    var list;
+    try { list = await (await fetch('/sessions')).json(); } catch(e){ return; }
+    var ul = $('sessionList');
+    if (!ul) return;
+    if (!Array.isArray(list) || !list.length){
+      ul.innerHTML = '<li class="empty">No sessions yet</li>';
+      return;
+    }
+    ul.innerHTML = list.map(function(s){
+      var active = s.id === SESSION;
+      var name = s.name || s.id;
+      return '<li class="session-row' + (active ? ' active' : '') + '" data-id="' + esc(s.id) + '">' +
+          '<span class="session-row-name" title="' + esc(name) + '">' + esc(name) + '</span>' +
+          '<span class="session-row-count num">' + nfmt(s.message_count || 0) + '</span>' +
+          '<span class="session-row-actions">' +
+            '<button class="act-btn" data-session-rename title="Rename">✎</button>' +
+            '<button class="act-btn danger" data-session-delete title="Delete">✕</button>' +
+          '</span>' +
+        '</li>';
+    }).join('');
+  }
+
+  function setSession(id){
+    SESSION = id;
+    try { localStorage.setItem('argus.session', id); } catch(e){}
+    // runs/seen/live-tracking are all per-session — drop the old session's before re-subscribing
+    // (also resets followingLive so a live run on the new session is auto-tracked even if the
+    // user had scrolled back into a past run on the previous session).
+    runs.clear(); seen.clear(); liveRunId = null; selectedRunId = null; followingLive = true;
+    currentView = 'transcript';   // the conversation is the default view for a session
+    reopenEvents();          // re-subscribe /events at the new session — replays its recent ring buffer
+    loadTranscript(id);      // show the persisted conversation
+    setTranscriptActive(true);
+    renderRunsList();
+    renderSessionList();
+  }
+
+  async function renameSession(id){
+    var name = prompt('Rename session:');
+    if (!name) return;
+    try {
+      // The fetch shim resolves (not rejects) a 401 when the admin token is missing/wrong, so a
+      // failed mutation must be caught on res.ok — otherwise we'd toast success on an auth failure.
+      var res = await fetch('/sessions/' + encodeURIComponent(id), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name })
+      });
+      if (!res.ok) { toast('Rename failed (' + res.status + ')', 'err'); return; }
+      renderSessionList();
+      toast('Renamed session', 'ok');
+    } catch(e){ toast('Rename failed: ' + e.message, 'err'); }
+  }
+
+  function deleteSessionPrompt(id){
+    confirmDelete({
+      title: 'Delete session',
+      message: "Delete this session? This can't be undone.",
+      onConfirm: async function(){
+        var res;
+        try { res = await fetch('/sessions/' + encodeURIComponent(id), { method: 'DELETE' }); }
+        catch(e){ toast('Delete failed: ' + e.message, 'err'); return; }
+        // Guard on res.ok so a 401 (no/wrong admin token) doesn't falsely report success and,
+        // worse, fall back to setSession('dashboard') when nothing was actually deleted.
+        if (!res.ok) { toast('Delete failed (' + res.status + ')', 'err'); return; }
+        toast('Session deleted', 'ok');
+        if (id === SESSION) setSession('dashboard');   // fall back to the default session
+        else renderSessionList();
+      }
+    });
+  }
+
+  var sessionListEl = $('sessionList');
+  if (sessionListEl) sessionListEl.addEventListener('click', function(e){
+    var row = e.target.closest('.session-row');
+    if (!row) return;
+    var id = row.getAttribute('data-id');
+    if (e.target.closest('[data-session-rename]')) { renameSession(id); return; }
+    if (e.target.closest('[data-session-delete]')) { deleteSessionPrompt(id); return; }
+    if (id && id !== SESSION) setSession(id);
+  });
+
+  var sessionNewBtn = $('sessionNewBtn');
+  if (sessionNewBtn) sessionNewBtn.addEventListener('click', async function(){
+    sessionNewBtn.disabled = true;
+    try {
+      // Check res.ok BEFORE parsing/using the body: a 401 from the fetch shim has no id, and
+      // setSession(undefined) would persist SESSION="undefined" to localStorage and re-subscribe
+      // /events?session_id=undefined — real corruption. Only switch on a real id.
+      var res = await fetch('/sessions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({})
+      });
+      if (!res.ok) { toast('Failed to create session (' + res.status + ')', 'err'); return; }
+      var r = await res.json();
+      if (!r || !r.id) { toast('Failed to create session (no id returned)', 'err'); return; }
+      setSession(r.id);
+      toast('New session created', 'ok');
+    } catch(e){ toast('Failed to create session: ' + e.message, 'err'); }
+    finally { sessionNewBtn.disabled = false; }
+  });
   /* ================= CONSOLE: run / slash-commands / usage / config / skills / status ================= */
   var runnerInput = $('runnerInput');
   var runBtn = $('runBtn');
@@ -690,8 +880,7 @@
         } catch(e){ toast('Failed to start new session: ' + e.message, 'err'); return; }
         runs.clear(); seen.clear(); liveRunId = null; selectedRunId = null; followingLive = true;
         renderRunsList();
-        viewerHead.innerHTML = '';
-        viewerBody.innerHTML = EMPTY_RUNS_HTML;
+        showTranscript();        // back to the (now context-cleared) conversation view
         loadUsage();
         toast('New session started', 'ok');
       }
@@ -728,8 +917,7 @@
       case 'reset': {
         runs.clear(); seen.clear(); liveRunId = null; selectedRunId = null; followingLive = true;
         renderRunsList();
-        viewerHead.innerHTML = '';
-        viewerBody.innerHTML = EMPTY_RUNS_HTML;
+        showTranscript();        // back to the conversation view
         toast('Trace view cleared — engine history reset is Telegram-only; the dashboard session persists', 'info');
         showCmdOut('/reset', 'Cleared the local trace view. History reset is Telegram-only; the dashboard session persists on the server.');
         break;
@@ -2352,7 +2540,7 @@
       tries += 1;
       try {
         var r = await fetch('/status', { cache: 'no-store' });
-        if (r.ok){ connectSSE(); loadConfig(); loadSystemPrompt(); loadEnv(); pollStatus(); toast('Server back online', 'ok'); return; }
+        if (r.ok){ reopenEvents(); loadConfig(); loadSystemPrompt(); loadEnv(); pollStatus(); toast('Server back online', 'ok'); return; }
       } catch(e){ /* still down */ }
       if (tries < 20) setTimeout(tick, 800);
       else toast('Server did not come back — try reloading', 'err');
@@ -2552,7 +2740,9 @@
   var startPage = (function(){ try { return localStorage.getItem('argus_page') || 'console'; } catch(e){ return 'console'; } })();
   switchPage(startPage);
 
-  connectSSE();
+  reopenEvents();
+  loadTranscript(SESSION);   // restore the persisted transcript for whichever session was active on last visit
+  renderSessionList();
   loadConfig();
   loadSkills();
   loadUsage();

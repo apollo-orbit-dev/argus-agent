@@ -187,11 +187,26 @@
         <!-- MASTER / DETAIL -->
         <div class="console-master">
 
-          <!-- RUNS -->
-          <div class="runs-panel">
-            <div class="runs-head">Runs</div>
-            <div class="runs-live" id="runsLive"></div>
-            <div class="runs-past" id="runsPast"></div>
+          <!-- SESSIONS -->
+          <aside class="session-sidebar" id="sessionSidebar">
+            <div class="runs-head session-sidebar-head">
+              <span>Sessions</span>
+              <button class="btn btn-sm btn-icon" id="sessionNewBtn" title="Create a new durable session" aria-label="New session">+ New</button>
+            </div>
+            <ul class="session-list" id="sessionList"></ul>
+          </aside>
+
+          <!-- MIDDLE: transcript selector (top) + runs (below) -->
+          <div class="console-mid">
+            <div class="transcript-card active" id="transcriptCard" role="button" tabindex="0" title="Show the full conversation for this session">
+              <div class="runs-head">Transcript</div>
+              <div class="transcript-card-meta" id="transcriptMeta">no messages yet</div>
+            </div>
+            <div class="runs-panel">
+              <div class="runs-head">Runs</div>
+              <div class="runs-live" id="runsLive"></div>
+              <div class="runs-past" id="runsPast"></div>
+            </div>
           </div>
 
           <!-- TRACE VIEWER -->
@@ -799,6 +814,8 @@
   </div>
 </div>
 
+<script src="/vendor/marked.min.js" defer></script>
+<script src="/vendor/purify.min.js" defer></script>
 <script src="/app.js" defer></script>
 </body>
 </html>

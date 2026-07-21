@@ -318,7 +318,7 @@ class Engine:
         self._data_dir = Path(data_dir) if data_dir else Path(__file__).resolve().parents[1]
         root = self._data_dir
         self.events = EventBus()
-        self.store = SessionStore()
+        self.store = SessionStore(str(root / "sessions.db"))
         self.registry = build_base_registry(config, self._data_dir)
         self._bg_tasks: set = set()   # keep background tasks (autoextract) alive from GC
         self._running: dict = {}      # session_id -> the in-flight run's task (for /stop)
@@ -1481,6 +1481,21 @@ class Engine:
     def reset(self, session_id: str) -> None:
         self.store.reset(session_id)
 
+    def list_sessions(self) -> list[dict]:
+        return self.store.list_sessions()
+
+    def create_session(self, name: str | None = None) -> str:
+        return self.store.create_session(name)
+
+    def rename_session(self, session_id: str, name: str) -> None:
+        self.store.rename_session(session_id, name)
+
+    def delete_session(self, session_id: str) -> None:
+        self.store.delete_session(session_id)
+
+    def session_messages(self, session_id: str, limit: int = 200, offset: int = 0) -> dict:
+        return self.store.session_messages(session_id, limit, offset)
+
     def new_session(self, session_id: str) -> None:
         """Start fresh: clear the session's conversation AND its event replay buffer."""
         self.store.reset(session_id)
@@ -1716,8 +1731,7 @@ class Engine:
             return {"compacted": False, "reason": f"summarization failed: {e}"}
         if not summary:
             return {"compacted": False, "reason": "empty summary"}
-        self.store.reset(session_id)
-        self.store.extend_messages(session_id,
+        self.store.set_working_set(session_id,
                                    [{"role": "user", "content":
                                      f"[Summary of our earlier conversation]\n{summary}"}] + recent)
         after_usage = self._usage_basic(session_id)
