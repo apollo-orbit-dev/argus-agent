@@ -5,7 +5,8 @@ import pytest
 
 from engine.tools.tables import (AddColumnTool, CopyTableTool, CreateTableTool, DropColumnTool,
                                   DropTableTool, InsertRowTool, ListTablesTool, QueryTableTool,
-                                  RenameColumnTool, RenameTableTool, TableError, TableStore)
+                                  RenameColumnTool, RenameTableTool, TableError, TableStore,
+                                  UpdateRowsTool)
 
 
 def _store(tmp_path):
@@ -386,3 +387,50 @@ def test_copy_table_whole_conflict_counts_actual_inserts(tmp_path):
     msg = s.copy_table("src", "dst")                        # whole-table path
     assert "1 row" in msg and "2 row" not in msg            # only the non-colliding row inserted
     assert s.query("SELECT score FROM dst WHERE date='2026-07-01'")[0]["score"] == 999
+
+
+# ---- update_rows ----
+
+def test_update_rows_updates_only_matching(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["id:integer:key", "status:text"])
+    s.insert("t", {"id": 1, "status": "open"})
+    s.insert("t", {"id": 2, "status": "open"})
+    n = s.update_rows("t", {"status": "closed"}, {"id": 1})
+    assert n == 1
+    rows = {r["id"]: r["status"] for r in s.query("SELECT id, status FROM t")}
+    assert rows == {1: "closed", 2: "open"}
+
+
+def test_update_rows_empty_match_refused(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["id:integer", "status:text"])
+    s.insert("t", {"id": 1, "status": "open"})
+    with pytest.raises(TableError):
+        s.update_rows("t", {"status": "closed"}, {})     # empty match would hit every row
+    assert s.query("SELECT status FROM t")[0]["status"] == "open"
+
+
+def test_update_rows_empty_set_refused(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["id:integer"])
+    s.insert("t", {"id": 1})
+    with pytest.raises(TableError):
+        s.update_rows("t", {}, {"id": 1})
+
+
+def test_update_rows_coerces_nonscalar(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["id:integer:key", "tags:json"])
+    s.insert("t", {"id": 1, "tags": ["a"]})
+    s.update_rows("t", {"tags": ["x", "y"]}, {"id": 1})       # list -> JSON text, not a bind error
+    assert "y" in s.query("SELECT tags FROM t WHERE id=1")[0]["tags"]
+
+
+def test_update_rows_tool(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["id:integer:key", "status:text"])
+    s.insert("t", {"id": 1, "status": "open"})
+    tool = UpdateRowsTool(s)
+    out = asyncio.run(tool.run(tool.Params(table="t", set={"status": "done"}, match={"id": 1})))
+    assert "1" in out and "error" not in out.lower()

@@ -223,6 +223,27 @@ class TableStore:
         verb = "created dest and copied" if created else "copied"
         return f"{verb} {n} row(s) from {src} → {dst} (columns: {collist})"
 
+    def update_rows(self, table: str, set_values: dict, match: dict) -> int:
+        """Set columns on all rows matching ALL of `match`. Refuses an empty match (that would
+        hit every row) and an empty set. Fully parameterized — no SQL fragment from the caller."""
+        t = _ident(table)
+        if not self._table_exists(t):
+            raise TableError(f"no table '{t}'")
+        if not set_values:
+            raise TableError("update_rows needs at least one column=value to set")
+        if not match:
+            raise TableError("update_rows needs at least one column=value to match "
+                             "(an empty match would update every row)")
+        set_cols = [_ident(k) for k in set_values]
+        match_cols = [_ident(k) for k in match]
+        set_clause = ", ".join(f"{c}=?" for c in set_cols)
+        where_clause = " AND ".join(f"{c}=?" for c in match_cols)
+        params = [_coerce(v) for v in set_values.values()] + [_coerce(v) for v in match.values()]
+        with self._lock:
+            cur = self._rw.execute(f"UPDATE {t} SET {set_clause} WHERE {where_clause}", params)
+            self._rw.commit()
+            return cur.rowcount
+
     def insert(self, name: str, values: dict) -> None:
         t = _ident(name)
         if not values:
@@ -462,6 +483,32 @@ class CopyTableTool(Tool):
             return self.store.copy_table(args.source, args.dest, args.where)
         except (TableError, sqlite3.Error) as e:
             return f"copy_table error: {e}"
+
+
+class UpdateRowsTool(Tool):
+    name = "update_rows"
+    description = (
+        "Change column values on EXISTING rows that match a filter — updates every row matching "
+        "ALL of `match` at once. Args: table, set (a dict of column -> new value), and match (a "
+        "dict of column -> value; only rows matching ALL pairs are changed). An empty match is "
+        "refused (it would rewrite every row). Example: "
+        "update_rows('tasks', {'status':'archived'}, {'year':2025})."
+    )
+
+    class Params(BaseModel):
+        table: str = Field(..., description="the table")
+        set: dict = Field(..., description="column -> new value")
+        match: dict = Field(..., description="column -> value; rows matching ALL pairs are updated")
+
+    def __init__(self, store: TableStore):
+        self.store = store
+
+    async def run(self, args: "UpdateRowsTool.Params") -> str:
+        try:
+            n = self.store.update_rows(args.table, args.set, args.match)
+        except (TableError, sqlite3.Error) as e:
+            return f"update_rows error: {e}"
+        return f"update_rows: updated {n} row(s) in '{args.table}'."
 
 
 class InsertRowTool(Tool):
