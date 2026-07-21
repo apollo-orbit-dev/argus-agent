@@ -124,13 +124,16 @@ class SessionStore:
             self._persist(s)
 
     def conversation(self, session_id: str) -> list[dict]:
-        # Pure read: load-if-exists (and cache), but never create/persist a row.
-        s = self._sessions.get(session_id)
-        if s is None:
-            s = self._load(session_id)           # from DB if it exists, else None
-            if s is not None:
-                self._sessions[session_id] = s   # cache; do NOT create/persist a row
-        return list(s.conversation) if s else []
+        # Pure read: load-if-exists (and cache), but never create/persist a row. Lock-guarded so the
+        # DB read is consistent with concurrent writes (keeps the "all DB access under self._lock"
+        # invariant literally true, even for a future non-asyncio caller).
+        with self._lock:
+            s = self._sessions.get(session_id)
+            if s is None:
+                s = self._load(session_id)           # from DB if it exists, else None
+                if s is not None:
+                    self._sessions[session_id] = s   # cache; do NOT create/persist a row
+            return list(s.conversation) if s else []
 
     def record_run(self, session_id: str, run_id: str) -> None:
         s = self.get_or_create(session_id)
