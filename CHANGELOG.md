@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here.
 
+## 0.7.3
+
+Internal/testbed release — a new developer instrument, no user-facing behavior change.
+
+### Added
+- **Model-capability benchmark** (`python -m engine.eval.benchmark`) — a committed, reproducible
+  instrument that runs a frozen, difficulty-graded task battery per model under the standard config,
+  scores each task (deterministic tool-chain + a model-graded quality judge), accumulates labeled JSON
+  results, and plots a per-tier metric-vs-model-size curve — for measuring how well Argus performs as
+  the driving model shrinks (finding the small-model "capability shelf"). The founding run (a ~35B vs a
+  3B) shows the shelf is difficulty-dependent: small models hold on trivial single-tool tasks and fall
+  off on structured/multi-step ones.
+
 ## 0.7.2
 
 ### Added
