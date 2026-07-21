@@ -166,6 +166,63 @@ class TableStore:
             self._rw.commit()
         return f"renamed table {o} → {n}"
 
+    def _create_like(self, source: str, dest: str) -> None:
+        """Create dest mirroring source's columns, types, and PK. (CREATE TABLE AS SELECT is NOT
+        used because it drops declared types and the primary key.) Caller holds self._lock."""
+        specs = []
+        for r in self._rw.execute(f"PRAGMA table_info({source})"):
+            spec = f"{_ident(r['name'])} {r['type'] or 'TEXT'}"
+            if r["pk"]:
+                spec += " PRIMARY KEY"
+            specs.append(spec)
+        self._rw.execute(f"CREATE TABLE {dest} ({', '.join(specs)})")
+
+    def copy_table(self, source: str, dest: str, where: str | None = None) -> str:
+        src = _ident(source); dst = _ident(dest)
+        if not self._table_exists(src):
+            raise TableError(f"no table '{src}'")
+        with self._lock:
+            created = not self._table_exists(dst)
+            if created:
+                self._create_like(src, dst)
+            # copy only columns present in BOTH tables, preserving source order
+            dst_cols = set(self._columns(dst))
+            cols = [c for c in self._columns(src) if c in dst_cols]
+            if not cols:
+                raise TableError(f"{src} and {dst} share no columns to copy")
+            collist = ", ".join(cols)
+            pk = self._pk_col(dst)
+            conflict = f" ON CONFLICT({pk}) DO NOTHING" if pk else ""
+            if where is None:
+                # whole-table copy: one server-side statement, no row cap, no materialization.
+                # "WHERE 1=1" is required when an ON CONFLICT tail follows: SQLite's parser would
+                # otherwise read a bare "FROM src ON CONFLICT(...)" as a join's ON-clause and choke
+                # on the following DO — a real grammar ambiguity, not a style choice.
+                tail = f" WHERE 1=1{conflict}" if conflict else ""
+                cur = self._rw.execute(
+                    f"INSERT INTO {dst} ({collist}) SELECT {collist} FROM {src}{tail}")
+                n = cur.rowcount
+            else:
+                w = (where or "").strip()
+                if not w or ";" in w:
+                    raise TableError("invalid where filter: a single boolean expression, no ';'")
+                # Read matching rows on the READ-ONLY connection (mode=ro + single-statement rule
+                # make injection a non-issue), then parameterized bulk-insert. No SQL fragment ever
+                # reaches a write connection. Batched so a huge result set is not held all at once.
+                read = self._ro.execute(f"SELECT {collist} FROM {src} WHERE {w}")
+                ph = ", ".join("?" for _ in cols)
+                insert_sql = f"INSERT INTO {dst} ({collist}) VALUES ({ph}){conflict}"
+                n = 0
+                while True:
+                    batch = read.fetchmany(1000)
+                    if not batch:
+                        break
+                    cur = self._rw.executemany(insert_sql, [tuple(r[c] for c in cols) for r in batch])
+                    n += cur.rowcount     # actual inserts (rows a DO NOTHING conflict skipped are excluded)
+            self._rw.commit()
+        verb = "created dest and copied" if created else "copied"
+        return f"{verb} {n} row(s) from {src} → {dst} (columns: {collist})"
+
     def insert(self, name: str, values: dict) -> None:
         t = _ident(name)
         if not values:
@@ -379,6 +436,32 @@ class RenameTableTool(Tool):
             return self.store.rename_table(args.old, args.new)
         except (TableError, sqlite3.Error) as e:
             return f"rename_table error: {e}"
+
+
+class CopyTableTool(Tool):
+    name = "copy_table"
+    description = (
+        "Copy rows from one table into another IN ONE CALL — use this instead of reading rows and "
+        "insert_row'ing them one at a time. If dest doesn't exist it is created with the same "
+        "columns, types, and primary key as source. If dest already exists, only columns shared by "
+        "both are copied (extra dest columns stay empty). Args: source, dest, and optional where — "
+        "a boolean filter to copy just some rows, e.g. \"date >= '2026-07-01'\" (a single expression, "
+        "no semicolons). Example: copy_table('sleep_log', 'sleep_backup')."
+    )
+
+    class Params(BaseModel):
+        source: str = Field(..., description="table to copy from")
+        dest: str = Field(..., description="table to copy into (created if missing)")
+        where: str | None = Field(None, description="optional boolean filter, e.g. \"date >= '2026-07-01'\"")
+
+    def __init__(self, store: TableStore):
+        self.store = store
+
+    async def run(self, args: "CopyTableTool.Params") -> str:
+        try:
+            return self.store.copy_table(args.source, args.dest, args.where)
+        except (TableError, sqlite3.Error) as e:
+            return f"copy_table error: {e}"
 
 
 class InsertRowTool(Tool):

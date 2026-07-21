@@ -3,9 +3,9 @@ import asyncio
 
 import pytest
 
-from engine.tools.tables import (AddColumnTool, CreateTableTool, DropColumnTool, DropTableTool,
-                                  InsertRowTool, ListTablesTool, QueryTableTool, RenameColumnTool,
-                                  RenameTableTool, TableError, TableStore)
+from engine.tools.tables import (AddColumnTool, CopyTableTool, CreateTableTool, DropColumnTool,
+                                  DropTableTool, InsertRowTool, ListTablesTool, QueryTableTool,
+                                  RenameColumnTool, RenameTableTool, TableError, TableStore)
 
 
 def _store(tmp_path):
@@ -293,3 +293,96 @@ def test_alter_tools(tmp_path):
     assert "renamed" in asyncio.run(RenameColumnTool(s).run(RenameColumnTool(s).Params(table="t", old="a", new="c")))
     assert "dropped" in asyncio.run(DropColumnTool(s).run(DropColumnTool(s).Params(table="t", column="b")))
     assert "renamed" in asyncio.run(RenameTableTool(s).run(RenameTableTool(s).Params(old="t", new="t2")))
+
+
+def test_copy_table_creates_dest_mirroring_schema(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("src", ["date:date:key", "score:integer"])
+    s.insert("src", {"date": "2026-07-15", "score": 80})
+    s.insert("src", {"date": "2026-07-16", "score": 90})
+    msg = s.copy_table("src", "dst")
+    # dest created with same columns, types, and PK
+    info = {c["name"]: (c["type"], c["pk"]) for c in s._rw.execute("PRAGMA table_info(dst)")}
+    assert info["date"] == ("TEXT", 1) and info["score"] == ("INTEGER", 0)
+    assert s.query("SELECT COUNT(*) AS n FROM dst")[0]["n"] == 2 and "2" in msg
+
+
+def test_copy_table_into_existing_dest_maps_shared_columns(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("src", ["date:date:key", "score:integer"])
+    s.insert("src", {"date": "2026-07-15", "score": 80})
+    # dest has an extra column not in src
+    s.create_table("dst", ["date:date:key", "score:integer", "sleep_start:text"])
+    s.copy_table("src", "dst")
+    row = s.query("SELECT * FROM dst WHERE date='2026-07-15'")[0]
+    assert row["score"] == 80 and row["sleep_start"] is None   # extra dest column stays NULL
+
+
+def test_copy_table_copies_more_than_500_rows(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("src", ["n:integer"])
+    for i in range(561):
+        s.insert("src", {"n": i})
+    s.copy_table("src", "dst")                                  # no read-path 500-row cap
+    assert s.query("SELECT COUNT(*) AS n FROM dst")[0]["n"] == 561
+
+
+def test_copy_table_with_where_filters(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("src", ["date:text", "score:integer"])
+    for d, v in [("2026-06-30", 1), ("2026-07-01", 2), ("2026-07-02", 3)]:
+        s.insert("src", {"date": d, "score": v})
+    n_msg = s.copy_table("src", "dst", where="date >= '2026-07-01'")
+    assert s.query("SELECT COUNT(*) AS n FROM dst")[0]["n"] == 2 and "2" in n_msg
+
+
+def test_copy_table_rejects_semicolon_where(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("src", ["x:integer"]); s.insert("src", {"x": 1})
+    with pytest.raises(TableError):
+        s.copy_table("src", "dst", where="1=1; DROP TABLE src")
+    # src intact; dst not populated with junk
+    assert s.query("SELECT COUNT(*) AS n FROM src")[0]["n"] == 1
+
+
+def test_copy_table_missing_source(tmp_path):
+    s = _store(tmp_path)
+    with pytest.raises(TableError):
+        s.copy_table("nope", "dst")
+
+
+def test_copy_table_tool(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("src", ["x:integer"]); s.insert("src", {"x": 1})
+    tool = CopyTableTool(s)
+    out = asyncio.run(tool.run(tool.Params(source="src", dest="dst")))
+    assert "copied" in out.lower() and "error" not in out.lower()
+
+
+def test_copy_table_filtered_conflict_counts_actual_inserts(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("src", ["date:date:key", "score:integer"])
+    for d, v in [("2026-07-01", 1), ("2026-07-02", 2), ("2026-07-03", 3)]:
+        s.insert("src", {"date": d, "score": v})
+    # dest has a PK and a pre-existing row whose key collides with a filtered source row
+    s.create_table("dst", ["date:date:key", "score:integer"])
+    s.insert("dst", {"date": "2026-07-02", "score": 999})   # colliding key, protected by DO NOTHING
+    # filter selects the colliding key (07-02) plus a new one (07-03)
+    msg = s.copy_table("src", "dst", where="date >= '2026-07-02'")
+    # (1) reported count is only the newly-inserted row (1), not the 2 rows read
+    assert "1 row" in msg and "2 row" not in msg
+    # (2) the pre-existing colliding row is untouched (DO NOTHING protected it)
+    assert s.query("SELECT score FROM dst WHERE date='2026-07-02'")[0]["score"] == 999
+    assert s.query("SELECT COUNT(*) AS n FROM dst")[0]["n"] == 2      # the one collision + one new
+
+
+def test_copy_table_whole_conflict_counts_actual_inserts(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("src", ["date:date:key", "score:integer"])
+    s.insert("src", {"date": "2026-07-01", "score": 1})
+    s.insert("src", {"date": "2026-07-02", "score": 2})
+    s.create_table("dst", ["date:date:key", "score:integer"])
+    s.insert("dst", {"date": "2026-07-01", "score": 999})   # collides with one source row
+    msg = s.copy_table("src", "dst")                        # whole-table path
+    assert "1 row" in msg and "2 row" not in msg            # only the non-colliding row inserted
+    assert s.query("SELECT score FROM dst WHERE date='2026-07-01'")[0]["score"] == 999
