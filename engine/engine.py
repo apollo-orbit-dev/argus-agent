@@ -354,6 +354,16 @@ class Engine:
         # shipped skills/library dir) still resolves off the module path.
         self._data_dir = Path(data_dir) if data_dir else Path(__file__).resolve().parents[1]
         root = self._data_dir
+        # Container sandbox. Constructed whenever it is ENABLED, even if the runtime turns out to
+        # be missing — status() has to be able to say why, and the fail-closed check below needs an
+        # object to ask.
+        self.sandbox = None
+        if config.enable_sandbox:
+            from engine.sandbox.podman import PodmanRuntime
+            self.sandbox = PodmanRuntime(
+                binary=config.sandbox_runtime,
+                image=config.sandbox_image,
+                workspaces_root=str(root / "workspaces"))
         self.events = EventBus()
         self.store = SessionStore(str(root / "sessions.db"))
         self.registry = build_base_registry(config, self._data_dir)
@@ -462,8 +472,12 @@ class Engine:
         # which makes the feature toggleable via PATCH /config without a restart. Same soft sandbox as
         # create_tool.
         from engine.tools.code_interpreter import CodeInterpreter
-        self.code_interp = CodeInterpreter(allow_network=config.code_interpreter_allow_network,
-                                           timeout=config.code_interpreter_timeout)
+        self.code_interp = CodeInterpreter(
+            allow_network=config.code_interpreter_allow_network,
+            timeout=config.code_interpreter_timeout,
+            runtime=self.sandbox if (config.enable_sandbox and self.sandbox
+                                     and self.sandbox.available()) else None,
+            workspace=config.sandbox_workspace)
         if config.enable_soul_editing:                    # the agent can revise its OWN persona
             from engine.tools.soul import ReadSoulTool, UpdateSoulTool
             self.registry.register(ReadSoulTool(self.get_soul))
@@ -522,6 +536,14 @@ class Engine:
                 # A bad events.db (e.g. left corrupt by an unclean shutdown) must not stop the whole
                 # process from booting — worse than dropping one turn's trace.
                 log.exception("startup trace prune failed; continuing without pruning")
+
+        # Sandbox idle sweep: stop containers that have had no exec for a while, so an operator who
+        # enabled the sandbox doesn't accumulate one running container per workspace forever.
+        if config.enable_sandbox and self.sandbox is not None:
+            try:
+                self.sandbox.stop_idle(config.sandbox_idle_minutes * 60)
+            except Exception:
+                log.exception("sandbox idle sweep failed")
 
     def _owner_session_id(self) -> str:
         """The owner's primary Telegram chat id — the delivery identity for scheduled routines that
@@ -1268,7 +1290,10 @@ class Engine:
                 from engine.tools.routine_tools import ListRoutinesTool, RunRoutineTool
                 run_registry.register(RunRoutineTool(self.routines, self.routine_executor, session_id))
                 run_registry.register(ListRoutinesTool(self.routines))
-            if c.enable_code_interpreter:         # exec_python, bound to this session for persistent state
+            # Fail closed: if the owner asked for the sandbox and it is not usable, exec_python is
+            # NOT registered. Falling back to the in-process AST sandbox would silently give them
+            # less isolation than they asked for.
+            if c.enable_code_interpreter and self._exec_python_ok():
                 from engine.tools.code_interpreter import ExecPythonTool
                 run_registry.register(ExecPythonTool(self.code_interp, session_id))
             if tool_creation_on:
@@ -1838,6 +1863,27 @@ class Engine:
                 for s in self.skill_registry.list()]
 
     # ---- library / scheduled / memory overviews (for the dashboard) ----
+    def sandbox_status(self) -> dict:
+        c = self._config
+        if not c.enable_sandbox or self.sandbox is None:
+            return {"enabled": False, "available": False, "reason": "sandbox is disabled",
+                    "runtime": c.sandbox_runtime, "image": c.sandbox_image, "workspaces": []}
+        return {"enabled": True, **self.sandbox.status()}
+
+    def _exec_python_ok(self) -> bool:
+        """Fail-closed gate for exec_python: if the owner asked for the container sandbox and it is
+        not usable, exec_python is NOT registered/advertised — it never falls back to the weaker
+        in-process AST sandbox, which would silently give them less isolation than they asked for.
+        Shared by run_task's per-run registry and tools_overview() so the two can never drift apart
+        (see the tools_overview docstring)."""
+        c = self._config
+        return (not c.enable_sandbox) or (self.sandbox is not None and self.sandbox.available())
+
+    def tools_overview_names(self) -> list[str]:
+        """Every tool name a turn could see — base registry plus the conditional block."""
+        ov = self.tools_overview()
+        return [t["name"] for t in ov["builtin"]] + [t["name"] for t in ov["conditional_enabled"]]
+
     def tools_overview(self) -> dict:
         """Enumerate every tool a turn could see: `builtin` (the base registry, fixed at Engine
         construction), `created` (persisted create_tool output), and `conditional_enabled` — every
@@ -1913,7 +1959,7 @@ class Engine:
             ("list_routines", "List saved routines."),
         )
         conditional += group(
-            c.enable_code_interpreter,
+            c.enable_code_interpreter and self._exec_python_ok(),
             ("exec_python", "Run Python in a sandboxed, session-persistent REPL."),
         )
         return {

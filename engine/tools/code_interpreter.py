@@ -34,9 +34,12 @@ class CodeInterpreter:
     the engine (like TableStore); the per-turn ExecPythonTool delegates here with its session id, so
     variables survive across turns even though the tool instance is rebuilt each run."""
 
-    def __init__(self, allow_network: bool = False, timeout: float = 10.0):
+    def __init__(self, allow_network: bool = False, timeout: float = 10.0,
+                 runtime=None, workspace: str = "default"):
         self.allow_network = allow_network
         self.timeout = timeout
+        self.runtime = runtime            # SandboxRuntime | None. None = the in-process AST sandbox.
+        self.workspace = workspace
         self._sessions: dict[str, dict] = {}
 
     def _new_namespace(self) -> dict:
@@ -58,7 +61,35 @@ class CodeInterpreter:
     def reset(self, session_id: str) -> None:
         self._sessions.pop(session_id, None)
 
+    async def run_sandboxed(self, code: str) -> str:
+        """Run `code` inside the container. STATELESS by design in stage 1 — each call is a fresh
+        `python -c`, so variables do NOT persist the way they do in the in-process REPL. The
+        workspace filesystem is the way to carry state between calls; a persistent in-container
+        REPL is deferred. Never raises: a container problem is reported to the model as text."""
+        from engine.sandbox.runtime import SandboxUnavailable
+        loop = asyncio.get_running_loop()
+        try:
+            r = await loop.run_in_executor(
+                None, lambda: self.runtime.exec(
+                    self.workspace, ["python", "-c", code], timeout=self.timeout))
+        except SandboxUnavailable as e:
+            return f"exec_python error: the sandbox is unavailable ({e})."
+        except Exception as e:                       # noqa: BLE001 - never kill the turn
+            return f"exec_python error: {type(e).__name__}: {e}"
+        if r.timed_out:
+            return f"exec_python: timed out after {self.timeout}s."
+        parts = []
+        if r.stdout.strip():
+            parts.append(r.stdout[:_MAX_OUTPUT])
+        if r.stderr.strip():
+            parts.append("stderr:\n" + r.stderr[:_MAX_OUTPUT])
+        if not parts:
+            parts.append("(no output)")
+        return "\n".join(parts)
+
     async def run(self, session_id: str, code: str, reset: bool = False) -> str:
+        if self.runtime is not None:
+            return await self.run_sandboxed(code)
         code = code or ""
         try:
             scan_ast(code, self.allow_network)          # same static gate as create_tool
