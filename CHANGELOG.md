@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## 0.9.0
 
 ### Added
 - **Routine builder: each tool's argument contract.** A tool-step's args are hand-typed JSON, but
