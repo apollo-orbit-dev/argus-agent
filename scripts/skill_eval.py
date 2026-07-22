@@ -12,6 +12,10 @@ Usage:
   python scripts/skill_eval.py --battery docs/ab/batteries/structured-data.json
   python scripts/skill_eval.py --battery <b> --models 'main,small=http://localhost:8001/v1|Qwen2.5-3B-Instruct' --k 3
   python scripts/skill_eval.py --battery <b> --dry-run        # print the run matrix, no model calls
+
+Also A/Bs a CONFIG change with the same machinery (arms = config-with-overrides vs config-as-is, no
+skill ablated), for loop-level interventions that aren't skills:
+  python scripts/skill_eval.py --battery <b> --compare-config adaptive_thinking=true
 """
 from __future__ import annotations
 
@@ -57,7 +61,37 @@ def parse_models(spec: str) -> list[dict]:
     return out
 
 
-def build_config(model: dict):
+def parse_config_arm(spec: str) -> dict:
+    """'adaptive_thinking=true,max_steps=8' -> {'adaptive_thinking': True, 'max_steps': 8}.
+
+    Turns the two arms into a CONFIG comparison instead of a skill ablation, so a loop-level
+    intervention (a threshold change, an adaptive-routing flag) can be measured with the same pass^k
+    machinery.
+    Treatment gets these overrides; baseline is the config as-is.
+    """
+    out: dict = {}
+    from config import Config
+    for entry in [e.strip() for e in (spec or "").split(",") if e.strip()]:
+        key, sep, raw = entry.partition("=")
+        key, raw = key.strip(), raw.strip()
+        if not sep or key not in Config.model_fields:
+            raise SystemExit(f"unknown config field {key!r} in --compare-config {spec!r}")
+        if raw.lower() in ("true", "false"):
+            out[key] = raw.lower() == "true"
+        else:
+            try:
+                out[key] = int(raw)
+            except ValueError:
+                try:
+                    out[key] = float(raw)
+                except ValueError:
+                    out[key] = raw
+    if not out:
+        raise SystemExit("--compare-config needs at least one key=value")
+    return out
+
+
+def build_config(model: dict, overrides: dict | None = None):
     from config import Config
     cfg = Config()
     # The eval measures tool SELECTION, not approvals. With interactive approvals on and no human in the
@@ -71,11 +105,16 @@ def build_config(model: dict):
         updates["model_name"] = model.get("model") or cfg.model_name
     if model.get("mode"):
         updates["tool_calling_mode"] = model["mode"]
+    updates.update(overrides or {})
     return cfg.model_copy(update=updates)
 
 
-async def run_one(cfg, battery: dict, case: dict, arm: str, timeout: float) -> dict:
-    """One isolated Engine run. Returns the captured chain + score for this (case, arm)."""
+async def run_one(cfg, battery: dict, case: dict, arm: str, timeout: float,
+                  ablate: bool = True) -> dict:
+    """One isolated Engine run. Returns the captured chain + score for this (case, arm).
+
+    `ablate=False` in --compare-config mode: the arms differ by CONFIG (both get the full skill
+    library), so unregistering would confound the comparison with a second variable."""
     from engine.engine import Engine
     from engine.skills.base import get_selector
     from engine.eval.scoring import score_case
@@ -83,7 +122,7 @@ async def run_one(cfg, battery: dict, case: dict, arm: str, timeout: float) -> d
     tmp = tempfile.mkdtemp(prefix="skilleval-")
     try:
         engine = Engine(cfg, data_dir=tmp)
-        if arm == "baseline":
+        if ablate and arm == "baseline":
             for s in battery.get("under_test", []):
                 engine.skill_registry.unregister(s)
         # seed a source fixture into the isolated workspace
@@ -122,18 +161,23 @@ async def run_one(cfg, battery: dict, case: dict, arm: str, timeout: float) -> d
         await asyncio.sleep(0.1)
         task.cancel()
 
-        tools, ct_args = [], []
+        tools, ct_args, obs = [], [], []
         for ev in events:
             data = getattr(ev, "data", {}) or {}
             if ev.kind == "tool_call" and data.get("tool"):
                 tools.append(data["tool"])
                 if data["tool"] == "create_table":
                     ct_args.append(data.get("args"))
-        captured = {"tools": tools, "activated_skill": activated, "create_table_args": ct_args}
+            # observer issues are the proximate effect of a loop-level intervention: a turn killed by
+            # `stuck_repeating` is a turn the loop gave up on. Diagnostics only — scoring is unchanged.
+            elif ev.kind == "observer" and data.get("issue"):
+                obs.append(data["issue"])
+        captured = {"tools": tools, "activated_skill": activated, "create_table_args": ct_args,
+                    "observer": obs}
         result = score_case(case["expect"], captured)
         return {"chain_correct": bool(result["chain_correct"]), "reasons": result["reasons"],
                 "tools": tools, "activated_skill": activated, "create_table_args": ct_args,
-                "final": (final or "")[:2000], "error": err}
+                "observer": obs, "final": (final or "")[:2000], "error": err}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -168,11 +212,15 @@ def _claude_judge_fn(model: str):
     return fn
 
 
-async def _judge_run(judge_fn, case: dict, r: dict) -> None:
+async def _judge_run(judge_fn, case: dict, r: dict, judge_all: bool = False) -> None:
     """Attach judge_score/judge_why to a run record (on-target rubric cases only). Never raises.
     Skips runs that errored/timed out — their capture is empty, and a low judge score on infra noise
     would silently contaminate judge_mean (and flip a KEEP/REGRESSION verdict)."""
-    if judge_fn is None or not case.get("skill") or not case.get("rubric") or r.get("error"):
+    # `judge_all` (--compare-config mode): a case's `skill` field marks on/off-target for a skill
+    # ablation and means nothing when the arms differ by config, so judge every rubric case.
+    if judge_fn is None or not case.get("rubric") or r.get("error"):
+        return
+    if not judge_all and not case.get("skill"):
         return
     from engine.eval.judge import build_judge_prompt, parse_judge_reply
     try:
@@ -183,25 +231,31 @@ async def _judge_run(judge_fn, case: dict, r: dict) -> None:
         r["judge_score"], r["judge_why"], r["judge_error"] = None, "", f"{type(e).__name__}: {e}"
 
 
-async def sweep(models: list[dict], battery: dict, k: int, timeout: float, judge_fn=None) -> dict:
+async def sweep(models: list[dict], battery: dict, k: int, timeout: float, judge_fn=None,
+                compare_config: dict | None = None) -> dict:
     results: dict = {}
     for model in models:
-        cfg = build_config(model)
+        base_cfg = build_config(model)
+        # --compare-config: treatment = config + overrides, baseline = config as-is, skills intact
+        # in both. Default: one config, arms differ by whether `under_test` skills are registered.
+        treat_cfg = build_config(model, compare_config) if compare_config else base_cfg
         mres: dict = {}
         for case in battery["cases"]:
             arms = {}
             for arm in ("treatment", "baseline"):
+                cfg = treat_cfg if arm == "treatment" else base_cfg
                 runs = []
                 for i in range(k):
                     try:
-                        r = await run_one(cfg, battery, case, arm, timeout)
+                        r = await run_one(cfg, battery, case, arm, timeout,
+                                          ablate=compare_config is None)
                     except Exception as e:          # noqa: BLE001 - a bad run (missing fixture, build
                         # error) records an error cell; it must NEVER abort the whole sweep and discard
                         # everything already completed.
                         r = {"chain_correct": False, "reasons": [f"run failed: {e}"], "tools": [],
-                             "activated_skill": None, "create_table_args": [], "final": "",
-                             "error": f"{type(e).__name__}: {e}"}
-                    await _judge_run(judge_fn, case, r)
+                             "activated_skill": None, "create_table_args": [], "observer": [],
+                             "final": "", "error": f"{type(e).__name__}: {e}"}
+                    await _judge_run(judge_fn, case, r, judge_all=compare_config is not None)
                     runs.append(r)
                     js = r.get("judge_score")
                     print(f"  [{model['name']}] {case['id']:<18} {arm:<9} run {i+1}/{k}: "
@@ -218,12 +272,14 @@ async def sweep(models: list[dict], battery: dict, k: int, timeout: float, judge
     return results
 
 
-def render_report(models, battery, k, results) -> str:
+def render_report(models, battery, k, results, compare_config: dict | None = None) -> str:
     thr = math.ceil(k * PASS_FRACTION)
     by_id = {c["id"]: c for c in battery["cases"]}
+    what = (f"treatment = config with {compare_config}, baseline = config as-is (skills intact in both)"
+            if compare_config else f"under_test (ablated in baseline): {battery.get('under_test')}")
     lines = [f"# Skill-eval report — {battery.get('name', 'battery')}",
              "", f"pass^k: k={k}, a case is 'correct' for an arm if it passes >= {thr}/{k} runs. "
-             f"under_test (ablated in baseline): {battery.get('under_test')}.", ""]
+             f"{what}.", ""]
     for m in models:
         name = m["name"]
         hdr = f"## model: {name}" + (f"  [tool_calling_mode={m['mode']}]" if m.get("mode") else "")
@@ -235,7 +291,7 @@ def render_report(models, battery, k, results) -> str:
                   "|------|--------|-----------|-------------|---|------------------------|"]
         for cid, arms in results[name].items():
             case = by_id[cid]
-            tgt = case["skill"] or "(off)"
+            tgt = case.get("skill") or "(off)"
             b, t = arms["baseline"]["passes"], arms["treatment"]["passes"]
             bc, tc = (b >= thr), (t >= thr)
             delta = ("=" if bc == tc else ("＋" if tc and not bc else "－"))
@@ -243,10 +299,18 @@ def render_report(models, battery, k, results) -> str:
             jcell = "—" if (bm is None and tm is None) else f"{_m(bm)} → {_m(tm)}"
             lines.append(f"| {cid} | {tgt} | {b}/{k} {'✓' if bc else '✗'} | {t}/{k} {'✓' if tc else '✗'} "
                          f"| {delta} | {jcell} |")
-        # per-skill roll-up (on-target only): deterministic chain-correctness AND judge quality
-        lines += ["", "**Per-skill roll-up (on-target):**"]
-        for skill in battery.get("under_test", []):
-            cases = [c for c in battery["cases"] if c["skill"] == skill]
+        # roll-up: deterministic chain-correctness AND judge quality. Per skill in ablation mode;
+        # one roll-up over every case in --compare-config mode (no skill is the variable there).
+        if compare_config:
+            groups = [(str(compare_config), battery["cases"])]
+            lines += ["", "**Roll-up (all cases):**"]
+        else:
+            groups = [(s, [c for c in battery["cases"] if c.get("skill") == s])
+                      for s in battery.get("under_test", [])]
+            lines += ["", "**Per-skill roll-up (on-target):**"]
+        for skill, cases in groups:
+            if not cases:
+                continue
             b_ok = sum(1 for c in cases if results[name][c["id"]]["baseline"]["passes"] >= thr)
             t_ok = sum(1 for c in cases if results[name][c["id"]]["treatment"]["passes"] >= thr)
             chain_v = "KEEP" if t_ok > b_ok else ("no-lift" if t_ok == b_ok else "REGRESSION")
@@ -264,10 +328,59 @@ def render_report(models, battery, k, results) -> str:
                 jline = "; judge (not run)"
             lines.append(f"- `{skill}`: chain baseline {b_ok}/{len(cases)} → treatment {t_ok}/{len(cases)} "
                          f"**{chain_v}**{jline}")
-        # over-fire check (off-target must be clean in BOTH arms, all runs)
+        # Mechanism check (config arms). A verdict is only meaningful if the intervention actually
+        # FIRED in the cases whose verdict moved. The loop-recovery run that motivated this printed
+        # **KEEP** off a single flipped case in which the mechanism never ran once — the delta was
+        # run-to-run variance wearing a verdict's clothes. Same class of trap as a skill battery whose
+        # treatment arm never activates the skill: it measures nothing, very convincingly.
+        if compare_config:
+            flipped, attributable = [], 0
+            for cid, arms_ in results[name].items():
+                b_ok = arms_["baseline"]["passes"] >= thr
+                t_ok = arms_["treatment"]["passes"] >= thr
+                if b_ok == t_ok:
+                    continue
+                obs = sorted({i for r in arms_["treatment"]["runs"] for i in (r.get("observer") or [])}
+                             | {i for r in arms_["baseline"]["runs"] for i in (r.get("observer") or [])})
+                flipped.append((cid, "＋" if t_ok else "－", obs))
+                if obs:
+                    attributable += 1
+            lines += ["", "**Mechanism check:**"]
+            if not flipped:
+                lines.append("- no case changed verdict — no effect to attribute.")
+            else:
+                for cid, d_, obs in flipped:
+                    lines.append(f"- {d_} `{cid}` — observer events in either arm: "
+                                 f"{obs if obs else '**NONE — delta is not attributable to the intervention**'}")
+                if attributable == 0:
+                    lines.append("- ⚠️ **INCONCLUSIVE:** no flipped case shows the intervention firing. "
+                                 "Treat the roll-up verdict above as noise, not a result, and make the "
+                                 "battery harder before rerunning.")
+
+        # observer roll-up: how often each arm thrashed, nudged, excised, or was killed outright
+        counts = {}
+        for arm in ("baseline", "treatment"):
+            c = {}
+            for cid in results[name]:
+                for r in results[name][cid][arm]["runs"]:
+                    for issue in r.get("observer") or []:
+                        c[issue] = c.get(issue, 0) + 1
+            counts[arm] = c
+        if any(counts.values()):
+            keys = sorted(set(counts["baseline"]) | set(counts["treatment"]))
+            lines += ["", "**Observer events (baseline → treatment, across all runs):**"]
+            for kk in keys:
+                lines.append(f"- `{kk}`: {counts['baseline'].get(kk, 0)} → {counts['treatment'].get(kk, 0)}")
+
+        # over-fire check (off-target must be clean in BOTH arms, all runs). Ablation-mode only:
+        # with config arms a `skill: null` case is "not applicable", not an off-target control, so
+        # this check would report every ordinary chain failure as an over-fire.
+        if compare_config:
+            lines += [""]
+            continue
         overfire = []
         for c in battery["cases"]:
-            if c["skill"]:
+            if c.get("skill"):
                 continue
             for arm in ("treatment", "baseline"):
                 if any(not r["chain_correct"] for r in results[name][c["id"]][arm]["runs"]):
@@ -286,26 +399,36 @@ def main():
     ap.add_argument("--judge", help="judge for on-target rubric cases (0-3). 'claude:opus' (or "
                                     "claude:fable) uses the claude CLI/subscription; otherwise a model "
                                     "spec like 'main' (same grammar as --models). Omit to skip judging.")
+    ap.add_argument("--compare-config", help="A/B a CONFIG change instead of a skill: "
+                                             "'adaptive_thinking=true[,max_steps=8]'. Treatment gets "
+                                             "the overrides, baseline is the config as-is, and NO skill "
+                                             "is ablated in either arm.")
     ap.add_argument("--dry-run", action="store_true", help="print the run matrix, build nothing, call no model")
     args = ap.parse_args()
 
     battery = json.loads(Path(args.battery).read_text())
     models = parse_models(args.models)
+    compare_config = parse_config_arm(args.compare_config) if args.compare_config else None
     # judge label: 'claude:<model>' -> the CLI/Opus backend; anything else -> an OpenAI-client model spec
     judge_label = None
     if args.judge:
         judge_label = args.judge if args.judge.startswith("claude:") else parse_models(args.judge)[0]["name"]
     n_cases, n_arms = len(battery["cases"]), 2
     total = len(models) * n_cases * n_arms * args.k
-    n_judge = sum(1 for c in battery["cases"] if c.get("skill") and c.get("rubric")) * n_arms * args.k * len(models)
+    _judged = [c for c in battery["cases"]
+               if c.get("rubric") and (compare_config or c.get("skill"))]
+    n_judge = len(_judged) * n_arms * args.k * len(models)
     print(f"battery '{battery.get('name')}' — {len(models)} model(s) × {n_cases} cases × {n_arms} arms × k={args.k} "
           f"= {total} runs" + (f"; judge={judge_label} on {n_judge} on-target cells" if judge_label else ""))
+    print(f"  arms: treatment=config+{compare_config} vs baseline=config (skills intact in both)"
+          if compare_config else
+          f"  arms: treatment=skills-on vs baseline=ablated {battery.get('under_test')}")
     if args.dry_run:
         for m in models:
             print(f"  model {m['name']}: {m.get('base_url', '(configured default)')}"
                   + (f"  mode={m['mode']}" if m.get("mode") else "  mode=(config default)"))
         for c in battery["cases"]:
-            print(f"  case {c['id']:<18} skill={c['skill']!s:<16} rubric={'yes' if c.get('rubric') else 'no'}")
+            print(f"  case {c['id']:<18} skill={c.get('skill')!s:<16} rubric={'yes' if c.get('rubric') else 'no'}")
         return 0
 
     judge_fn = None
@@ -319,8 +442,8 @@ def main():
         judge_fn = _client_judge_fn(ModelClient(js.get("base_url") or jc.model_base_url,
                                                 js.get("model") or jc.model_name,
                                                 jc.model_api_key, timeout=jc.request_timeout))
-    results = asyncio.run(sweep(models, battery, args.k, args.timeout, judge_fn))
-    report = render_report(models, battery, args.k, results)
+    results = asyncio.run(sweep(models, battery, args.k, args.timeout, judge_fn, compare_config))
+    report = render_report(models, battery, args.k, results, compare_config)
     stem = Path(args.battery).stem
     out = Path(args.out) if args.out else (ROOT / "docs" / "ab" / "reports" / f"{stem}-report.md")
     out.parent.mkdir(parents=True, exist_ok=True)

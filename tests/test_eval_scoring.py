@@ -60,3 +60,42 @@ def test_schema_has_json_column_fails_on_all_text():
                                   "columns": ["name:text", "ingredients:text", "steps:text"]}]}
     r = score_case({"schema_has": ["json"]}, cap)
     assert r["chain_correct"] is False
+
+
+# ---- absence-of-pathology predicates (for batteries of deliberately unanswerable tasks) ----
+
+def test_max_counts_passes_when_under_the_ceiling():
+    cap = {"tools": ["query_rows", "query_rows"], "activated_skill": None}
+    assert score_case({"max_counts": {"query_rows": 2}}, cap)["chain_correct"] is True
+
+
+def test_max_counts_fails_when_a_tool_is_repeated_too_often():
+    cap = {"tools": ["query_rows", "query_rows", "query_rows"], "activated_skill": None}
+    r = score_case({"max_counts": {"query_rows": 2}}, cap)
+    assert r["chain_correct"] is False
+    assert "max_counts" in r["reasons"][0]
+
+
+def test_max_counts_ignores_tools_it_does_not_name():
+    cap = {"tools": ["calculator"] * 9 + ["query_rows"], "activated_skill": None}
+    assert score_case({"max_counts": {"query_rows": 2}}, cap)["chain_correct"] is True
+
+
+def test_no_observer_passes_when_the_issue_never_fired():
+    cap = {"tools": ["query_rows"], "activated_skill": None, "observer": ["repeat_nudge"]}
+    assert score_case({"no_observer": ["stuck_repeating"]}, cap)["chain_correct"] is True
+
+
+def test_no_observer_fails_when_the_loop_gave_up():
+    cap = {"tools": ["query_rows"] * 3, "activated_skill": None,
+           "observer": ["repeat_nudge", "stuck_repeating"]}
+    r = score_case({"no_observer": ["stuck_repeating"]}, cap)
+    assert r["chain_correct"] is False
+    assert "stuck_repeating" in r["reasons"][0]
+
+
+def test_no_observer_treats_a_missing_capture_as_clean():
+    """A run with no observer key (older capture, or a run that errored) must not be scored as
+    having fired something it never recorded."""
+    cap = {"tools": ["query_rows"], "activated_skill": None}
+    assert score_case({"no_observer": ["stuck_repeating"]}, cap)["chain_correct"] is True

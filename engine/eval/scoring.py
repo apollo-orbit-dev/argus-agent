@@ -23,10 +23,17 @@ def _all_column_specs(create_table_args: list) -> list[str]:
 
 
 def score_case(expect: dict, captured: dict) -> dict:
-    """expect: any of tools_in_order / min_counts / activates / skill_not / schema_has.
+    """expect: any of tools_in_order / min_counts / max_counts / no_observer / activates /
+    skill_not / schema_has.
     captured: {"tools": [ordered tool names], "activated_skill": name|None,
-               "create_table_args": [{"name":..., "columns":[...]}]}.
+               "create_table_args": [{"name":..., "columns":[...]}],
+               "observer": [issue strings]}.
     Returns {"chain_correct": bool, "checks": {name: bool}, "reasons": [str]}.
+
+    `max_counts` and `no_observer` express the ABSENCE of a pathology rather than the presence of a
+    result — needed for batteries whose tasks are deliberately unanswerable, where the right
+    behaviour is to answer gracefully rather than to complete a chain. `no_observer` names observer
+    issues that must NOT appear (e.g. "stuck_repeating" — the loop gave up on a livelock).
 
     `schema_has` inspects the create_table ARGUMENTS (not the tool sequence): a list of substrings
     each of which must appear in at least one created column spec (e.g. ["json"] verifies a json/list
@@ -47,6 +54,20 @@ def score_case(expect: dict, captured: dict) -> dict:
         checks["min_counts"] = ok
         if not ok:
             reasons.append(f"min_counts {expect['min_counts']} not met by {tools}")
+
+    if "max_counts" in expect:
+        ok = all(tools.count(t) <= n for t, n in expect["max_counts"].items())
+        checks["max_counts"] = ok
+        if not ok:
+            reasons.append(f"max_counts {expect['max_counts']} exceeded by {tools}")
+
+    if "no_observer" in expect:
+        seen = set(captured.get("observer") or [])
+        hit = sorted(seen & set(expect["no_observer"]))
+        ok = not hit
+        checks["no_observer"] = ok
+        if not ok:
+            reasons.append(f"observer fired {hit}")
 
     if "activates" in expect:
         ok = skill == expect["activates"]
