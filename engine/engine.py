@@ -414,7 +414,8 @@ class Engine:
                 binary=config.sandbox_runtime,
                 image=config.sandbox_image,
                 workspaces_root=str(root / "workspaces"),
-                idle_minutes=config.sandbox_idle_minutes)
+                idle_minutes=config.sandbox_idle_minutes,
+                network_mode=config.sandbox_network)
         self.events = EventBus()
         self.store = SessionStore(str(root / "sessions.db"))
         self.registry = build_base_registry(config, self._data_dir)
@@ -613,6 +614,18 @@ class Engine:
                         self.sandbox.stop(ws)
             except Exception:
                 log.exception("startup sandbox container reap failed")
+
+        # Egress sidecar: in "proxy" mode every workspace container depends on the sidecar being up
+        # BEFORE the first ensure_workspace() call (otherwise the container starts on a network with
+        # no route out and no way to reach it). Prepared once at startup, next to the reap above, and
+        # guarded the same way — a failure here (podman down, host not ready yet) must be logged, not
+        # crash Engine construction; ensure_workspace's own network/proxy plumbing still holds even if
+        # the sidecar isn't ready yet, it just won't have anywhere to send traffic until it is.
+        if config.enable_sandbox and self.sandbox is not None and config.sandbox_network == "proxy":
+            try:
+                self.sandbox.ensure_egress()
+            except Exception:
+                log.exception("could not prepare the sandbox egress proxy")
 
     def _owner_session_id(self) -> str:
         """The owner's primary Telegram chat id — the delivery identity for scheduled routines that

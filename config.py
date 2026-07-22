@@ -20,6 +20,10 @@ SemanticRecall = Literal["auto", "on", "off"]
 # /config (or any other config consumer) is rejected by pydantic before it ever reaches a
 # subprocess, rather than relying on the caller to have validated it.
 SandboxRuntimeName = Literal["podman", "docker"]
+# sandbox_network selects a security posture (see the field docstring below), so it gets the same
+# Literal treatment as sandbox_runtime: PATCH /config is not admin-gated, and an unrecognised value
+# must be rejected by pydantic before it can weaken isolation silently.
+SandboxNetwork = Literal["proxy", "lan", "none"]
 # sandbox_image becomes an argument to `podman build -t <image>` / `podman run <image> ...`. Legal
 # image reference only: lowercase alphanumerics plus '.', '_', '-', '/', optional ':tag'. Anchored
 # so it cannot start with '-' (podman would read that as a flag) and cannot contain whitespace or
@@ -109,6 +113,11 @@ class Config(BaseSettings):
     enable_sandbox: bool = False
     sandbox_runtime: SandboxRuntimeName = "podman"  # podman | docker (docker = weaker: root daemon + socket)
     sandbox_image: str = Field("argus-sandbox:local", pattern=_SANDBOX_IMAGE_RE)
+    # Container egress. "proxy" (default): the container joins an --internal network with no route
+    # off it and reaches the internet only through a policy-enforcing sidecar, so it can call public
+    # APIs but not the LAN. "lan": full network — the escape hatch, and a real loss of isolation.
+    # "none": airgapped.
+    sandbox_network: SandboxNetwork = "proxy"
     sandbox_workspace: str = "default"        # workspace for sessions with no profile
     sandbox_idle_minutes: int = Field(30, ge=1)
     sandbox_exec_timeout: float = Field(120.0, gt=0)
@@ -270,7 +279,7 @@ class Config(BaseSettings):
         "max_steps", "auto_compact_tokens", "request_timeout",
         "enable_tool_creation", "tool_creation_allow_network", "created_tool_timeout",
         "enable_code_interpreter", "code_interpreter_timeout", "code_interpreter_allow_network",
-        "enable_sandbox", "sandbox_runtime", "sandbox_image", "sandbox_workspace",
+        "enable_sandbox", "sandbox_runtime", "sandbox_image", "sandbox_network", "sandbox_workspace",
         "sandbox_idle_minutes", "sandbox_exec_timeout",
         "enable_dep_approval", "tool_secret_names", "enable_trusted_tools", "enable_action_verify",
         "adaptive_thinking",

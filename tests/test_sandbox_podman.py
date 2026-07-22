@@ -52,11 +52,13 @@ def test_container_name_is_namespaced():
 
 
 def test_run_argv_is_isolated_by_default(tmp_path):
-    """Stage 1 has no egress proxy, so the container must have NO network at all. If this
-    assertion is ever relaxed, the sandbox has quietly gained LAN access."""
+    """Stage 2 default is "proxy": the container joins the internal network, whose only exit is
+    the policy-enforcing sidecar — never the unrestricted default bridge. See
+    tests/test_sandbox_network.py for the full proxy/lan/none matrix."""
     rt = PodmanRuntime(workspaces_root=str(tmp_path), image="argus-sandbox:local")
     argv = rt._run_argv("default")
-    assert "--network=none" in argv
+    assert "--network argus-internal" in " ".join(argv)
+    assert "--network=none" not in argv
     assert "--userns=keep-id" in argv
     assert "argus-sandbox:local" in argv
     assert argv[-2:] == ["sleep", "infinity"]
@@ -115,8 +117,9 @@ def test_run_argv_omits_only_memory_when_memory_controller_is_missing(tmp_path, 
     assert "2g" not in argv
     assert "--pids-limit" in argv and "256" in argv
     assert "--cpus" in argv and "2" in argv
-    # still isolated: network=none and exactly one bind mount, untouched by the dropped cap
-    assert "--network=none" in argv
+    # still isolated: on the internal network (default proxy mode) and exactly one bind mount,
+    # untouched by the dropped cap
+    assert "--network argus-internal" in " ".join(argv)
     vols = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
     assert len(vols) == 1
     assert any("--memory" in r.message for r in caplog.records), \
@@ -131,7 +134,7 @@ def test_run_argv_omits_all_caps_when_no_controllers_are_reported(tmp_path):
     assert "--pids-limit" not in argv
     assert "--cpus" not in argv
     # isolation properties that don't depend on cgroups must survive completely uncapped resources
-    assert "--network=none" in argv
+    assert "--network argus-internal" in " ".join(argv)
     vols = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
     assert len(vols) == 1
     assert vols[0].endswith("/default:/home/argus:Z")

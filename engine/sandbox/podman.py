@@ -55,10 +55,11 @@ class PodmanRuntime:
     def __init__(self, binary: str = "podman", image: str = "argus-sandbox:local",
                  workspaces_root: str = "data/workspaces", memory: str = "2g",
                  pids_limit: int = 256, cpus: str = "2", idle_minutes: int = 30,
-                 sweep_interval_s: float = 60.0):
+                 sweep_interval_s: float = 60.0, network_mode: str = "proxy"):
         self.binary = binary
         self.image = image
         self.workspaces_root = os.path.abspath(workspaces_root)
+        self.network_mode = network_mode
         self.memory = memory
         self.pids_limit = pids_limit
         self.cpus = cpus
@@ -81,9 +82,24 @@ class PodmanRuntime:
 
     # ---------------- argv construction (unit-tested without podman) ----------------
 
+    def _network_flags(self) -> list[str]:
+        """proxy: the internal network, whose only exit is the sidecar. none: no network at all.
+        lan: the default bridge — full reach, including this LAN. The env vars are belt-and-braces;
+        the actual enforcement is that in `proxy` mode there is no route anywhere else."""
+        if self.network_mode == "none":
+            return ["--network=none"]
+        if self.network_mode == "lan":
+            return []
+        proxy = f"http://{self.EGRESS_NAME}:{self.PROXY_PORT}"
+        return ["--network", self.NETWORK_NAME,
+                "-e", f"HTTP_PROXY={proxy}", "-e", f"HTTPS_PROXY={proxy}",
+                "-e", f"http_proxy={proxy}", "-e", f"https_proxy={proxy}"]
+
     def _run_argv(self, name: str) -> list[str]:
-        """Stage 1: --network=none. There is no egress proxy yet, so the container gets no network
-        at all rather than the default bridge, which would silently hand it the LAN.
+        """Network mode (`self.network_mode`, see `_network_flags`): "proxy" (default) puts the
+        container on the internal network with no route off it except the egress sidecar; "lan"
+        gives it the normal bridge (the documented escape hatch — a real loss of isolation); "none"
+        gives it no network at all.
 
         `--user <host-uid>:<host-gid>` alongside `--userns=keep-id` is what makes the bind-mounted
         workspace writable on ANY host, not just one where the operator happens to be uid 1000 (see
@@ -102,7 +118,7 @@ class PodmanRuntime:
         return [
             self.binary, "run", "-d",
             "--name", self.container_name(name),
-            "--network=none",
+            *self._network_flags(),
             "--userns=keep-id",
             "--user", f"{os.getuid()}:{os.getgid()}",
             "-v", f"{self.workspace_dir(name)}:/home/argus:Z",
@@ -234,6 +250,7 @@ class PodmanRuntime:
             "reason": None if ok.exit_code == 0 else (ok.stderr.strip()[:200] or "runtime error"),
             "image": self.image,
             "image_present": img.exit_code == 0,
+            "network": self.network_mode,
             "workspaces": sorted(running),
             "dropped_limits": dropped,
             "cgroup_controllers": sorted(controllers),
