@@ -1,21 +1,18 @@
 """Shared SSRF-safe outbound fetch, used by any tool that fetches an agent/user-supplied URL
-(the watcher, download_file). Requires http(s), DNS-resolves the host and rejects if ANY resolved
-address is private/loopback/link-local/reserved/multicast (defeats hostnames that point at
-internal IPs — cloud metadata, the Argus server, LAN devices — which the literal-only `url_is_safe`
-misses). Redirects are NOT auto-followed; each hop is re-validated. (Residual: a rebind between this
-resolve and httpx's own connect is a narrow TOCTOU; no-auto-redirect + per-hop re-check closes the
-common vectors.)
+(the watcher, download_file). Requires http(s); the host must satisfy engine.sandbox.egress_policy,
+which DNS-resolves the host and rejects if ANY resolved address is private/loopback/link-local/
+reserved/multicast (defeats hostnames that point at internal IPs — cloud metadata, the Argus
+server, LAN devices). This is the same resolving policy tool_creation.url_is_safe now delegates to,
+so a created tool and a fetched watch/download are held to one standard, not two. Redirects are NOT
+auto-followed; each hop is re-validated. (Residual: a rebind between this resolve and httpx's own
+connect is a narrow TOCTOU; no-auto-redirect + per-hop re-check closes the common vectors.)
 """
 from __future__ import annotations
 
 import asyncio
-import ipaddress
-import socket
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 import httpx
-
-from engine.experimental.tool_creation import url_is_safe
 
 _MAX_REDIRECTS = 5
 
@@ -24,32 +21,10 @@ class BlockedURLError(ValueError):
     """Raised when a URL/host is rejected by the SSRF guard."""
 
 
-def _ip_blocked(addr: str) -> bool:
-    try:
-        ip = ipaddress.ip_address(addr)
-    except ValueError:
-        return True                          # unresolvable/garbage → block
-    return (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
-            or ip.is_multicast or ip.is_unspecified)
-
-
 def url_fetch_ok(url: str) -> bool:
     """http(s) only, and EVERY DNS-resolved address of the host must be public."""
-    try:
-        p = urlparse(str(url))
-    except Exception:
-        return False
-    if p.scheme.lower() not in ("http", "https"):
-        return False
-    host = (p.hostname or "").lower().rstrip(".")
-    if not host or not url_is_safe(url):     # scheme, blocked hostnames, IP-literal private ranges
-        return False
-    port = p.port or (443 if p.scheme.lower() == "https" else 80)
-    try:
-        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-    except Exception:
-        return False
-    return bool(infos) and not any(_ip_blocked(info[4][0]) for info in infos)
+    from engine.sandbox.egress_policy import url_allowed
+    return url_allowed(url)[0]
 
 
 async def safe_fetch(url: str, *, timeout: float = 20.0, max_bytes: int | None = None,

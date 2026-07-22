@@ -19,13 +19,11 @@ from __future__ import annotations
 
 import ast
 import asyncio
-import ipaddress
 import json
 import logging
 import os
 import re
 from typing import Callable, Optional
-from urllib.parse import urlparse
 
 log = logging.getLogger("argus.toolcreation")
 
@@ -33,29 +31,13 @@ from pydantic import BaseModel, Field, create_model
 
 from engine.tools.base import Tool, ToolRegistry
 
-_BLOCKED_HOSTNAMES = {"localhost", "metadata", "metadata.google.internal"}
-
 
 def url_is_safe(url) -> bool:
-    """Block created-tool requests to loopback/private/link-local hosts (SSRF guard).
-
-    Prevents a created tool from reaching private LAN services or cloud metadata. Naive on DNS rebinding (hostnames that resolve to private
-    IPs are allowed); set TOOL_CREATION_ALLOW_NETWORK=false to disable egress entirely.
-    """
-    try:
-        host = (urlparse(str(url)).hostname or "").lower()
-    except Exception:
-        return False
-    if not host or host in _BLOCKED_HOSTNAMES:
-        return False
-    try:
-        ip = ipaddress.ip_address(host)
-        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
-                or ip.is_multicast or ip.is_unspecified):
-            return False
-    except ValueError:
-        pass  # not an IP literal
-    return True
+    """SSRF guard for created-tool requests. Delegates to engine.sandbox.egress_policy, which
+    RESOLVES the host — this function used to check IP literals only, so a hostname pointing at a
+    private address (the LAN, the Argus server, cloud metadata) was allowed straight through."""
+    from engine.sandbox.egress_policy import url_allowed
+    return url_allowed(url)[0]
 
 
 class _SafeHTTPX:

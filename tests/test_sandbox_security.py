@@ -66,7 +66,13 @@ def test_safe_code_still_compiles():
     ("http://[::1]:8700/", False),
     ("http://0.0.0.0:8700/", False),
 ])
-def test_url_is_safe(url, safe):
+def test_url_is_safe(url, safe, monkeypatch):
+    # url_is_safe now DNS-resolves real hostnames (the fix this task ships). Every case here that
+    # is expected False is caught by the blocked-hostname/private-IP-literal checks before any
+    # resolution happens, so stubbing getaddrinfo to a public address cannot mask a regression —
+    # it only keeps the two real-hostname cases (open-meteo, wikipedia) from hitting live DNS.
+    monkeypatch.setattr("socket.getaddrinfo",
+                        lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 443))])
     assert url_is_safe(url) is safe
 
 
@@ -84,9 +90,12 @@ def test_created_tool_cannot_reach_localhost():
     assert "blocked" in out.lower()
 
 
-def test_safe_httpx_forces_no_redirect_follow():
+def test_safe_httpx_forces_no_redirect_follow(monkeypatch):
     # a created tool can't set follow_redirects=True to chase a 3xx into the LAN
     from engine.experimental.tool_creation import _SafeHTTPX
+
+    monkeypatch.setattr("socket.getaddrinfo",
+                        lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 443))])
 
     class _Rec:
         RequestError = RuntimeError
