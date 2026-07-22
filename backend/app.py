@@ -8,11 +8,13 @@ import asyncio
 import hashlib
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -35,6 +37,20 @@ class RunRequest(BaseModel):
 
 def _sse(ev) -> str:
     return f"data: {json.dumps(ev.to_json())}\n\n"
+
+
+def _run_sandbox_setup(script: str, env: dict) -> dict:
+    """Blocking body of POST /sandbox/setup, run via run_in_threadpool so a slow/cold-cache image
+    build (up to 600s) can't stall the event loop — see the call site for why."""
+    try:
+        p = subprocess.run(["bash", script], capture_output=True, text=True,
+                            timeout=600, env=env)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "exit_code": 124,
+                "output": "setup timed out after 600s (an image build can be slow on a cold "
+                          "cache — re-run it, or run scripts/setup-sandbox.sh in a terminal)"}
+    return {"ok": p.returncode == 0, "exit_code": p.returncode,
+            "output": (p.stdout + p.stderr)[-8000:]}
 
 
 def create_app(engine: Engine) -> FastAPI:
@@ -464,29 +480,25 @@ def create_app(engine: Engine) -> FastAPI:
     # ---- sandbox ----
     @app.get("/sandbox/status")
     async def sandbox_status():
-        return engine.sandbox_status()
+        # engine.sandbox_status() shells out to the runtime binary (several `subprocess.run` calls,
+        # up to 15s each) — run it off the event loop so a slow/loaded runtime can't stall every
+        # other request, the SSE stream, and the Telegram bot.
+        return await run_in_threadpool(engine.sandbox_status)
 
     @app.post("/sandbox/setup")
     async def sandbox_setup(request: Request):
         """Run the ONE vendored setup script. Deliberately takes no arguments of any kind: there is
         no command parameter to smuggle anything through, so this endpoint cannot become a shell."""
         _require_admin(request)
-        import subprocess
         script = str(Path(__file__).resolve().parents[1] / "scripts" / "setup-sandbox.sh")
         if not os.path.isfile(script):
             raise HTTPException(404, "setup-sandbox.sh is not present in this install")
         env = {**os.environ,
                "SANDBOX_RUNTIME": engine.config.sandbox_runtime,
                "SANDBOX_IMAGE": engine.config.sandbox_image}
-        try:
-            p = subprocess.run(["bash", script], capture_output=True, text=True,
-                               timeout=600, env=env)
-        except subprocess.TimeoutExpired:
-            return {"ok": False, "exit_code": 124,
-                    "output": "setup timed out after 600s (an image build can be slow on a cold "
-                              "cache — re-run it, or run scripts/setup-sandbox.sh in a terminal)"}
-        return {"ok": p.returncode == 0, "exit_code": p.returncode,
-                "output": (p.stdout + p.stderr)[-8000:]}
+        # An image build can run for minutes — off the event loop, same reasoning as /sandbox/status
+        # above, only more so: this one has a 600s timeout, not 15s.
+        return await run_in_threadpool(_run_sandbox_setup, script, env)
 
     # ---- approval-gated dependency installs ----
     @app.get("/deps")

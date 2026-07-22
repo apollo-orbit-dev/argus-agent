@@ -14,9 +14,23 @@ from engine.sandbox.runtime import ExecResult, FakeRuntime
 from tests.test_config import _mk
 
 
+# sandbox_runtime is now a Literal["podman", "docker"] at the Config level (a PATCH /config caller
+# can no longer smuggle an arbitrary path into a subprocess argv[0] — see config.py). These tests
+# need a binary that is GENUINELY missing (not simulated) to exercise the real fail-closed path, so
+# _engine keeps accepting the old sentinel value and, instead of routing it through Config, patches
+# it onto the constructed PodmanRuntime directly — still a real, unmocked "not found" reading.
+_FAKE_BINARY = "definitely-not-a-real-binary"
+
+
 def _engine(**over):
+    force_missing = over.get("sandbox_runtime") == _FAKE_BINARY
+    if force_missing:
+        over["sandbox_runtime"] = "podman"   # placeholder; must be Literal-valid to build Config
     cfg = _mk(**over)
-    return Engine(cfg, data_dir=tempfile.mkdtemp())
+    eng = Engine(cfg, data_dir=tempfile.mkdtemp())
+    if force_missing:
+        eng.sandbox.binary = _FAKE_BINARY
+    return eng
 
 
 def test_sandbox_off_keeps_todays_behaviour():

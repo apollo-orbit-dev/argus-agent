@@ -10,8 +10,21 @@ from engine.engine import Engine
 from tests.test_config import _mk
 
 
+# sandbox_runtime is a Literal["podman", "docker"] at the Config level (config.py) — a PATCH
+# /config caller can no longer hand it an arbitrary path. test_status_reports_enabled_but_unavailable
+# still wants a binary that is GENUINELY missing (not simulated), so this sentinel is routed around
+# Config and patched directly onto the constructed PodmanRuntime — a real, unmocked "not found".
+_FAKE_BINARY = "definitely-not-a-real-binary"
+
+
 def _client(**over):
-    return TestClient(create_app(Engine(_mk(**over), data_dir=tempfile.mkdtemp())))
+    force_missing = over.get("sandbox_runtime") == _FAKE_BINARY
+    if force_missing:
+        over["sandbox_runtime"] = "podman"   # placeholder; must be Literal-valid to build Config
+    eng = Engine(_mk(**over), data_dir=tempfile.mkdtemp())
+    if force_missing:
+        eng.sandbox.binary = _FAKE_BINARY
+    return TestClient(create_app(eng))
 
 
 def _route(app, path, method):
