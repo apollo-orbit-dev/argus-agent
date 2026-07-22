@@ -23,6 +23,11 @@ All notable changes to this project are documented here.
   (the model has no mid-conversation system slot), so the transcript rendered them as your own
   bubbles. They now render as a centred, dashed "Argus nudge" note, detected by the `[note] ` prefix
   those injections already share.
+- **Action-column buttons no longer sit out of alignment.** `.actions` set `display:flex` on a
+  `<td>`, which takes the cell out of the table layout algorithm so it never stretches to the row
+  height — a 92px row (long wrapped task text) got a 44px cell, leaving the button floating and the
+  cell's bottom border short of the row's. Only visible once a row wrapped, which the new Scheduled
+  tasks delete column made routine. Affects the Routines, Watches, Files and Scheduled tables.
 - **Watches delete reported success on failure.** The fetch shim resolves a 401 rather than rejecting,
   so a missing admin token toasted "Stopped watching" and changed nothing. Now checks `res.ok`, like
   the session mutations.

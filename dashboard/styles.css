@@ -192,7 +192,12 @@
   .rowfade-out{ animation:rowFadeOut .28s ease forwards; }
   @keyframes rowFadeOut{ to{ opacity:0; transform:scale(.98); } }
 
-  .actions{ display:flex; gap:4px; }
+  /* Only ever used on a <td>. `display:flex` takes the cell OUT of the table layout algorithm, so
+     it stops stretching to the row height — a 92px row (long wrapped task text) got a 44px cell,
+     leaving the button floating and the cell's bottom border short of the row's. Keep it a real
+     table cell and lay the buttons out inside it. */
+  td.actions{ white-space:nowrap; text-align:right; }
+  td.actions .act-btn + .act-btn{ margin-left:4px; }
   .act-btn{ background:none; border:1px solid transparent; color:var(--muted); cursor:pointer; padding:3px 6px; border-radius:5px; font-size:13px; }
   .act-btn:hover{ color:var(--ink); border-color:var(--border-strong); background:var(--panel-2); }
   .act-btn.danger:hover{ color:var(--danger); border-color:rgba(242,92,110,.4); }
