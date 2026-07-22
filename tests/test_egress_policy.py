@@ -100,6 +100,33 @@ def test_url_allowed_uses_the_default_port_per_scheme(monkeypatch):
     assert seen["port"] == 80
 
 
+@pytest.mark.parametrize("url", ["http://example.com:99999/", "http://example.com:abc/",
+                                 "http://example.com:-1/"])
+def test_url_allowed_returns_false_not_raise_on_malformed_port(url):
+    """urlparse defers port parsing to attribute access: p.port raises ValueError for an
+    out-of-range, non-numeric, or negative port. url_allowed is declared -> tuple[bool, str] and
+    must never let that escape as an exception."""
+    ok, reason = url_allowed(url)
+    assert ok is False and reason
+
+
+@pytest.mark.parametrize("host", ["2130706433", "0x7f000001", "0177.0.0.1", "127.1"])
+def test_resolve_false_fails_closed_on_disguised_loopback(host):
+    """These are alternate numeric forms of 127.0.0.1 that ipaddress.ip_address cannot parse, so
+    with resolve=False (no DNS to catch them) they must be refused, not waved through."""
+    ok, reason = host_allowed(host, resolve=False)
+    assert ok is False and reason
+
+
+def test_cgnat_space_is_not_public():
+    """100.64.0.0/10 (RFC 6598) is carrier-grade NAT space: ISP-side, not publicly reachable, but
+    not covered by is_private/is_reserved/etc either."""
+    assert ip_is_public("100.64.0.1") is False
+    assert ip_is_public("100.127.255.255") is False  # top of the /10
+    ok, reason = host_allowed("100.64.0.1", resolve=False)
+    assert ok is False and reason
+
+
 def test_module_imports_only_stdlib():
     """It is COPYed into the sandbox image, which has no third-party packages and no Argus code.
     A stray import turns the proxy into a container that will not start."""

@@ -76,6 +76,24 @@ def test_url_is_safe(url, safe, monkeypatch):
     assert url_is_safe(url) is safe
 
 
+@pytest.mark.parametrize("url", ["http://example.com:99999/", "http://example.com:abc/",
+                                 "http://example.com:-1/"])
+def test_url_is_safe_returns_false_not_raise_on_malformed_port(url):
+    """url_allowed evaluates p.port outside a try/except before this fix, so a malformed port
+    raised ValueError straight out of url_is_safe -- which a created tool's `except
+    httpx.RequestError` cannot catch. It must return False, not raise."""
+    assert url_is_safe(url) is False
+
+
+def test_url_is_safe_rejects_hostname_resolving_to_private_address(monkeypatch):
+    """Mutation guard for the headline fix: url_is_safe delegates to the resolving egress policy,
+    so a hostname that DNS-resolves to a LAN address must be refused even though the literal name
+    looks public. Reverting url_is_safe to a literal-only check leaves this red."""
+    monkeypatch.setattr("socket.getaddrinfo",
+                        lambda *a, **k: [(2, 1, 6, "", ("192.168.0.93", 443))])
+    assert url_is_safe("https://totally-innocent.example.com/") is False
+
+
 def test_created_tool_cannot_reach_localhost():
     # a tool that tries to hit a LAN service gets an httpx error, not a connection
     code = ("import httpx\n"

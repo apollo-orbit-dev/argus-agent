@@ -65,6 +65,18 @@ def test_url_fetch_ok_blocks_internal():
         assert url_fetch_ok(bad) is False, bad
 
 
+def test_url_fetch_ok_rejects_hostname_resolving_to_private_address(monkeypatch):
+    """Mutation guard for the headline fix: url_fetch_ok delegates to the resolving egress policy,
+    so a hostname that DNS-resolves to a LAN address must be refused even though the literal name
+    looks public. Reverting the resolving delegation to a literal-only check leaves this red."""
+    import socket
+
+    from engine.tools.watch import url_fetch_ok
+    monkeypatch.setattr(socket, "getaddrinfo",
+                        lambda *a, **k: [(2, 1, 6, "", ("192.168.0.93", 443))])
+    assert url_fetch_ok("https://totally-innocent.example.com/") is False
+
+
 async def test_fetch_rejects_internal_ip(tmp_path):
     """_fetch raises before any request when the URL host is internal (literal, no network)."""
     mgr = WatchManager(WatchStore(str(tmp_path / "w.json")))
