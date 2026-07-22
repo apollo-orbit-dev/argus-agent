@@ -36,43 +36,72 @@ def test_write_read_traversal_safe(tmp_path):
     assert not (tmp_path / "evil.txt").exists()
 
 
-def test_write_text_refuses_to_follow_a_symlink_planted_at_the_leaf(tmp_path):
+def test_write_text_refuses_to_follow_a_symlink_planted_at_the_leaf(tmp_path, monkeypatch):
     """TOCTOU: safe_path() resolves and validates the path, but a symlink planted at that exact
     leaf AFTER the check and BEFORE the open() would, without O_NOFOLLOW, be silently followed —
-    letting a write land outside the workspace. Simulates the race window directly."""
-    from engine.tools.files import safe_path
+    letting a write land outside the workspace.
+
+    Planting the symlink before calling write_text (as opposed to during the race window) would
+    be caught by safe_path()'s own pre-existing-symlink check and never reach _open_no_follow at
+    all — that would test something else entirely and wouldn't catch a regression that dropped
+    O_NOFOLLOW. So here safe_path is wrapped to plant the symlink itself, immediately after it
+    resolves and validates the path but before it returns — i.e. after validation, before open(),
+    exactly the window _open_no_follow exists to close."""
+    import engine.tools.files as files_mod
 
     ws = FileWorkspace(str(tmp_path / "ws"))
     os.makedirs(ws.root, exist_ok=True)
     outside = tmp_path / "outside.txt"
     outside.write_text("original")
+    assert not str(outside).startswith(os.path.realpath(ws.root) + os.sep)  # genuinely outside
 
-    p = safe_path(ws.root, "evil.txt")            # resolves cleanly; no symlink exists yet
-    os.symlink(str(outside), p)                    # ...the race: a symlink appears at the leaf
+    real_safe_path = files_mod.safe_path
+
+    def racy_safe_path(root, name):
+        p = real_safe_path(root, name)      # validation happens here — no symlink exists yet
+        os.symlink(str(outside), p)         # ...the race: a symlink appears right after
+        return p
+
+    monkeypatch.setattr(files_mod, "safe_path", racy_safe_path)
     try:
         ws.write_text("evil.txt", "PWNED")
         assert False, "write_text must not follow a symlink planted at the leaf"
     except ValueError:
         pass
     assert outside.read_text() == "original"       # the outside file was never touched
+    leaf = os.path.join(ws.root, "evil.txt")
+    assert os.path.islink(leaf)                    # the planted symlink is still there...
+    os.remove(leaf)                                # ...clean it up ourselves (tmp_path handles the rest)
 
 
-def test_save_bytes_refuses_to_follow_a_symlink_planted_at_the_leaf(tmp_path):
-    from engine.tools.files import safe_path
+def test_save_bytes_refuses_to_follow_a_symlink_planted_at_the_leaf(tmp_path, monkeypatch):
+    """save_bytes twin of the write_text TOCTOU test above — see its docstring for why the
+    symlink must be planted mid-race (via a wrapped safe_path) rather than before the call."""
+    import engine.tools.files as files_mod
 
     ws = FileWorkspace(str(tmp_path / "ws"))
     os.makedirs(ws.root, exist_ok=True)
     outside = tmp_path / "outside.bin"
     outside.write_bytes(b"original")
+    assert not str(outside).startswith(os.path.realpath(ws.root) + os.sep)  # genuinely outside
 
-    p = safe_path(ws.root, "evil.bin")
-    os.symlink(str(outside), p)
+    real_safe_path = files_mod.safe_path
+
+    def racy_safe_path(root, name):
+        p = real_safe_path(root, name)
+        os.symlink(str(outside), p)
+        return p
+
+    monkeypatch.setattr(files_mod, "safe_path", racy_safe_path)
     try:
         ws.save_bytes("evil.bin", b"PWNED")
         assert False, "save_bytes must not follow a symlink planted at the leaf"
     except ValueError:
         pass
     assert outside.read_bytes() == b"original"
+    leaf = os.path.join(ws.root, "evil.bin")
+    assert os.path.islink(leaf)
+    os.remove(leaf)
 
 
 def test_tools_read_list_delete(tmp_path):
