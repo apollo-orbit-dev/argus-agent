@@ -461,6 +461,33 @@ def create_app(engine: Engine) -> FastAPI:
             raise HTTPException(400, "body must include 'id'")
         return engine.scheduled_delete(body["id"])
 
+    # ---- sandbox ----
+    @app.get("/sandbox/status")
+    async def sandbox_status():
+        return engine.sandbox_status()
+
+    @app.post("/sandbox/setup")
+    async def sandbox_setup(request: Request):
+        """Run the ONE vendored setup script. Deliberately takes no arguments of any kind: there is
+        no command parameter to smuggle anything through, so this endpoint cannot become a shell."""
+        _require_admin(request)
+        import subprocess
+        script = str(Path(__file__).resolve().parents[1] / "scripts" / "setup-sandbox.sh")
+        if not os.path.isfile(script):
+            raise HTTPException(404, "setup-sandbox.sh is not present in this install")
+        env = {**os.environ,
+               "SANDBOX_RUNTIME": engine.config.sandbox_runtime,
+               "SANDBOX_IMAGE": engine.config.sandbox_image}
+        try:
+            p = subprocess.run(["bash", script], capture_output=True, text=True,
+                               timeout=600, env=env)
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "exit_code": 124,
+                    "output": "setup timed out after 600s (an image build can be slow on a cold "
+                              "cache — re-run it, or run scripts/setup-sandbox.sh in a terminal)"}
+        return {"ok": p.returncode == 0, "exit_code": p.returncode,
+                "output": (p.stdout + p.stderr)[-8000:]}
+
     # ---- approval-gated dependency installs ----
     @app.get("/deps")
     async def deps():
