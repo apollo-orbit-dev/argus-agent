@@ -88,10 +88,93 @@ def test_run_argv_runs_as_the_invoking_hosts_own_uid_and_gid(tmp_path):
 
 
 def test_run_argv_caps_resources(tmp_path):
+    """All three caps are only ever passed when their cgroup controller is actually available
+    (see the cgroup-controller-detection tests below) — mock a host that reports all three."""
     rt = PodmanRuntime(workspaces_root=str(tmp_path), memory="2g", pids_limit=256, cpus="2")
+    rt._cgroup_cache = (time.time(), frozenset({"memory", "pids", "cpu"}))
     argv = rt._run_argv("default")
     assert "--memory" in argv and "2g" in argv
     assert "--pids-limit" in argv and "256" in argv
+    assert "--cpus" in argv and "2" in argv
+
+
+# ---------------------------------------------------------------------------------------------
+# cgroup controller detection: on a host booted with `cgroup_disable=memory` (the default on
+# Raspberry Pi OS and common on ARM SBCs), `podman info` reports controllers `[cpu pids]` with no
+# `memory` — passing `--memory` anyway does not degrade gracefully, it makes `podman run` fail
+# outright. Each cap must only be passed when its controller is actually available, and a dropped
+# cap must never be silent (logged + surfaced via status()).
+# ---------------------------------------------------------------------------------------------
+def test_run_argv_omits_only_memory_when_memory_controller_is_missing(tmp_path, caplog):
+    """The exact real-world case that broke the owner's server: controllers = [cpu pids]."""
+    rt = PodmanRuntime(workspaces_root=str(tmp_path), memory="2g", pids_limit=256, cpus="2")
+    rt._cgroup_cache = (time.time(), frozenset({"cpu", "pids"}))
+    with caplog.at_level("WARNING"):
+        argv = rt._run_argv("default")
+    assert "--memory" not in argv
+    assert "2g" not in argv
+    assert "--pids-limit" in argv and "256" in argv
+    assert "--cpus" in argv and "2" in argv
+    # still isolated: network=none and exactly one bind mount, untouched by the dropped cap
+    assert "--network=none" in argv
+    vols = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
+    assert len(vols) == 1
+    assert any("--memory" in r.message for r in caplog.records), \
+        "a dropped cap must be logged, never silent"
+
+
+def test_run_argv_omits_all_caps_when_no_controllers_are_reported(tmp_path):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path), memory="2g", pids_limit=256, cpus="2")
+    rt._cgroup_cache = (time.time(), frozenset())
+    argv = rt._run_argv("default")
+    assert "--memory" not in argv
+    assert "--pids-limit" not in argv
+    assert "--cpus" not in argv
+    # isolation properties that don't depend on cgroups must survive completely uncapped resources
+    assert "--network=none" in argv
+    vols = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
+    assert len(vols) == 1
+    assert vols[0].endswith("/default:/home/argus:Z")
+    assert "tables.db" not in " ".join(argv)
+    assert "sessions.db" not in " ".join(argv)
+
+
+def test_cgroup_controllers_are_cached_and_not_shelled_out_on_every_call(tmp_path, monkeypatch):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    monkeypatch.setattr("engine.sandbox.podman.shutil.which", lambda b: "/usr/bin/podman")
+    calls = []
+
+    def fake_run(argv, *, stdin="", timeout=30.0):
+        calls.append(argv)
+        return ExecResult(0, "[cpu pids]\n", "")
+
+    rt._run = fake_run
+    assert rt._cgroup_controllers() == frozenset({"cpu", "pids"})
+    assert rt._cgroup_controllers() == frozenset({"cpu", "pids"})
+    assert len(calls) == 1, "a fresh reading within the TTL must not re-shell out to `podman info`"
+
+
+def test_status_reports_dropped_caps(tmp_path, monkeypatch):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path), memory="2g", pids_limit=256, cpus="2")
+    monkeypatch.setattr("engine.sandbox.podman.shutil.which", lambda b: "/usr/bin/podman")
+
+    def fake_run(argv, *, stdin="", timeout=30.0):
+        if "--version" in argv:
+            return ExecResult(0, "podman version 5.4.2\n", "")
+        if "--format" in argv:
+            return ExecResult(0, "[cpu pids]\n", "")   # the real-world case: no `memory`
+        if "info" in argv:
+            return ExecResult(0, "", "")
+        if "exists" in argv:
+            return ExecResult(0, "", "")
+        if "ps" in argv:
+            return ExecResult(0, "", "")
+        raise AssertionError(f"unexpected argv: {argv}")
+
+    rt._run = fake_run
+    body = rt.status()
+    assert body["dropped_limits"] == ["--memory"]
+    assert body["cgroup_controllers"] == ["cpu", "pids"]
 
 
 def test_bad_workspace_name_never_reaches_argv(tmp_path):

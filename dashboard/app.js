@@ -1201,6 +1201,12 @@
         (s.image_present === false ? ' <span class="sb-bad">(not built)</span>' : '') + '</span>');
       if (s.workspaces && s.workspaces.length)
         rows.push('<span>running: ' + esc(s.workspaces.join(', ')) + '</span>');
+      // A dropped resource cap (host cgroup controller missing, e.g. `cgroup_disable=memory` on
+      // Raspberry Pi OS / ARM SBCs) is a real reduction in isolation — never hide it silently.
+      if (s.dropped_limits && s.dropped_limits.length)
+        rows.push('<span class="sb-bad">reduced isolation: ' + esc(s.dropped_limits.join(', ')) +
+          ' not enforced (host cgroup controllers: ' +
+          esc((s.cgroup_controllers || []).join(', ') || 'none') + ')</span>');
       el.innerHTML = rows.join('');
     } catch(e){ el.innerHTML = '<span class="sb-bad">status unavailable</span>'; }
   }
