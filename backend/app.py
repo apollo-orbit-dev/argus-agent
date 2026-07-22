@@ -367,7 +367,10 @@ def create_app(engine: Engine) -> FastAPI:
         if up is None:
             raise HTTPException(400, "no file uploaded")
         data = await up.read()
-        return engine.files_save(up.filename, data)
+        try:
+            return engine.files_save(up.filename, data)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
 
     @app.get("/files/{name}")
     async def files_download(name: str, inline: int = 0):

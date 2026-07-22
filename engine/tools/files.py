@@ -225,7 +225,10 @@ class DownloadFileTool(Tool):
         if not os.path.splitext(name)[1]:            # no extension → infer from content type
             ctype = (r.headers.get("content-type", "").split(";")[0].strip().lower())
             name += _CTYPE_EXT.get(ctype, "")
-        saved = self.ws.save_bytes(name, r.content)
+        try:
+            saved = self.ws.save_bytes(name, r.content)
+        except ValueError as e:
+            return f"download_file error: {e}."
         return (f"download_file: saved '{saved}' ({len(r.content)} bytes) to your workspace. "
                 "You can now read it (read_document) or add it to your knowledge base.")
 

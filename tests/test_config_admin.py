@@ -125,6 +125,31 @@ async def test_files_inline_is_xss_hardened(client):
         assert r.headers["content-type"] == "image/png"
 
 
+async def test_files_upload_rejects_traversal_name_with_400(client):
+    """A filename that safe_path rejects (e.g. path traversal) must come back as a clean 400,
+    not a 500 — the endpoint has to catch the ValueError safe_path now raises."""
+    c, eng, tmp_path = client
+    async with c:
+        r = await c.post("/files/upload", files={"file": ("../evil.txt", b"pwned", "text/plain")})
+        assert r.status_code == 400
+        assert "traversal" in r.json()["detail"].lower()
+    assert not eng.files_path("evil.txt")            # nothing was written under the workspace
+    assert not (tmp_path.parent / "evil.txt").exists()
+
+
+async def test_files_upload_saves_a_well_formed_name(client):
+    c, eng, _ = client
+    name = "test_files_upload_saves_a_well_formed_name.txt"
+    try:
+        async with c:
+            r = await c.post("/files/upload", files={"file": (name, b"hello", "text/plain")})
+            assert r.status_code == 200
+            assert r.json()["ok"] is True
+        assert eng.files_path(name)
+    finally:
+        eng.files_delete(name)                       # this fixture doesn't isolate the workspace dir
+
+
 async def test_enable_tool_creation_via_patch(client):
     c, eng, _ = client
     async with c:

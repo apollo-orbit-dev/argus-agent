@@ -84,6 +84,22 @@ async def test_download_blocks_internal_url(tmp_path, monkeypatch):
     assert ws.list() == []                                           # nothing saved
 
 
+async def test_download_rejects_traversal_name_cleanly(tmp_path, monkeypatch):
+    """safe_path raises ValueError on a bad name (traversal, absolute path, ...) — download_file
+    must turn that into a clean '<tool> error: ...' string, not let it propagate out of run()."""
+    ws = FileWorkspace(str(tmp_path / "ws"))
+
+    async def fake_fetch(url, **kw):
+        return types.SimpleNamespace(status_code=200, headers={"content-type": "text/plain"},
+                                     content=b"pwned")
+    monkeypatch.setattr("engine.tools.net_guard.safe_fetch", fake_fetch)
+    out = await DownloadFileTool(ws).run(
+        DownloadFileTool.Params(url="https://x.com/report.txt", name="../evil.txt"))
+    assert out.startswith("download_file error:")
+    assert ws.list() == []                                            # nothing saved
+    assert not (tmp_path / "evil.txt").exists()                       # nothing escaped the workspace
+
+
 async def test_download_http_error(tmp_path, monkeypatch):
     ws = FileWorkspace(str(tmp_path / "ws"))
 
