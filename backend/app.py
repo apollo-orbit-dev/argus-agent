@@ -25,7 +25,10 @@ from engine.version import get_version
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 DASHBOARD_DIR = PROJECT_DIR / "dashboard"
-ENV_PATH = PROJECT_DIR / ".env"
+# The .env path is NOT a module constant: it comes from the engine (engine.env_path), which follows
+# the engine's data_dir. That way an app built on a throwaway engine writes the throwaway .env, not
+# the developer's real one — the module-constant version silently rewrote the real .env whenever a
+# test or a QA session drove config on an engine with a temp data_dir.
 
 
 class RunRequest(BaseModel):
@@ -663,16 +666,17 @@ def create_app(engine: Engine) -> FastAPI:
     async def config_save(request: Request):
         _require_admin(request)
         try:
-            persist_to_env(engine.config, ENV_PATH)
+            persist_to_env(engine.config, engine.env_path)
         except Exception as e:
             raise HTTPException(500, f"could not write .env: {e}")
-        return {"saved": True, "path": str(ENV_PATH)}
+        return {"saved": True, "path": str(engine.env_path)}
 
     @app.get("/config/env")
     async def config_env_get(request: Request):
         _require_admin(request)
-        text = ENV_PATH.read_text(encoding="utf-8") if ENV_PATH.exists() else ""
-        return {"text": text, "path": str(ENV_PATH)}
+        env_path = engine.env_path
+        text = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+        return {"text": text, "path": str(env_path)}
 
     @app.put("/config/env")
     async def config_env_put(body: dict, request: Request):
@@ -681,7 +685,7 @@ def create_app(engine: Engine) -> FastAPI:
         if not isinstance(text, str):
             raise HTTPException(400, "body must include 'text'")
         try:
-            ENV_PATH.write_text(text, encoding="utf-8")
+            engine.env_path.write_text(text, encoding="utf-8")
         except Exception as e:
             raise HTTPException(500, f"could not write .env: {e}")
         return {"saved": True, "note": "restart to apply changes that need a restart"}

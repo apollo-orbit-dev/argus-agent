@@ -388,7 +388,8 @@ def new_run_id() -> str:
 
 
 class Engine:
-    def __init__(self, config: Config, data_dir: Optional[str] = None):
+    def __init__(self, config: Config, data_dir: Optional[str] = None,
+                 env_path: Optional[str] = None):
         self._config = config
         # Where ALL per-feature databases/files live. Defaults to the repo root (byte-identical
         # behavior for every store when data_dir is None); pass a tmp dir and a throwaway Engine writes
@@ -458,7 +459,13 @@ class Engine:
         from engine.rules.store import RulesStore
         self.rules = RulesStore(str(self._data_dir / "rules.json"))
         from engine.model_presets import ModelPresetStore
-        self._env_path = Path(__file__).resolve().parents[1] / ".env"
+        # The .env this engine persists config to. Follows data_dir (the isolation seam) so a
+        # throwaway Engine(cfg, data_dir=tmp) writes tmp/.env, NOT the developer's real .env — the
+        # `__init__` comment above promises exactly this, and _env_path used to be the one thing
+        # that broke it (hard-coded to the repo root, ignoring data_dir). Production passes
+        # data_dir=None, so _data_dir is the repo root and this stays the repo .env, unchanged.
+        # `env_path` overrides both, for a caller that wants an explicit target.
+        self._env_path = Path(env_path) if env_path else (self._data_dir / ".env")
         self.model_presets_store = ModelPresetStore(
             str(root / "model_presets.json"))
         self._ensure_model_roles(config)   # seed/reconcile chat + embedding connections & roles
@@ -831,6 +838,12 @@ class Engine:
                            provider=conn.get("provider", "auto"))
 
     # ---- model connections + capability roles ----
+    @property
+    def env_path(self) -> Path:
+        """Where this engine persists config. The backend's .env endpoints use this rather than a
+        module constant, so an app built on a throwaway engine can't write the developer's .env."""
+        return self._env_path
+
     def save_config_to_env(self) -> None:
         """Persist the live config to .env so a change survives a restart."""
         from config import persist_to_env

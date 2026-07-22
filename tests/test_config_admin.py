@@ -38,15 +38,13 @@ class _EchoModel:
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path):
     cfg = Config(model_base_url="http://x/v1", model_name="main", telegram_bot_token="")
-    eng = Engine(cfg)
+    eng = Engine(cfg, env_path=str(tmp_path / ".env"))   # isolate .env writes from the repo
     eng._model_client = lambda: _EchoModel()
     eng._system_prompt_file = tmp_path / "sp.txt"   # isolate from repo
     from engine.custom_commands import CustomCommandStore
     eng.commands = CustomCommandStore(str(tmp_path / "custom_commands.yaml"))   # don't touch the repo file
-    import backend.app as app_mod
-    monkeypatch.setattr(app_mod, "ENV_PATH", tmp_path / ".env")
     app = create_app(eng)
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t"), eng, tmp_path
 
@@ -185,13 +183,11 @@ async def test_enable_tool_creation_via_patch(client):
         assert r.json()["enable_tool_creation"] is True
 
 
-async def test_admin_token_gates_sensitive_endpoints(tmp_path, monkeypatch):
+async def test_admin_token_gates_sensitive_endpoints(tmp_path):
     cfg = Config(model_base_url="http://x/v1", model_name="main", telegram_bot_token="",
                  admin_token="s3cret")
-    eng = Engine(cfg)
+    eng = Engine(cfg, env_path=str(tmp_path / ".env"))
     eng._system_prompt_file = tmp_path / "sp.txt"
-    import backend.app as app_mod
-    monkeypatch.setattr(app_mod, "ENV_PATH", tmp_path / ".env")
     (tmp_path / ".env").write_text("MODEL_NAME=main\n")
     app = create_app(eng)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
