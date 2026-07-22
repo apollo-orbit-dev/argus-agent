@@ -1,11 +1,37 @@
+import os
+
 import pytest
 from config import Config
 
+# Field names (== env var names, uppercased; Config sets no env_prefix and no per-field
+# aliases) that pydantic-settings would otherwise read from the developer's real .env AND from
+# any matching OS environment variable. Computed once at import time.
+_CONFIG_ENV_NAMES = {name.upper() for name in Config.model_fields}
+
 
 def _mk(**over):
+    """Build a Config hermetically: no real .env, no real OS environment leakage.
+
+    pydantic-settings' precedence is init kwargs > env vars > .env file > field defaults (see
+    tests/conftest.py). That means a bare `Config(**over)` doesn't just risk reading the
+    developer's `.env` for every field `over` doesn't cover — an exported shell env var for the
+    same name would win too. A test asserting "the default" must not be quietly asserting
+    "the default, unless this machine's .env or shell happens to override it".
+
+    `_env_file=None` is pydantic-settings' documented per-instance way to suppress the dotenv
+    source (verified against the installed pydantic-settings 2.14.2: BaseSettings.__init__
+    accepts a private `_env_file` kwarg for exactly this). There is no equivalent kwarg to
+    suppress the OS-environment source, so we temporarily pop any matching os.environ entries
+    around construction and restore them afterward (restores even on error, and doesn't touch
+    variables our fields don't care about, e.g. PATH).
+    """
     base = dict(model_base_url="http://x/v1", model_name="main", telegram_bot_token="")
     base.update(over)
-    return Config(**base)
+    saved = {k: os.environ.pop(k) for k in list(os.environ) if k.upper() in _CONFIG_ENV_NAMES}
+    try:
+        return Config(_env_file=None, **base)
+    finally:
+        os.environ.update(saved)
 
 
 def test_defaults():
