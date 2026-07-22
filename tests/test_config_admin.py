@@ -105,6 +105,34 @@ async def test_files_inline_vs_attachment_disposition(client):
         assert r.text == "# Title\n\nhello"
 
 
+async def test_files_download_works_for_a_subdirectory_path(client):
+    """Regression: files_list() returns relative paths like 'reports/july.md', and the dashboard
+    requests '/files/' + encodeURIComponent(name) — i.e. '/files/reports%2Fjuly.md'. That must
+    resolve to the real file (both download and inline preview), not 400/404."""
+    c, eng, _ = client
+    eng.files_save("reports/july.md", b"hello from a subdirectory")
+    async with c:
+        r = await c.get("/files/reports%2Fjuly.md")
+        assert r.status_code == 200 and r.text == "hello from a subdirectory"
+        assert "attachment" in r.headers["content-disposition"]
+        r = await c.get("/files/reports%2Fjuly.md", params={"inline": 1})
+        assert r.status_code == 200 and r.text == "hello from a subdirectory"
+        # a literal (unencoded) '/' must work too
+        r = await c.get("/files/reports/july.md")
+        assert r.status_code == 200 and r.text == "hello from a subdirectory"
+
+
+async def test_files_download_rejects_traversal_with_an_error_not_a_file(client):
+    """Allowing subdirectory paths through must not reopen path traversal: containment still has
+    to come from files_path()/safe_path(), which fails closed rather than serving a file."""
+    c, eng, tmp_path = client
+    async with c:
+        r = await c.get("/files/..%2F..%2Fetc%2Fpasswd")
+        assert r.status_code == 404
+        r = await c.get("/files/../../etc/passwd")
+        assert r.status_code == 404
+
+
 async def test_files_inline_is_xss_hardened(client):
     """Inline previews must never let a workspace .html/.svg execute as a document same-origin."""
     c, eng, _ = client
@@ -123,6 +151,31 @@ async def test_files_inline_is_xss_hardened(client):
         # an image keeps its real type (safe to render; sandbox+nosniff still applied)
         r = await c.get("/files/logo.png", params={"inline": 1})
         assert r.headers["content-type"] == "image/png"
+
+
+async def test_files_upload_rejects_traversal_name_with_400(client):
+    """A filename that safe_path rejects (e.g. path traversal) must come back as a clean 400,
+    not a 500 — the endpoint has to catch the ValueError safe_path now raises."""
+    c, eng, tmp_path = client
+    async with c:
+        r = await c.post("/files/upload", files={"file": ("../evil.txt", b"pwned", "text/plain")})
+        assert r.status_code == 400
+        assert "traversal" in r.json()["detail"].lower()
+    assert not eng.files_path("evil.txt")            # nothing was written under the workspace
+    assert not (tmp_path.parent / "evil.txt").exists()
+
+
+async def test_files_upload_saves_a_well_formed_name(client):
+    c, eng, _ = client
+    name = "test_files_upload_saves_a_well_formed_name.txt"
+    try:
+        async with c:
+            r = await c.post("/files/upload", files={"file": (name, b"hello", "text/plain")})
+            assert r.status_code == 200
+            assert r.json()["ok"] is True
+        assert eng.files_path(name)
+    finally:
+        eng.files_delete(name)                       # this fixture doesn't isolate the workspace dir
 
 
 async def test_enable_tool_creation_via_patch(client):

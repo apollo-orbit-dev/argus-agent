@@ -1101,6 +1101,10 @@
     setInputVal('inTraceDays', cfg.trace_retention_days);
     setInputVal('inTraceKeep', cfg.trace_keep_runs_per_session);
 
+    reflectBoolSwitch('cfgEnableSandbox', cfg.enable_sandbox);
+    setInputVal('cfgSandboxRuntime', cfg.sandbox_runtime);
+    setInputVal('cfgSandboxIdleMinutes', cfg.sandbox_idle_minutes);
+
     var tok = $('inTgToken');
     if (tok && document.activeElement !== tok)
       tok.placeholder = cfg.telegram_bot_token === '***set***' ? 'a token is set — paste a new one to change' : 'paste new token to change';
@@ -1173,6 +1177,56 @@
   $('observerThreshold').addEventListener('change', function(){
     var n = Number($('observerThreshold').value);
     if (Number.isFinite(n)) patchConfigKey('observer_repeat_threshold', Math.trunc(n)).catch(function(){ toast('Failed to set threshold', 'err'); });
+  });
+
+  /* ---- sandbox card ---- */
+  wireBoolSwitch('cfgEnableSandbox', 'enable_sandbox');
+  $('cfgSandboxRuntime').addEventListener('change', function(){
+    patchConfigKey('sandbox_runtime', this.value).catch(function(){ toast('Failed to set sandbox_runtime', 'err'); loadConfig(); });
+  });
+  wireNumberField('cfgSandboxIdleMinutes', 'sandbox_idle_minutes');
+  async function loadSandboxStatus(){
+    var el = $('sandboxStatus');
+    if (!el) return;
+    try {
+      var s = await (await fetch('/sandbox/status')).json();
+      var cls = s.available ? 'sb-ok' : 'sb-bad';
+      var rows = [
+        '<span>runtime: <span class="' + cls + '">' + esc(s.runtime || '?') +
+          (s.version ? ' ' + esc(s.version) : '') + '</span></span>',
+        '<span>status: <span class="' + cls + '">' +
+          (s.available ? 'ready' : esc(s.reason || 'unavailable')) + '</span></span>'
+      ];
+      if (s.image) rows.push('<span>image: ' + esc(s.image) +
+        (s.image_present === false ? ' <span class="sb-bad">(not built)</span>' : '') + '</span>');
+      if (s.workspaces && s.workspaces.length)
+        rows.push('<span>running: ' + esc(s.workspaces.join(', ')) + '</span>');
+      // A dropped resource cap (host cgroup controller missing, e.g. `cgroup_disable=memory` on
+      // Raspberry Pi OS / ARM SBCs) is a real reduction in isolation — never hide it silently.
+      if (s.dropped_limits && s.dropped_limits.length)
+        rows.push('<span class="sb-bad">reduced isolation: ' + esc(s.dropped_limits.join(', ')) +
+          ' not enforced (host cgroup controllers: ' +
+          esc((s.cgroup_controllers || []).join(', ') || 'none') + ')</span>');
+      el.innerHTML = rows.join('');
+    } catch(e){ el.innerHTML = '<span class="sb-bad">status unavailable</span>'; }
+  }
+  $('sandboxRecheckBtn').addEventListener('click', loadSandboxStatus);
+  $('sandboxSetupBtn').addEventListener('click', async function(){
+    var btn = this, out = $('sandboxOutput');
+    btn.disabled = true; btn.textContent = 'Setting up…';
+    out.style.display = 'block'; out.textContent = 'running scripts/setup-sandbox.sh …';
+    try {
+      // The fetch shim resolves a 401 rather than rejecting, so success is only visible on res.ok.
+      var res = await fetch('/sandbox/setup', { method: 'POST' });
+      if (!res.ok){ out.textContent = 'Setup failed (' + res.status + ')'; toast('Setup failed (' + res.status + ')', 'err'); }
+      else {
+        var d = await res.json();
+        out.textContent = d.output || '(no output)';
+        toast(d.ok ? 'Sandbox ready' : 'Setup failed — see the output', d.ok ? 'ok' : 'err');
+      }
+    } catch(e){ out.textContent = String(e); toast('Setup failed: ' + e.message, 'err'); }
+    btn.disabled = false; btn.textContent = 'Set up sandbox';
+    loadSandboxStatus();
   });
 
   /* ---- controls popover ---- */
@@ -2852,6 +2906,7 @@
   pageLoaders.settings = function(){
     loadRoles(); loadCommands(); loadNotify();
     loadSystemPrompt(); loadSoul(); loadEnv();
+    loadSandboxStatus();
   };
 
   var startPage = (function(){ try { return localStorage.getItem('argus_page') || 'console'; } catch(e){ return 'console'; } })();

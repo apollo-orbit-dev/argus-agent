@@ -1,0 +1,52 @@
+# Build context for the sandbox image (Containerfile).
+#
+# The build context is handed wholesale to the container runtime, so anything listed here would
+# otherwise leave the host during `podman build` even though the Containerfile never COPYs it.
+# Today it has zero COPY lines, so the correct context is "almost nothing" — but a stale, fat
+# context is exactly how a secret ends up somewhere nobody expected, so the exclusions are explicit
+# rather than implied by the absence of a COPY.
+#
+# NOTE for the stage-2 egress proxy: it will `COPY engine/sandbox/egress_policy.py` and
+# `engine/sandbox/proxy.py` into the image. Those live under `engine/`, which is NOT excluded here,
+# so they will be available. If you ever switch this file to a deny-all (`*`) form, remember that a
+# negation cannot re-include a file whose parent DIRECTORY is excluded — the same rule that bites in
+# .gitignore.
+
+# --- secrets and credentials ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- the agent's own data: conversations, memories, tables, traces, files it wrote ---
+data/
+workspace/
+workspaces/
+*.db
+*.db-wal
+*.db-shm
+created_tools/
+created_skills/
+artifacts/
+
+# --- personal / operational: deploy.sh carries the server address, notes carry findings ---
+scripts/
+docs/
+.superpowers/
+CLAUDE.md
+*.log
+
+# --- development cruft, none of it useful to the image ---
+.git/
+.github/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+tests/
+benchmark/
+dashboard/
+uv.lock

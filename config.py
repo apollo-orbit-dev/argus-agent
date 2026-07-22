@@ -14,6 +14,17 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 ToolCallingMode = Literal["native", "manual", "native_finish"]
 SkillSelectionMode = Literal["model_driven", "explicit", "hybrid"]
 SemanticRecall = Literal["auto", "on", "off"]
+# The container sandbox execs this value directly as argv[0] of a subprocess (see
+# scripts/setup-sandbox.sh and engine/sandbox/podman.py) — it must never be able to hold an
+# arbitrary path. Constraining it to a Literal means an unauthenticated/under-authorized PATCH
+# /config (or any other config consumer) is rejected by pydantic before it ever reaches a
+# subprocess, rather than relying on the caller to have validated it.
+SandboxRuntimeName = Literal["podman", "docker"]
+# sandbox_image becomes an argument to `podman build -t <image>` / `podman run <image> ...`. Legal
+# image reference only: lowercase alphanumerics plus '.', '_', '-', '/', optional ':tag'. Anchored
+# so it cannot start with '-' (podman would read that as a flag) and cannot contain whitespace or
+# shell metacharacters.
+_SANDBOX_IMAGE_RE = r"^[a-z0-9][a-z0-9._/-]*(?::[A-Za-z0-9._-]+)?$"
 # "global": one shared memory bank keyed on memory_user_id, so facts follow the
 # person across every interface (dashboard, Telegram). "session": legacy per-session
 # isolation — each conversation (each Telegram chat, the dashboard) has its own memory.
@@ -90,6 +101,17 @@ class Config(BaseSettings):
     enable_code_interpreter: bool = False
     code_interpreter_timeout: float = 10.0
     code_interpreter_allow_network: bool = False
+    # Container sandbox (EXPERIMENTAL, off by default). When on, exec_python runs inside a
+    # long-lived rootless container with the workspace bind-mounted, instead of the language-level
+    # AST sandbox. If it is on but the runtime is missing, sandboxed tools are NOT registered —
+    # they never fall back to the weaker soft sandbox, because that would silently give the user
+    # less isolation than they asked for.
+    enable_sandbox: bool = False
+    sandbox_runtime: SandboxRuntimeName = "podman"  # podman | docker (docker = weaker: root daemon + socket)
+    sandbox_image: str = Field("argus-sandbox:local", pattern=_SANDBOX_IMAGE_RE)
+    sandbox_workspace: str = "default"        # workspace for sessions with no profile
+    sandbox_idle_minutes: int = Field(30, ge=1)
+    sandbox_exec_timeout: float = Field(120.0, gt=0)
     # Approval-gated dependency installs: when a created tool needs a non-stdlib import,
     # file a human approve/deny request instead of hard-failing. On approval the package
     # is pip-installed and allowlisted. Off = disallowed imports hard-fail (legacy). The
@@ -248,6 +270,8 @@ class Config(BaseSettings):
         "max_steps", "auto_compact_tokens", "request_timeout",
         "enable_tool_creation", "tool_creation_allow_network", "created_tool_timeout",
         "enable_code_interpreter", "code_interpreter_timeout", "code_interpreter_allow_network",
+        "enable_sandbox", "sandbox_runtime", "sandbox_image", "sandbox_workspace",
+        "sandbox_idle_minutes", "sandbox_exec_timeout",
         "enable_dep_approval", "tool_secret_names", "enable_trusted_tools", "enable_action_verify",
         "adaptive_thinking",
         "enable_skill_creation", "enable_soul_editing", "enable_datastore", "enable_tables",

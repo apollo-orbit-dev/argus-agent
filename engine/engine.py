@@ -250,7 +250,50 @@ SKILL_CREATION_DIRECTIVE = (
 # Names of first-class built-ins that are registered only when their dependency URL is set (see the
 # gating in build_base_registry). These names stay RESERVED even when gated off, so create_tool won't
 # let the model shadow them with a sandbox reimplementation. Keep in sync with the gating below.
-GATED_BUILTIN_NAMES = {"web_search", "fetch_page", "map_site", "crawl_site", "extract_data"}
+#
+# exec_python belongs here too, for a different reason: in the fail-closed state (sandbox ON, runtime
+# down — see _exec_python_ok), exec_python is deliberately absent from the registry rather than
+# falling back to the weaker in-process AST sandbox. Without reserving the name, create_tool would
+# treat that absence as "free to take" and hand the model a host-side, AST-scanned replacement under
+# the SAME name — the exact silent downgrade fail-closed exists to prevent, just triggered by the
+# model instead of by Engine. Reserving it keeps create_tool refusing the name in every state
+# (sandboxed-and-up, sandboxed-and-down, unsandboxed), which is fine: when exec_python IS registered,
+# the ordinary built-in guard (not this reserved-name set) is what actually fires.
+GATED_BUILTIN_NAMES = {"web_search", "fetch_page", "map_site", "crawl_site", "extract_data",
+                       "exec_python"}
+
+
+def _workspace_dir_for(data_dir: Path, config: "Config") -> Path:
+    """The single, unified workspace directory — used by BOTH the file tools (read_file,
+    list_files, ...) and the container sandbox mount, so the host and the container always see the
+    same bytes (spec §3.1). Computed the same way everywhere this path is needed, so a FileWorkspace
+    built from it and PodmanRuntime.workspace_dir(config.sandbox_workspace) always agree."""
+    return data_dir / "workspaces" / config.sandbox_workspace
+
+
+def _migrate_legacy_workspace_dir(data_dir: Path, config: "Config") -> None:
+    """One-time migration from the pre-unification layout (`<data_dir>/workspace`) to the unified
+    one (`<data_dir>/workspaces/<sandbox_workspace>`) — see finding 1. Runs on every Engine init,
+    unconditionally (the path change applies whether or not the sandbox is enabled), so a fresh
+    process always looks at the current location before anything else touches it.
+
+    This directory holds live user data, so the only two things this function is allowed to do are
+    move the old directory into place (when it is unambiguously the only copy) or leave both alone
+    and complain loudly. It must never merge or overwrite: a wrong guess here destroys the owner's
+    files, so ambiguity always loses to doing nothing.
+    """
+    old = data_dir / "workspace"
+    new = _workspace_dir_for(data_dir, config)
+    if not old.exists():
+        return                                     # fresh install, or already migrated — nothing to do
+    if new.exists():
+        log.warning("both the legacy workspace dir %s and the current workspace dir %s exist — "
+                    "leaving BOTH untouched. This needs a human decision (which files are current); "
+                    "auto-merging risks destroying data, so nothing was moved.", old, new)
+        return
+    new.parent.mkdir(parents=True, exist_ok=True)
+    os.rename(str(old), str(new))                  # atomic: both paths are on one filesystem (data_dir)
+    log.info("migrated legacy workspace dir %s -> %s (sandbox/file-tools path unification)", old, new)
 
 
 def _tool_param_specs(tool) -> list[dict]:
@@ -324,7 +367,7 @@ def build_base_registry(config: Config, data_dir: Path) -> ToolRegistry:
         from engine.tools.artifacts import BuildWebPageTool, InspectArtifactTool
         from engine.tools.files import FileWorkspace
         _art_dir = str(data_dir / "artifacts")
-        _ws = FileWorkspace(str(data_dir / "workspace"))
+        _ws = FileWorkspace(str(_workspace_dir_for(data_dir, config)))
         reg.register(BuildWebPageTool(_art_dir, workspace=_ws))
         reg.register(InspectArtifactTool(_art_dir))
         if config.enable_pdf:
@@ -354,6 +397,24 @@ class Engine:
         # shipped skills/library dir) still resolves off the module path.
         self._data_dir = Path(data_dir) if data_dir else Path(__file__).resolve().parents[1]
         root = self._data_dir
+        # Finding 1: the file tools and the sandbox mount used to point at two different
+        # directories (<data_dir>/workspace vs <data_dir>/workspaces/<name>), so exec_python wrote
+        # where read_file/list_files never looked. Now there is one directory for both; this call
+        # moves any pre-existing workspace into the unified location before anything below
+        # constructs a FileWorkspace or a PodmanRuntime pointed at it. Runs regardless of
+        # enable_sandbox — the path change is unconditional.
+        _migrate_legacy_workspace_dir(root, config)
+        # Container sandbox. Constructed whenever it is ENABLED, even if the runtime turns out to
+        # be missing — status() has to be able to say why, and the fail-closed check below needs an
+        # object to ask.
+        self.sandbox = None
+        if config.enable_sandbox:
+            from engine.sandbox.podman import PodmanRuntime
+            self.sandbox = PodmanRuntime(
+                binary=config.sandbox_runtime,
+                image=config.sandbox_image,
+                workspaces_root=str(root / "workspaces"),
+                idle_minutes=config.sandbox_idle_minutes)
         self.events = EventBus()
         self.store = SessionStore(str(root / "sessions.db"))
         self.registry = build_base_registry(config, self._data_dir)
@@ -423,7 +484,9 @@ class Engine:
         # ---- vetted built-ins: file workspace, document reader, knowledge base, watcher ----
         from engine.tools.files import (DeleteFileTool, DownloadFileTool, FileWorkspace,
                                          ListFilesTool, ReadFileTool, WriteFileTool)
-        self._workspace_dir = str(root / "workspace")
+        # Unified with the sandbox mount (finding 1): same directory the container bind-mounts, so
+        # host tools and container-side code always see the same bytes.
+        self._workspace_dir = str(_workspace_dir_for(root, config))
         self.workspace = FileWorkspace(self._workspace_dir)
         if config.enable_files:
             for T in (WriteFileTool, ReadFileTool, ListFilesTool, DeleteFileTool, DownloadFileTool):
@@ -456,14 +519,26 @@ class Engine:
             # NL->SQL front door: writes and runs the SQL for you, grounded in the live schema, with
             # error-driven self-repair. Uses the aux (utility/chat) model to generate the query.
             self.registry.register(AskDataTool(self.tables, self._aux_model_client))
-        # Code interpreter (exec_python): sandboxed REPL for one-off computation. The manager holds
-        # per-session namespaces so variables persist across turns; it's cheap, so build it always
-        # and gate only the tool REGISTRATION on the live enable_code_interpreter flag (in run_task),
-        # which makes the feature toggleable via PATCH /config without a restart. Same soft sandbox as
-        # create_tool.
+        # Code interpreter (exec_python): REPL for one-off computation. The manager holds per-session
+        # namespaces so variables persist across turns in the soft-sandbox path; it's cheap, so build
+        # it always and gate only the tool REGISTRATION on the live enable_code_interpreter flag (in
+        # run_task), which makes the feature toggleable via PATCH /config without a restart.
+        #
+        # `runtime` starts at None here and is NOT resolved from `self.sandbox.available()` at
+        # construction time: availability can change after boot (podman comes up after Argus does),
+        # and freezing it here would decouple the value used for EXECUTION from the value
+        # `_exec_python_ok()` uses for the fail-closed GATE, which is evaluated live on every turn.
+        # If those two diverge, a turn can pass the gate (sandbox now available) while still running
+        # through the old, frozen None — i.e. through the weaker in-process AST sandbox, silently.
+        # run_task resolves `self.code_interp.runtime` fresh, from the same `enable_sandbox` flag, in
+        # the same breath as the gate check, immediately before registering ExecPythonTool.
         from engine.tools.code_interpreter import CodeInterpreter
-        self.code_interp = CodeInterpreter(allow_network=config.code_interpreter_allow_network,
-                                           timeout=config.code_interpreter_timeout)
+        self.code_interp = CodeInterpreter(
+            allow_network=config.code_interpreter_allow_network,
+            timeout=config.code_interpreter_timeout,
+            runtime=None,
+            workspace=config.sandbox_workspace,
+            container_timeout=config.sandbox_exec_timeout)
         if config.enable_soul_editing:                    # the agent can revise its OWN persona
             from engine.tools.soul import ReadSoulTool, UpdateSoulTool
             self.registry.register(ReadSoulTool(self.get_soul))
@@ -522,6 +597,22 @@ class Engine:
                 # A bad events.db (e.g. left corrupt by an unclean shutdown) must not stop the whole
                 # process from booting — worse than dropping one turn's trace.
                 log.exception("startup trace prune failed; continuing without pruning")
+
+        # Startup reap: stop any argus-ws-* containers left running from a previous process (crash,
+        # deploy, kill -9 — anything that skips graceful shutdown). This is the CROSS-PROCESS half of
+        # idle cleanup; the in-process half (_maybe_stop_idle) only fires from inside exec(), so a
+        # workspace that is never touched again after this process exits would otherwise run forever.
+        # Safe because stage-1 containers are stateless — the bind-mounted workspace dir holds the
+        # actual state, and ensure_workspace() recreates the container on demand — so stopping one
+        # that happens to still be alive loses nothing.
+        if config.enable_sandbox and self.sandbox is not None:
+            try:
+                st = self.sandbox.status()
+                if st.get("available"):
+                    for ws in st.get("workspaces", []):
+                        self.sandbox.stop(ws)
+            except Exception:
+                log.exception("startup sandbox container reap failed")
 
     def _owner_session_id(self) -> str:
         """The owner's primary Telegram chat id — the delivery identity for scheduled routines that
@@ -1268,8 +1359,17 @@ class Engine:
                 from engine.tools.routine_tools import ListRoutinesTool, RunRoutineTool
                 run_registry.register(RunRoutineTool(self.routines, self.routine_executor, session_id))
                 run_registry.register(ListRoutinesTool(self.routines))
-            if c.enable_code_interpreter:         # exec_python, bound to this session for persistent state
+            # Fail closed: if the owner asked for the sandbox and it is not usable, exec_python is
+            # NOT registered. Falling back to the in-process AST sandbox would silently give them
+            # less isolation than they asked for.
+            #
+            # The runtime that will actually EXECUTE code is resolved right here, from the exact same
+            # `enable_sandbox` flag the gate above just checked, in the same breath — never earlier
+            # (e.g. at Engine construction), so the two can never disagree. See ExecPythonTool.__init__
+            # for how the tool's own description is derived from this same `self.code_interp.runtime`.
+            if c.enable_code_interpreter and self._exec_python_ok():
                 from engine.tools.code_interpreter import ExecPythonTool
+                self.code_interp.runtime = self.sandbox if c.enable_sandbox else None
                 run_registry.register(ExecPythonTool(self.code_interp, session_id))
             if tool_creation_on:
                 from engine.experimental.tool_creation import (
@@ -1838,6 +1938,27 @@ class Engine:
                 for s in self.skill_registry.list()]
 
     # ---- library / scheduled / memory overviews (for the dashboard) ----
+    def sandbox_status(self) -> dict:
+        c = self._config
+        if not c.enable_sandbox or self.sandbox is None:
+            return {"enabled": False, "available": False, "reason": "sandbox is disabled",
+                    "runtime": c.sandbox_runtime, "image": c.sandbox_image, "workspaces": []}
+        return {"enabled": True, **self.sandbox.status()}
+
+    def _exec_python_ok(self) -> bool:
+        """Fail-closed gate for exec_python: if the owner asked for the container sandbox and it is
+        not usable, exec_python is NOT registered/advertised — it never falls back to the weaker
+        in-process AST sandbox, which would silently give them less isolation than they asked for.
+        Shared by run_task's per-run registry and tools_overview() so the two can never drift apart
+        (see the tools_overview docstring)."""
+        c = self._config
+        return (not c.enable_sandbox) or (self.sandbox is not None and self.sandbox.available())
+
+    def tools_overview_names(self) -> list[str]:
+        """Every tool name a turn could see — base registry plus the conditional block."""
+        ov = self.tools_overview()
+        return [t["name"] for t in ov["builtin"]] + [t["name"] for t in ov["conditional_enabled"]]
+
     def tools_overview(self) -> dict:
         """Enumerate every tool a turn could see: `builtin` (the base registry, fixed at Engine
         construction), `created` (persisted create_tool output), and `conditional_enabled` — every
@@ -1912,10 +2033,13 @@ class Engine:
             ("run_routine", "Run a saved routine."),
             ("list_routines", "List saved routines."),
         )
-        conditional += group(
-            c.enable_code_interpreter,
-            ("exec_python", "Run Python in a sandboxed, session-persistent REPL."),
-        )
+        if c.enable_code_interpreter and self._exec_python_ok():
+            # Same description the tool itself would advertise this turn (exec_python_description()
+            # keyed on the same `enable_sandbox` flag ExecPythonTool.__init__ uses) — kept as one
+            # function so this dashboard-facing list and the live tool schema can't drift apart.
+            from engine.tools.code_interpreter import exec_python_description
+            conditional.append({"name": "exec_python",
+                                "description": exec_python_description(sandboxed=c.enable_sandbox)})
         return {
             "builtin": [{"name": t.name, "description": t.description} for t in self.registry.list()],
             "created": [{"name": t.name, "description": t.description} for t in self._created_tools],

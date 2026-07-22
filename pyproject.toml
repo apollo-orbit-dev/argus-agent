@@ -44,3 +44,4 @@ pythonpath = ["."]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning"]
+markers = ["podman: needs a real podman binary; skipped when absent"]

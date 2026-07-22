@@ -534,6 +534,33 @@
         </div>
 
         <div class="card" style="margin-bottom:16px;">
+          <div class="card-head"><span class="card-title">Sandbox</span>
+            <span class="card-hint">experimental — needs podman</span></div>
+          <div class="field">
+            <label class="switch"><input type="checkbox" id="cfgEnableSandbox">
+              <span class="track"><span class="thumb"></span></span>Run exec_python in a container</label>
+            <div class="field-note">Off by default. When on, exec_python runs inside a rootless container
+              with your workspace bind-mounted, instead of the language-level sandbox. Applies on restart.
+              If the runtime is missing, exec_python is switched off rather than falling back.</div>
+          </div>
+          <div class="grid grid-2">
+            <div class="field"><label class="field-label">Runtime</label>
+              <select id="cfgSandboxRuntime">
+                <option value="podman">podman (recommended)</option>
+                <option value="docker">docker (weaker: root daemon + socket)</option>
+              </select></div>
+            <div class="field"><label class="field-label">Idle stop (minutes)</label>
+              <input type="number" id="cfgSandboxIdleMinutes" min="1"></div>
+          </div>
+          <div class="sandbox-status" id="sandboxStatus">checking…</div>
+          <div class="small-btn-row">
+            <button class="btn btn-sm" id="sandboxRecheckBtn">Re-check</button>
+            <button class="btn btn-sm btn-primary" id="sandboxSetupBtn">Set up sandbox</button>
+          </div>
+          <pre class="sandbox-output" id="sandboxOutput" style="display:none;"></pre>
+        </div>
+
+        <div class="card" style="margin-bottom:16px;">
           <div class="card-head"><span class="card-title">Run trace persistence</span></div>
           <div class="field row-inline" style="justify-content:space-between;">
             <label class="switch"><input type="checkbox" id="swTracePersist"><span class="track"><span class="thumb"></span></span>Persist run trace (survives restart)</label>
