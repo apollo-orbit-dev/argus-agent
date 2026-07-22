@@ -92,3 +92,6 @@ docs/superpowers/
 docs/ab/*
 !docs/ab/batteries/
 !docs/ab/fixtures/
+
+# Local working notes for Claude (not part of the shippable product)
+CLAUDE.md
