@@ -2,9 +2,31 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## 0.8.2
 
 ### Added
+- **`geocode` tool** — look up a place's latitude, longitude and timezone by name, with a
+  disambiguating hint (`Springfield, IL`, `Cambridge, UK`). The geocoder already existed as a helper
+  shared by `weather` and `time_in_zone`, but it had no `Tool` subclass, so the model could never
+  call it — and created tools run in a sandbox that can't import engine modules, meaning any
+  model-authored tool needing coordinates had to re-implement geocoding (including the state-hint
+  disambiguation) against the raw API. Returns `latitude=… longitude=… timezone=…` rather than prose,
+  because the output usually feeds another computation.
+- **Dashboard: the session id is shown in the Runs card header**, click to copy. The sessions sidebar
+  shows a session's *name*, so once you rename one the id had nowhere left to surface — and the id is
+  what you need to quote when reporting a failure. Falls back to selecting the text where
+  `navigator.clipboard` is unavailable (plain http over a LAN is not a secure context).
+- **Eval harness: `--compare-config`** — A/B a *config* change instead of a skill (treatment = config
+  + overrides, baseline = as-is, no skill ablated in either arm), so loop-level interventions can be
+  measured with the same pass^k machinery. Unknown config fields are rejected, so a typo can't
+  silently A/B nothing.
+- **Eval scoring: `max_counts` and `no_observer` predicates** — express the *absence* of a pathology
+  rather than the presence of a result, for batteries of deliberately unanswerable tasks where the
+  right behaviour is to answer gracefully rather than complete a chain.
+- **Eval reports: a Mechanism check** — for config arms, lists the observer events seen in each
+  flipped case and prints an explicit **INCONCLUSIVE** warning when no flipped case shows the
+  intervention firing. Added after a run printed **KEEP** off a single flipped case in which the
+  mechanism never ran once. Reports also roll up observer events per arm.
 - **README: "Small-model scaffolding"** — a section naming the layers that exist specifically to make
   a small model dependable (the loop-health Observer, switchable tool-calling modes, deterministic
   skill steps, explicit-first skill selection, tight tool contracts, the post-action verifier,
@@ -17,6 +39,15 @@ All notable changes to this project are documented here.
   under `docs/ab/` were previously gitignored, leaving `engine/eval/` public with no entry point.
   `.gitignore` now un-ignores exactly those (the personal deploy/probe scripts and the local A/B
   reports stay out).
+
+### Fixed
+- **The observer's repeat-nudge now fires for calls that fail validation.** The loop had two ways to
+  finish a step with a tool exchange and only one reached the observer's repeat check: the
+  validation-failure branch went straight back to the top of the loop, so a call repeating with
+  malformed arguments counted toward the `stuck_repeating` abort but was never nudged to change
+  approach. That had been true since the nudge was written, and it is backwards from where the need
+  is greatest — repeated malformed arguments are a signature small-model failure, and a validation
+  error carries almost nothing the second time.
 
 ## 0.8.1
 
