@@ -10,9 +10,13 @@ RUNTIME="${SANDBOX_RUNTIME:-podman}"
 IMAGE="${SANDBOX_IMAGE:-argus-sandbox:local}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 
+# Colour only when writing to a real terminal. Run from the dashboard, stdout is a pipe (not a tty),
+# so the ANSI codes would reach a browser <pre> as literal garbage (□[32m…). ✓/✗ are plain UTF-8 and
+# render fine either way.
+if [ -t 1 ]; then GREEN=$'\033[32m'; RED=$'\033[31m'; RESET=$'\033[0m'; else GREEN=''; RED=''; RESET=''; fi
 info() { printf '  %s\n' "$1"; }
-ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
-fail() { printf '  \033[31m✗\033[0m %s\n' "$1"; exit 1; }
+ok()   { printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$1"; }
+fail() { printf '  %s✗%s %s\n' "$RED" "$RESET" "$1"; exit 1; }
 
 echo ""
 echo "  Argus sandbox setup"

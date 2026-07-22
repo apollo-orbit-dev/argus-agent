@@ -71,3 +71,22 @@ def test_setup_is_admin_gated():
     src = inspect.getsource(app_mod.create_app)
     idx = src.index("/sandbox/setup")
     assert "_require_admin" in src[idx:idx + 600]
+
+
+def test_setup_output_has_ansi_escape_codes_stripped(monkeypatch):
+    """The dashboard shows setup output in a <pre>, where ANSI colour codes render as garbage
+    (□[32m…). The script suppresses them off a tty, but the backend strips any that slip through."""
+    import subprocess as _sp
+
+    from backend import app as app_mod
+
+    class _P:
+        returncode = 0
+        stdout = "  \x1b[32m✓\x1b[0m podman is usable\n  \x1b[31m✗\x1b[0m and a red one\n"
+        stderr = ""
+    monkeypatch.setattr(_sp, "run", lambda *a, **k: _P())
+
+    out = app_mod._run_sandbox_setup("dummy.sh", {})["output"]
+    assert "\x1b" not in out and "[32m" not in out, "escape codes must be gone"
+    assert "✓" in out and "✗" in out, "the check marks themselves must survive"
+    assert "podman is usable" in out

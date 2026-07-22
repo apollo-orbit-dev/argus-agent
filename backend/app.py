@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -42,6 +43,12 @@ def _sse(ev) -> str:
     return f"data: {json.dumps(ev.to_json())}\n\n"
 
 
+# ANSI escape sequences (colour codes etc.) render as literal garbage in a browser <pre>. The setup
+# script already suppresses them when its stdout isn't a tty, but strip any that slip through from
+# the script or a tool it calls — this output is only ever shown in the dashboard.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
 def _run_sandbox_setup(script: str, env: dict) -> dict:
     """Blocking body of POST /sandbox/setup, run via run_in_threadpool so a slow/cold-cache image
     build (up to 600s) can't stall the event loop — see the call site for why."""
@@ -53,7 +60,7 @@ def _run_sandbox_setup(script: str, env: dict) -> dict:
                 "output": "setup timed out after 600s (an image build can be slow on a cold "
                           "cache — re-run it, or run scripts/setup-sandbox.sh in a terminal)"}
     return {"ok": p.returncode == 0, "exit_code": p.returncode,
-            "output": (p.stdout + p.stderr)[-8000:]}
+            "output": _ANSI_RE.sub("", p.stdout + p.stderr)[-8000:]}
 
 
 def create_app(engine: Engine) -> FastAPI:
