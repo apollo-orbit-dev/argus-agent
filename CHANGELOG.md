@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+- **Routine builder: each tool's argument contract.** A tool-step's args are hand-typed JSON, but
+  `/routine-meta` returned tools as bare names — a dropdown of 70+ tools and a blank box, with the
+  source as the only documentation. It now also returns `tool_params` (`name`, `type`, `required`,
+  `description` per argument), shown under the args box with an **insert template** button that fills
+  in the required keys. Tools with no arguments say so explicitly.
+
+### Fixed
+- **Tool and skill descriptions are no longer truncated** on the Developer page. They were clipped at
+  140 characters even though the row already wraps; the longest built-in description is ~1170
+  characters, so most of it — including the part explaining *when* to use the tool — was hidden.
+
 ## 0.8.3
 
 ### Fixed
