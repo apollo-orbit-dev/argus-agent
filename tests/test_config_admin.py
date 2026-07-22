@@ -105,6 +105,34 @@ async def test_files_inline_vs_attachment_disposition(client):
         assert r.text == "# Title\n\nhello"
 
 
+async def test_files_download_works_for_a_subdirectory_path(client):
+    """Regression: files_list() returns relative paths like 'reports/july.md', and the dashboard
+    requests '/files/' + encodeURIComponent(name) — i.e. '/files/reports%2Fjuly.md'. That must
+    resolve to the real file (both download and inline preview), not 400/404."""
+    c, eng, _ = client
+    eng.files_save("reports/july.md", b"hello from a subdirectory")
+    async with c:
+        r = await c.get("/files/reports%2Fjuly.md")
+        assert r.status_code == 200 and r.text == "hello from a subdirectory"
+        assert "attachment" in r.headers["content-disposition"]
+        r = await c.get("/files/reports%2Fjuly.md", params={"inline": 1})
+        assert r.status_code == 200 and r.text == "hello from a subdirectory"
+        # a literal (unencoded) '/' must work too
+        r = await c.get("/files/reports/july.md")
+        assert r.status_code == 200 and r.text == "hello from a subdirectory"
+
+
+async def test_files_download_rejects_traversal_with_an_error_not_a_file(client):
+    """Allowing subdirectory paths through must not reopen path traversal: containment still has
+    to come from files_path()/safe_path(), which fails closed rather than serving a file."""
+    c, eng, tmp_path = client
+    async with c:
+        r = await c.get("/files/..%2F..%2Fetc%2Fpasswd")
+        assert r.status_code == 404
+        r = await c.get("/files/../../etc/passwd")
+        assert r.status_code == 404
+
+
 async def test_files_inline_is_xss_hardened(client):
     """Inline previews must never let a workspace .html/.svg execute as a document same-origin."""
     c, eng, _ = client

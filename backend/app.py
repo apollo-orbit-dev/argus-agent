@@ -372,10 +372,12 @@ def create_app(engine: Engine) -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, str(e))
 
-    @app.get("/files/{name}")
+    @app.get("/files/{name:path}")
     async def files_download(name: str, inline: int = 0):
-        if "/" in name or "\\" in name:
-            raise HTTPException(400, "invalid file name")
+        # `name` may be a subdirectory path (e.g. 'reports/july.md', or an encoded '%2F' from the
+        # dashboard). Containment is NOT enforced here — it comes entirely from files_path(), which
+        # runs safe_path() and fails closed (returns None) on traversal, absolute paths, symlink
+        # escapes, etc. Do not reintroduce a naive '/'/'\\' check here; it breaks subdirectories.
         path = engine.files_path(name)
         if not path:
             raise HTTPException(404, "no such file")

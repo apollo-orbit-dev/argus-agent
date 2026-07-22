@@ -33,8 +33,15 @@ def safe_name(name: str) -> str:
 
 
 def _safe_component(part: str) -> str:
-    """Sanitise ONE path component with the same character policy as safe_name()."""
-    part = re.sub(r"[^A-Za-z0-9._ -]+", "_", part).strip(". ")
+    """Sanitise ONE path component with the same character policy as safe_name(), except a
+    leading dot is preserved. This directory doubles as a container HOME, where dotfiles/dotdirs
+    ('.bashrc', '.config/settings.json') are normal and shouldn't be mangled into 'bashrc' /
+    'config/settings.json'. Trailing dots/spaces are still stripped. This is safe because
+    safe_path() rejects any '..' component on the RAW, pre-sanitisation parts before this
+    function ever runs — a leading dot surviving here can't resurrect path traversal.
+    """
+    part = re.sub(r"[^A-Za-z0-9._ -]+", "_", part)
+    part = part.lstrip(" ").rstrip(". ")
     return part[:120]
 
 
@@ -62,6 +69,23 @@ def safe_path(root: str, name: str) -> str:
     return full
 
 
+def _open_no_follow(p: str, mode: str, encoding: str | None = None):
+    """Open `p` for writing (create/truncate) with O_NOFOLLOW.
+
+    safe_path() already rejects a leaf that IS a symlink at check-time, but that check and this
+    open() are two separate syscalls — a symlink planted in between (TOCTOU) would otherwise be
+    followed, letting a write land anywhere the link points. O_NOFOLLOW makes the open() itself
+    fail if the leaf has become a symlink, closing that window. Raises ValueError (the same type
+    every other rejection in this module raises) so callers don't need a second except clause.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+    try:
+        fd = os.open(p, flags, 0o644)
+    except OSError as e:
+        raise ValueError(f"couldn't write '{os.path.basename(p)}': {e.strerror or e}") from e
+    return os.fdopen(fd, mode, encoding=encoding)
+
+
 class FileWorkspace:
     def __init__(self, root: str):
         self.root = root
@@ -77,14 +101,14 @@ class FileWorkspace:
     def write_text(self, name: str, content: str) -> str:
         p = self._path(name)
         os.makedirs(os.path.dirname(p), exist_ok=True)
-        with open(p, "w", encoding="utf-8") as fh:
+        with _open_no_follow(p, "w", encoding="utf-8") as fh:
             fh.write(content or "")
         return self.rel(name)
 
     def save_bytes(self, name: str, data: bytes) -> str:
         p = self._path(name)
         os.makedirs(os.path.dirname(p), exist_ok=True)
-        with open(p, "wb") as fh:
+        with _open_no_follow(p, "wb") as fh:
             fh.write(data)
         return self.rel(name)
 

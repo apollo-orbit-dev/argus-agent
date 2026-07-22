@@ -45,6 +45,59 @@ def test_rejects_a_symlink_that_escapes(tmp_path):
         safe_path(str(root), "escape/secret.txt")
 
 
+def test_rejects_a_symlinked_file_that_escapes(tmp_path):
+    """Not just symlinked directories: a leaf name that is itself a symlink to a file outside
+    root must be rejected too — the realpath check has to catch both link kinds."""
+    outside_file = tmp_path / "secret.txt"
+    outside_file.write_text("outside secret")
+    root = tmp_path / "ws"
+    root.mkdir()
+    os.symlink(str(outside_file), str(root / "link.txt"))
+    with pytest.raises(ValueError):
+        safe_path(str(root), "link.txt")
+
+
+def test_rejects_a_prefix_collision_sibling(tmp_path):
+    """A root of '.../ws' must not accept a resolved path that merely starts with the same
+    string, like '.../wsx' — a bare `full.startswith(root_real)` (no separator) would wrongly
+    allow this; the check must require root_real + os.sep (or an exact match). Reached via a
+    symlink (not a literal '..' component) so this exercises the resolved-path boundary check
+    itself, not the separate raw '..' rejection."""
+    root = tmp_path / "ws"
+    root.mkdir()
+    sibling = tmp_path / "wsx"
+    sibling.mkdir()
+    (sibling / "secret.txt").write_text("not yours")
+    os.symlink(str(sibling), str(root / "escape"))
+    root_real = os.path.realpath(str(root))
+    full = os.path.realpath(str(sibling / "secret.txt"))
+    assert full.startswith(root_real)                       # the naive check would let this through
+    assert not (full == root_real or full.startswith(root_real + os.sep))  # the real check rejects it
+    with pytest.raises(ValueError):
+        safe_path(str(root), "escape/secret.txt")
+
+
+def test_normalises_backslashes_to_forward_slashes(tmp_path):
+    p = safe_path(str(tmp_path), "reports\\july.md")
+    assert p == os.path.join(os.path.realpath(str(tmp_path)), "reports", "july.md")
+
+
+def test_allows_a_leading_dot_in_a_component(tmp_path):
+    p = safe_path(str(tmp_path), ".bashrc")
+    assert p == os.path.join(os.path.realpath(str(tmp_path)), ".bashrc")
+    p = safe_path(str(tmp_path), ".config/settings.json")
+    assert p == os.path.join(os.path.realpath(str(tmp_path)), ".config", "settings.json")
+
+
+def test_still_rejects_dotdot_after_allowing_leading_dots(tmp_path):
+    with pytest.raises(ValueError):
+        safe_path(str(tmp_path), "..")
+    with pytest.raises(ValueError):
+        safe_path(str(tmp_path), "../escape.txt")
+    with pytest.raises(ValueError):
+        safe_path(str(tmp_path), ".config/../../escape.txt")
+
+
 def test_sanitises_each_component(tmp_path):
     p = safe_path(str(tmp_path), "we;ird/na$me.txt")
     assert p.endswith(os.path.join("we_ird", "na_me.txt"))

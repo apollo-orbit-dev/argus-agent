@@ -1,5 +1,6 @@
 """File workspace: path-safety + read/write/list/delete + SSRF-guarded download."""
 import asyncio
+import os
 import types
 
 from engine.tools.files import (DeleteFileTool, DownloadFileTool, FileWorkspace,
@@ -33,6 +34,45 @@ def test_write_read_traversal_safe(tmp_path):
     assert "error" in out.lower() and "traversal" in out.lower()
     assert not ws.exists("evil.txt")
     assert not (tmp_path / "evil.txt").exists()
+
+
+def test_write_text_refuses_to_follow_a_symlink_planted_at_the_leaf(tmp_path):
+    """TOCTOU: safe_path() resolves and validates the path, but a symlink planted at that exact
+    leaf AFTER the check and BEFORE the open() would, without O_NOFOLLOW, be silently followed —
+    letting a write land outside the workspace. Simulates the race window directly."""
+    from engine.tools.files import safe_path
+
+    ws = FileWorkspace(str(tmp_path / "ws"))
+    os.makedirs(ws.root, exist_ok=True)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("original")
+
+    p = safe_path(ws.root, "evil.txt")            # resolves cleanly; no symlink exists yet
+    os.symlink(str(outside), p)                    # ...the race: a symlink appears at the leaf
+    try:
+        ws.write_text("evil.txt", "PWNED")
+        assert False, "write_text must not follow a symlink planted at the leaf"
+    except ValueError:
+        pass
+    assert outside.read_text() == "original"       # the outside file was never touched
+
+
+def test_save_bytes_refuses_to_follow_a_symlink_planted_at_the_leaf(tmp_path):
+    from engine.tools.files import safe_path
+
+    ws = FileWorkspace(str(tmp_path / "ws"))
+    os.makedirs(ws.root, exist_ok=True)
+    outside = tmp_path / "outside.bin"
+    outside.write_bytes(b"original")
+
+    p = safe_path(ws.root, "evil.bin")
+    os.symlink(str(outside), p)
+    try:
+        ws.save_bytes("evil.bin", b"PWNED")
+        assert False, "save_bytes must not follow a symlink planted at the leaf"
+    except ValueError:
+        pass
+    assert outside.read_bytes() == b"original"
 
 
 def test_tools_read_list_delete(tmp_path):
