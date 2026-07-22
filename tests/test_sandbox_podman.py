@@ -397,6 +397,11 @@ def _workspace_fake_run(calls, *, state="running", networks_json='{"argus-intern
     finding 1), start/unpause, `rm -f`, and `run` (creation)."""
     def fake_run(argv, *, stdin="", timeout=30.0):
         calls.append(list(argv))
+        if argv[1] == "info":
+            # The cgroup-controller probe fires from _run_argv only when `podman` is on PATH — false
+            # on a dev box without it, TRUE on GitHub's ubuntu-latest (podman is preinstalled). Answer
+            # it here so this test drives the same state machine regardless of the host.
+            return ExecResult(0, "[cpu memory pids]", "")
         if argv[1] == "inspect":
             if "NetworkSettings" in argv[3]:
                 return ExecResult(0, networks_json, "")

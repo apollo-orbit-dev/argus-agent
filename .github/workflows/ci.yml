@@ -20,6 +20,19 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Remove preinstalled container runtimes
+        # The sandbox suite is designed to run with NO container runtime: logic is tested against
+        # FakeRuntime, and the real-runtime tests skip when podman is absent. GitHub's ubuntu-latest
+        # PREINSTALLS podman, which flips `shutil.which("podman")` truthy and drives lifecycle tests
+        # down code paths (e.g. the cgroup-controller probe) they don't exercise on a runner-less
+        # machine — a mismatch that fails CI while passing locally. Restore the intended environment.
+        run: |
+          for b in podman docker; do
+            p="$(command -v "$b" 2>/dev/null || true)"
+            [ -n "$p" ] && sudo rm -f "$p" || true
+          done
+          echo "podman on PATH: $(command -v podman || echo 'no (as intended)')"
+
       - name: Install dependencies
         run: pip install -e . -r requirements-dev.txt
 
