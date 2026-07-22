@@ -257,6 +257,9 @@ def test_engine_startup_reaps_leftover_containers(monkeypatch, tmp_path):
             return {"runtime": "stub", "available": True,
                     "workspaces": ["default", "orphan"]}
 
+        def ensure_egress(self):
+            pass
+
         def stop(self, name):
             stopped.append(name)
 
@@ -281,6 +284,114 @@ def test_engine_startup_reap_is_skipped_when_the_runtime_is_unavailable():
     raises (status() on a missing binary reports available=False with an empty workspace list)."""
     eng = _engine(enable_sandbox=True, sandbox_runtime="definitely-not-a-real-binary")
     assert eng.sandbox is not None   # construction itself must not have raised
+
+
+# ---------------------------------------------------------------------------------------------
+# Podman sandbox stage 2, review finding (IMPORTANT): a dead/never-started egress sidecar was
+# invisible after Engine.__init__ — ensure_egress() ran exactly once, at boot, best-effort. These
+# pin that Engine construction still calls it at startup ONLY in "proxy" mode (never lan/none,
+# where there is no sidecar), and that a failure there is fully absorbed: Engine construction must
+# still succeed and a workspace container must still be attempted afterward. The corresponding
+# per-call repair (ensure_workspace() re-checking egress on every use, TTL-cached) is covered at
+# the PodmanRuntime level in tests/test_sandbox_podman.py — this file only pins the Engine-level
+# wiring, using a stub so no real podman is exercised.
+# ---------------------------------------------------------------------------------------------
+class _EgressTrackingStub:
+    """Same shape as test_engine_startup_reaps_leftover_containers's _StubRuntime, plus an
+    ensure_egress() that records every call and can be told to fail."""
+
+    def __init__(self, *, fail: bool = False, **kw):
+        self.fail = fail
+        self.ensure_egress_calls = 0
+        self.ensure_workspace_calls = []
+
+    def available(self):
+        return True
+
+    def status(self):
+        return {"runtime": "stub", "available": True, "workspaces": []}
+
+    def ensure_egress(self):
+        self.ensure_egress_calls += 1
+        if self.fail:
+            from engine.sandbox.runtime import SandboxUnavailable
+            raise SandboxUnavailable("stub sidecar is down")
+
+    def ensure_workspace(self, name):
+        self.ensure_workspace_calls.append(name)
+
+    def stop(self, name):
+        pass
+
+    def stop_idle(self, idle_seconds):
+        return []
+
+    def exec(self, *a, **kw):
+        raise NotImplementedError
+
+
+def _engine_with_stub(monkeypatch, **over):
+    import engine.sandbox.podman as podman_mod
+    stub_holder = {}
+
+    def _make_stub(**kw):
+        stub = _EgressTrackingStub(**kw)
+        stub_holder["stub"] = stub
+        return stub
+
+    monkeypatch.setattr(podman_mod, "PodmanRuntime", _make_stub)
+    eng = _engine(enable_sandbox=True, **over)
+    return eng, stub_holder["stub"]
+
+
+def test_engine_startup_calls_ensure_egress_when_network_mode_is_proxy(monkeypatch):
+    eng, stub = _engine_with_stub(monkeypatch, sandbox_network="proxy")
+    assert eng.sandbox is stub
+    assert stub.ensure_egress_calls == 1
+
+
+@pytest.mark.parametrize("mode", ["lan", "none"])
+def test_engine_startup_does_not_call_ensure_egress_outside_proxy_mode(monkeypatch, mode):
+    eng, stub = _engine_with_stub(monkeypatch, sandbox_network=mode)
+    assert eng.sandbox is stub
+    assert stub.ensure_egress_calls == 0
+
+
+def test_ensure_egress_failure_at_startup_does_not_prevent_engine_construction(monkeypatch):
+    eng, stub = _engine_with_stub(monkeypatch, sandbox_network="proxy", fail=True)
+    assert eng.sandbox is stub                  # construction succeeded despite the failure
+    assert stub.ensure_egress_calls == 1
+
+
+def test_ensure_egress_failure_does_not_block_a_workspace_container_from_starting(monkeypatch):
+    """A broken sidecar must not stop exec_python's workspace container from being attempted —
+    the container just has nowhere to send traffic until the sidecar is repaired."""
+    eng, stub = _engine_with_stub(monkeypatch, sandbox_network="proxy", fail=True)
+    eng.sandbox.ensure_workspace("default")
+    assert stub.ensure_workspace_calls == ["default"]
+
+
+def test_status_reports_sidecar_health_in_proxy_mode():
+    """PodmanRuntime.status() (exercised for real here, not through the stub) must surface
+    egress_ready so /sandbox/status and the dashboard can tell a broken sidecar apart from a
+    healthy one instead of just reporting the configured network mode."""
+    import time as _time
+    rt = PodmanRuntime(workspaces_root=tempfile.mkdtemp())
+    # A fresh, still-within-TTL cache entry — status() must read this rather than shell out to a
+    # real (here: absent) podman binary.
+    rt._egress_cache = (_time.time(), False, "stub sidecar is down")
+    body = rt.status()
+    assert body["network"] == "proxy"
+    assert body["egress_ready"] is False
+    assert body["egress_reason"] == "stub sidecar is down"
+
+
+@pytest.mark.parametrize("mode", ["lan", "none"])
+def test_status_egress_ready_is_not_applicable_outside_proxy_mode(mode):
+    rt = PodmanRuntime(workspaces_root=tempfile.mkdtemp(), network_mode=mode)
+    body = rt.status()
+    assert body["egress_ready"] is None
+    assert mode in body["egress_reason"]
 
 
 # ---------------------------------------------------------------------------------------------

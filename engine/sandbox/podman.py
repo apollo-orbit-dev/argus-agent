@@ -42,6 +42,16 @@ _CAP_CONTROLLER = {
 }
 _CGROUP_TTL_S = _AVAILABILITY_TTL_S
 
+# ensure_egress() is idempotent but not cheap — up to five `podman` subprocess calls (network
+# exists, sidecar inspect x2, run/start/unpause, network connect). It used to run exactly once, at
+# Engine construction; that leaves a dead sidecar (podman not ready yet at boot, or the sidecar
+# container dying later) permanently invisible, because nothing ever checks again. ensure_workspace()
+# now re-checks it on every call in `proxy` mode (see `_egress_ready_cached`) so a broken sidecar
+# gets repaired on the next turn instead of only at the next restart — but ensure_workspace runs on
+# every single exec(), so this must be cached the same TTL shape as available()/cgroup controllers,
+# or every turn pays for several extra subprocess calls.
+_EGRESS_TTL_S = _AVAILABILITY_TTL_S
+
 
 class PodmanRuntime:
     NETWORK_NAME = "argus-internal"
@@ -66,6 +76,8 @@ class PodmanRuntime:
         self._last_exec: dict[str, float] = {}
         self._avail_cache: "tuple[float, bool] | None" = None
         self._cgroup_cache: "tuple[float, frozenset[str]] | None" = None
+        # (timestamp, ready, reason) — see _egress_ready_cached. reason is "" when ready.
+        self._egress_cache: "tuple[float, bool, str] | None" = None
         # Idle sweep (see _maybe_stop_idle): no background task, just an opportunistic check on
         # every exec() — same shape as TraceStore._maybe_prune (engine/trace/store.py).
         self.idle_minutes = idle_minutes
@@ -227,11 +239,52 @@ class PodmanRuntime:
         except SandboxUnavailable:
             return False
 
+    def _egress_ready_cached(self) -> "tuple[bool, str]":
+        """TTL-cached (`_EGRESS_TTL_S`, same shape as `available()`/`_cgroup_controllers`) wrapper
+        around `ensure_egress()`. Backs both `ensure_workspace()`'s repair-on-use path and
+        `status()`'s `egress_ready` field, so the two can never disagree about how stale the last
+        check was.
+
+        Only meaningful in `proxy` mode — callers must gate on `self.network_mode == "proxy"`
+        themselves; this method always attempts the real check (it has no idea what mode it's
+        being called under, and calling it in `lan`/`none` would wrongly create the internal
+        network and a sidecar that mode has no use for).
+
+        Never raises: a failed `ensure_egress()` is caught, logged once per TTL window (not on
+        every call — that would spam the log every single exec() while the sidecar is down), and
+        cached as `(False, reason)` so callers can surface it without ever having a broken sidecar
+        block a workspace container from starting."""
+        now = time.time()
+        if self._egress_cache is not None and now - self._egress_cache[0] < _EGRESS_TTL_S:
+            _, ready, reason = self._egress_cache
+            return ready, reason
+        try:
+            self.ensure_egress()
+            self._egress_cache = (now, True, "")
+            return True, ""
+        except SandboxUnavailable as e:
+            reason = str(e)
+            self._egress_cache = (now, False, reason)
+            log.warning("sandbox egress proxy is not ready: %s", reason)
+            return False, reason
+
+    def _egress_status_fields(self) -> dict:
+        """`egress_ready`/`egress_reason` for status(). Only `proxy` mode ever runs a sidecar —
+        reporting a bare `False` for `lan`/`none` would read as "egress is broken" when there is in
+        fact no egress sidecar to be broken, so those modes get `None` plus an explanatory reason
+        instead."""
+        if self.network_mode != "proxy":
+            return {"egress_ready": None,
+                    "egress_reason": f"not applicable — sandbox_network is {self.network_mode!r}"}
+        ready, reason = self._egress_ready_cached()
+        return {"egress_ready": ready, "egress_reason": reason or None}
+
     def status(self) -> dict:
         if not shutil.which(self.binary):
             return {"runtime": self.binary, "available": False, "reason": "binary not found",
                     "image": self.image, "workspaces": [], "dropped_limits": [],
-                    "cgroup_controllers": []}
+                    "cgroup_controllers": [], "network": self.network_mode,
+                    **self._egress_status_fields()}
         ver = self._run([self.binary, "--version"], timeout=15)
         ok = self._run([self.binary, "info"], timeout=15)
         img = self._run([self.binary, "image", "exists", self.image], timeout=15)
@@ -254,6 +307,7 @@ class PodmanRuntime:
             "workspaces": sorted(running),
             "dropped_limits": dropped,
             "cgroup_controllers": sorted(controllers),
+            **self._egress_status_fields(),
         }
 
     def ensure_egress(self) -> None:
@@ -318,6 +372,14 @@ class PodmanRuntime:
                 f"egress proxy has no outbound network: {c.stderr.strip()[:200]}")
 
     def ensure_workspace(self, name: str) -> None:
+        if self.network_mode == "proxy":
+            # Best-effort, TTL-cached repair: a startup ensure_egress() failure (podman not ready
+            # yet) or a sidecar that died mid-process must not stay invisible until the whole
+            # process restarts. This never raises and never blocks the workspace container below
+            # from being attempted, even when the sidecar can't be readied — the container just
+            # starts on `argus-internal` with nowhere to send traffic, same as before this fix,
+            # except now it's actually retried and surfaced via status() instead of frozen forever.
+            self._egress_ready_cached()
         cname = self.container_name(name)
         os.makedirs(self.workspace_dir(name), exist_ok=True)
         state = self._run([self.binary, "inspect", "-f", "{{.State.Status}}", cname], timeout=20)

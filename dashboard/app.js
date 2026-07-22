@@ -1201,6 +1201,12 @@
         (s.image_present === false ? ' <span class="sb-bad">(not built)</span>' : '') + '</span>');
       if (s.workspaces && s.workspaces.length)
         rows.push('<span>running: ' + esc(s.workspaces.join(', ')) + '</span>');
+      // egress_ready is only meaningful in "proxy" mode (null in lan/none — no sidecar exists
+      // there to be broken) — surface it so a dead sidecar isn't invisible until exec_python
+      // fails opaquely inside a workspace container.
+      if (s.network === 'proxy')
+        rows.push('<span>egress: <span class="' + (s.egress_ready ? 'sb-ok' : 'sb-bad') + '">' +
+          (s.egress_ready ? 'ready' : esc(s.egress_reason || 'not ready')) + '</span></span>');
       // A dropped resource cap (host cgroup controller missing, e.g. `cgroup_disable=memory` on
       // Raspberry Pi OS / ARM SBCs) is a real reduction in isolation — never hide it silently.
       if (s.dropped_limits && s.dropped_limits.length)

@@ -160,6 +160,11 @@ def test_cgroup_controllers_are_cached_and_not_shelled_out_on_every_call(tmp_pat
 def test_status_reports_dropped_caps(tmp_path, monkeypatch):
     rt = PodmanRuntime(workspaces_root=str(tmp_path), memory="2g", pids_limit=256, cpus="2")
     monkeypatch.setattr("engine.sandbox.podman.shutil.which", lambda b: "/usr/bin/podman")
+    # This test is about dropped resource caps, not egress — prime a fresh (within-TTL) egress
+    # cache entry so status() reads it instead of shelling out through this test's narrower
+    # fake_run (which only scripts the caps-related calls). See test_sandbox_wiring.py for the
+    # egress_ready reporting itself.
+    rt._egress_cache = (time.time(), True, "")
 
     def fake_run(argv, *, stdin="", timeout=30.0):
         if "--version" in argv:
@@ -253,6 +258,10 @@ def test_available_caches_the_unavailable_outcome_too(tmp_path):
 def test_exec_sweeps_idle_workspaces_but_never_the_one_it_just_used(tmp_path):
     rt = PodmanRuntime(workspaces_root=str(tmp_path), idle_minutes=1)
     rt._sweep_interval_s = 0   # sweep on every exec() call for the test
+    # This test is about the idle sweep, not egress — prime a fresh egress cache entry so
+    # ensure_workspace's (default proxy-mode) egress check is a cache hit, not another `_run` call
+    # this test's narrower `responses` dict doesn't script.
+    rt._egress_cache = (time.time(), True, "")
 
     responses = {"inspect": ExecResult(0, "running\n", ""),
                 "exec": ExecResult(0, "42\n", ""),
@@ -275,6 +284,7 @@ def test_exec_sweeps_idle_workspaces_but_never_the_one_it_just_used(tmp_path):
 
 def test_exec_does_not_sweep_before_the_sweep_interval_elapses(tmp_path):
     rt = PodmanRuntime(workspaces_root=str(tmp_path), idle_minutes=1, sweep_interval_s=3600)
+    rt._egress_cache = (time.time(), True, "")   # not under test here — see the sibling test above
     responses = {"inspect": ExecResult(0, "running\n", ""), "exec": ExecResult(0, "", "")}
     rt._run = lambda argv, *, stdin="", timeout=30.0: responses[argv[1]]
     rt._last_exec["stale"] = time.time() - 999
@@ -297,6 +307,7 @@ def test_ensure_workspace_raises_sandbox_unavailable_when_start_fails_on_a_dead_
     the fix, ensure_workspace ignored that and returned as if the workspace were ready — the
     caller then hit a raw podman error out of exec() instead of a clean SandboxUnavailable."""
     rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    rt._egress_cache = (time.time(), True, "")   # not under test here — this is about the container
     rt._run = _script_run({
         "inspect": ExecResult(0, "dead\n", ""),
         "start": ExecResult(1, "", "Error: crun: cannot start a dead container: OCI error"),
@@ -309,6 +320,7 @@ def test_ensure_workspace_raises_sandbox_unavailable_when_start_fails_on_a_dead_
 
 def test_ensure_workspace_raises_sandbox_unavailable_when_start_fails_on_a_paused_container_and_unpause_also_fails(tmp_path):
     rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    rt._egress_cache = (time.time(), True, "")   # not under test here — this is about the container
     rt._run = _script_run({
         "inspect": ExecResult(0, "paused\n", ""),
         "unpause": ExecResult(1, "", "Error: cannot unpause: container gone"),
@@ -323,6 +335,7 @@ def test_ensure_workspace_unpauses_rather_than_starts_a_paused_container(tmp_pat
     """`podman start` fails on a paused container — it needs `unpause` instead. A successful
     unpause must be treated as the workspace being ready, same as an already-running one."""
     rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    rt._egress_cache = (time.time(), True, "")   # not under test here — this is about the container
     calls = []
 
     def fake_run(argv, *, stdin="", timeout=30.0):
@@ -341,6 +354,7 @@ def test_ensure_workspace_unpauses_rather_than_starts_a_paused_container(tmp_pat
 
 def test_ensure_workspace_returns_when_start_succeeds_on_an_exited_container(tmp_path):
     rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    rt._egress_cache = (time.time(), True, "")   # not under test here — this is about the container
     rt._run = _script_run({
         "inspect": ExecResult(0, "exited\n", ""),
         "start": ExecResult(0, "", ""),
