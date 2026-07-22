@@ -44,6 +44,7 @@ system_prompt.md
 # parent DIRECTORY is excluded.
 scripts/*
 !scripts/skill_eval.py
+!scripts/setup-sandbox.sh
 docs/RUNBOOK.md
 docs/routines-spec.md
 docs/feature-backlog.md
