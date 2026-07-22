@@ -5,7 +5,9 @@ they catch the flag mistakes that matter (a missing --network=none is a silent l
 without needing a container runtime. The end-to-end tests are marked `podman` and skip when the
 binary is absent, which is the case in CI.
 """
+import os
 import shutil
+import subprocess
 import time
 
 import pytest
@@ -14,6 +16,34 @@ from engine.sandbox.podman import PodmanRuntime
 from engine.sandbox.runtime import ExecResult, SandboxUnavailable, validate_workspace
 
 needs_podman = pytest.mark.skipif(shutil.which("podman") is None, reason="podman not installed")
+
+
+def _real_sandbox_image_present() -> bool:
+    """True only if podman is installed AND the actual shipped image (argus-sandbox:local) has
+    been built locally — there is no registry for it (see the Containerfile header), so on a fresh
+    machine it doesn't exist until scripts/setup-sandbox.sh has been run.
+
+    Short-circuits on a missing binary rather than letting the subprocess call raise, since this
+    runs at collection time and CI/most dev machines don't have podman at all."""
+    if shutil.which("podman") is None:
+        return False
+    try:
+        r = subprocess.run(["podman", "image", "exists", "argus-sandbox:local"],
+                           capture_output=True, timeout=15)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+# Finding 4: python:3.12-slim (the old stand-in image for these tests) runs as root and was never
+# built from our Containerfile, so it cannot catch a uid/permission defect in the image that
+# actually ships (finding 3) or any other Containerfile regression. These tests now target
+# argus-sandbox:local — the real image — and skip cleanly (rather than erroring against a missing
+# image) with a reason that says how to get it.
+needs_real_sandbox_image = pytest.mark.skipif(
+    not _real_sandbox_image_present(),
+    reason="argus-sandbox:local is not built locally — run scripts/setup-sandbox.sh to build it "
+           "(these end-to-end tests intentionally target the real shipped image, not a stand-in)")
 
 
 def test_container_name_is_namespaced():
@@ -44,6 +74,17 @@ def test_run_argv_mounts_only_the_workspace(tmp_path):
     assert vols[0].endswith("/default:/home/argus:Z")
     assert "tables.db" not in " ".join(argv)
     assert "sessions.db" not in " ".join(argv)
+
+
+# ---------------------------------------------------------------------------------------------
+# Finding 3 (IMPORTANT): the container must run as the INVOKING host user's own uid/gid, not a
+# uid baked into the image — otherwise it only works on the one machine where the operator
+# happens to be uid 1000.
+# ---------------------------------------------------------------------------------------------
+def test_run_argv_runs_as_the_invoking_hosts_own_uid_and_gid(tmp_path):
+    argv = PodmanRuntime(workspaces_root=str(tmp_path))._run_argv("default")
+    assert "--user" in argv
+    assert argv[argv.index("--user") + 1] == f"{os.getuid()}:{os.getgid()}"
 
 
 def test_run_argv_caps_resources(tmp_path):
@@ -221,10 +262,10 @@ def test_ensure_workspace_returns_when_start_succeeds_on_an_exited_container(tmp
     rt.ensure_workspace("default")  # must not raise
 
 
-@needs_podman
+@needs_real_sandbox_image
 @pytest.mark.podman
 def test_end_to_end_exec_round_trip(tmp_path):
-    rt = PodmanRuntime(workspaces_root=str(tmp_path), image="python:3.12-slim")
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
     try:
         rt.ensure_workspace("default")
         r = rt.exec("default", ["python", "-c", "print(6*7)"], timeout=60)
@@ -233,10 +274,10 @@ def test_end_to_end_exec_round_trip(tmp_path):
         rt.stop("default")
 
 
-@needs_podman
+@needs_real_sandbox_image
 @pytest.mark.podman
 def test_end_to_end_workspace_is_shared_with_the_host(tmp_path):
-    rt = PodmanRuntime(workspaces_root=str(tmp_path), image="python:3.12-slim")
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
     try:
         rt.ensure_workspace("default")
         rt.exec("default", ["sh", "-c", "echo hi > /home/argus/from_container.txt"], timeout=60)
@@ -245,10 +286,10 @@ def test_end_to_end_workspace_is_shared_with_the_host(tmp_path):
         rt.stop("default")
 
 
-@needs_podman
+@needs_real_sandbox_image
 @pytest.mark.podman
 def test_end_to_end_has_no_network(tmp_path):
-    rt = PodmanRuntime(workspaces_root=str(tmp_path), image="python:3.12-slim")
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
     try:
         rt.ensure_workspace("default")
         r = rt.exec("default", ["python", "-c",

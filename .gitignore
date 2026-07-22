@@ -27,7 +27,12 @@ custom_commands.yaml
 created_tools/
 created_skills/
 # agent file workspace + built web pages
+# `workspace/` is the pre-unification layout (auto-migrated on Engine init — see
+# engine.engine._migrate_legacy_workspace_dir); `workspaces/` is the current one, shared with the
+# container sandbox mount. Keep ignoring both: an old checkout may still have one on disk right up
+# until the next Engine start migrates it.
 workspace/
+workspaces/
 artifacts/
 
 # Persona / prompt overrides (ship the defaults in code, not the user's edits)

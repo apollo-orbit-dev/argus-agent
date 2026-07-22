@@ -250,7 +250,50 @@ SKILL_CREATION_DIRECTIVE = (
 # Names of first-class built-ins that are registered only when their dependency URL is set (see the
 # gating in build_base_registry). These names stay RESERVED even when gated off, so create_tool won't
 # let the model shadow them with a sandbox reimplementation. Keep in sync with the gating below.
-GATED_BUILTIN_NAMES = {"web_search", "fetch_page", "map_site", "crawl_site", "extract_data"}
+#
+# exec_python belongs here too, for a different reason: in the fail-closed state (sandbox ON, runtime
+# down — see _exec_python_ok), exec_python is deliberately absent from the registry rather than
+# falling back to the weaker in-process AST sandbox. Without reserving the name, create_tool would
+# treat that absence as "free to take" and hand the model a host-side, AST-scanned replacement under
+# the SAME name — the exact silent downgrade fail-closed exists to prevent, just triggered by the
+# model instead of by Engine. Reserving it keeps create_tool refusing the name in every state
+# (sandboxed-and-up, sandboxed-and-down, unsandboxed), which is fine: when exec_python IS registered,
+# the ordinary built-in guard (not this reserved-name set) is what actually fires.
+GATED_BUILTIN_NAMES = {"web_search", "fetch_page", "map_site", "crawl_site", "extract_data",
+                       "exec_python"}
+
+
+def _workspace_dir_for(data_dir: Path, config: "Config") -> Path:
+    """The single, unified workspace directory — used by BOTH the file tools (read_file,
+    list_files, ...) and the container sandbox mount, so the host and the container always see the
+    same bytes (spec §3.1). Computed the same way everywhere this path is needed, so a FileWorkspace
+    built from it and PodmanRuntime.workspace_dir(config.sandbox_workspace) always agree."""
+    return data_dir / "workspaces" / config.sandbox_workspace
+
+
+def _migrate_legacy_workspace_dir(data_dir: Path, config: "Config") -> None:
+    """One-time migration from the pre-unification layout (`<data_dir>/workspace`) to the unified
+    one (`<data_dir>/workspaces/<sandbox_workspace>`) — see finding 1. Runs on every Engine init,
+    unconditionally (the path change applies whether or not the sandbox is enabled), so a fresh
+    process always looks at the current location before anything else touches it.
+
+    This directory holds live user data, so the only two things this function is allowed to do are
+    move the old directory into place (when it is unambiguously the only copy) or leave both alone
+    and complain loudly. It must never merge or overwrite: a wrong guess here destroys the owner's
+    files, so ambiguity always loses to doing nothing.
+    """
+    old = data_dir / "workspace"
+    new = _workspace_dir_for(data_dir, config)
+    if not old.exists():
+        return                                     # fresh install, or already migrated — nothing to do
+    if new.exists():
+        log.warning("both the legacy workspace dir %s and the current workspace dir %s exist — "
+                    "leaving BOTH untouched. This needs a human decision (which files are current); "
+                    "auto-merging risks destroying data, so nothing was moved.", old, new)
+        return
+    new.parent.mkdir(parents=True, exist_ok=True)
+    os.rename(str(old), str(new))                  # atomic: both paths are on one filesystem (data_dir)
+    log.info("migrated legacy workspace dir %s -> %s (sandbox/file-tools path unification)", old, new)
 
 
 def _tool_param_specs(tool) -> list[dict]:
@@ -324,7 +367,7 @@ def build_base_registry(config: Config, data_dir: Path) -> ToolRegistry:
         from engine.tools.artifacts import BuildWebPageTool, InspectArtifactTool
         from engine.tools.files import FileWorkspace
         _art_dir = str(data_dir / "artifacts")
-        _ws = FileWorkspace(str(data_dir / "workspace"))
+        _ws = FileWorkspace(str(_workspace_dir_for(data_dir, config)))
         reg.register(BuildWebPageTool(_art_dir, workspace=_ws))
         reg.register(InspectArtifactTool(_art_dir))
         if config.enable_pdf:
@@ -354,6 +397,13 @@ class Engine:
         # shipped skills/library dir) still resolves off the module path.
         self._data_dir = Path(data_dir) if data_dir else Path(__file__).resolve().parents[1]
         root = self._data_dir
+        # Finding 1: the file tools and the sandbox mount used to point at two different
+        # directories (<data_dir>/workspace vs <data_dir>/workspaces/<name>), so exec_python wrote
+        # where read_file/list_files never looked. Now there is one directory for both; this call
+        # moves any pre-existing workspace into the unified location before anything below
+        # constructs a FileWorkspace or a PodmanRuntime pointed at it. Runs regardless of
+        # enable_sandbox — the path change is unconditional.
+        _migrate_legacy_workspace_dir(root, config)
         # Container sandbox. Constructed whenever it is ENABLED, even if the runtime turns out to
         # be missing — status() has to be able to say why, and the fail-closed check below needs an
         # object to ask.
@@ -434,7 +484,9 @@ class Engine:
         # ---- vetted built-ins: file workspace, document reader, knowledge base, watcher ----
         from engine.tools.files import (DeleteFileTool, DownloadFileTool, FileWorkspace,
                                          ListFilesTool, ReadFileTool, WriteFileTool)
-        self._workspace_dir = str(root / "workspace")
+        # Unified with the sandbox mount (finding 1): same directory the container bind-mounts, so
+        # host tools and container-side code always see the same bytes.
+        self._workspace_dir = str(_workspace_dir_for(root, config))
         self.workspace = FileWorkspace(self._workspace_dir)
         if config.enable_files:
             for T in (WriteFileTool, ReadFileTool, ListFilesTool, DeleteFileTool, DownloadFileTool):

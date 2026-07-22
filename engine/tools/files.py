@@ -45,14 +45,21 @@ def _safe_component(part: str) -> str:
     return part[:120]
 
 
-def safe_path(root: str, name: str) -> str:
+def safe_path(root: str, name: str, *, resolve_leaf: bool = True) -> str:
     """Resolve `name` under `root`, allowing subdirectories. Returns an absolute path.
 
-    Rejects absolute paths, any '..' component, and anything whose realpath escapes root —
-    including via a symlink already inside the workspace, which is why the check is on the
-    RESOLVED path rather than the joined one. Raises ValueError on rejection; callers turn that
-    into a tool-level error message rather than letting it reach the model as a traceback.
-    """
+    Rejects absolute paths, any '..' component, and (when `resolve_leaf` is True, the default)
+    anything whose realpath escapes root — including via a symlink already inside the workspace,
+    which is why that check is on the RESOLVED path rather than the joined one. Raises ValueError
+    on rejection; callers turn that into a tool-level error message rather than letting it reach
+    the model as a traceback.
+
+    `resolve_leaf=False` still requires every PARENT directory to resolve inside root (so
+    traversal via a symlinked parent is still barred), but returns the leaf's own on-disk position
+    without following it if the leaf itself is a symlink. list()/read/write never use this — they
+    must keep refusing a symlink whose target escapes. It exists for delete(): a symlink planted
+    in the workspace (trivial for in-container code to do) is neither readable nor writable through
+    the normal path, and without this a user has no way to remove it either — see finding 5."""
     rel = (name or "").strip().replace("\\", "/")
     if os.path.isabs(rel) or rel.startswith("/"):
         raise ValueError("absolute paths are not allowed")
@@ -63,10 +70,16 @@ def safe_path(root: str, name: str) -> str:
     if not parts:
         raise ValueError("invalid file name")
     root_real = os.path.realpath(root)
-    full = os.path.realpath(os.path.join(root_real, *parts))
-    if full != root_real and not full.startswith(root_real + os.sep):
+    if resolve_leaf:
+        full = os.path.realpath(os.path.join(root_real, *parts))
+        if full != root_real and not full.startswith(root_real + os.sep):
+            raise ValueError("path escapes the workspace")
+        return full
+    parent_real = (os.path.realpath(os.path.join(root_real, *parts[:-1]))
+                  if len(parts) > 1 else root_real)
+    if parent_real != root_real and not parent_real.startswith(root_real + os.sep):
         raise ValueError("path escapes the workspace")
-    return full
+    return os.path.join(parent_real, parts[-1])
 
 
 def _open_no_follow(p: str, mode: str, encoding: str | None = None):
@@ -127,35 +140,70 @@ class FileWorkspace:
         return self.path_if_exists(name) is not None
 
     def delete(self, name: str) -> bool:
-        p = self.path_if_exists(name)
-        if p:
+        """Remove a file — or a symlink, which read()/write() correctly refuse to follow if its
+        target escapes the workspace (safe_path's realpath check), but which the user still needs
+        a way to get rid of (finding 5). Resolves only the parent directory, not the leaf itself, so
+        a symlink at that exact position is located and unlinked rather than followed: os.remove()
+        on a symlink removes the link entry, never the thing it points to."""
+        try:
+            p = safe_path(self.root, name, resolve_leaf=False)
+        except ValueError:
+            return False
+        if os.path.islink(p) or os.path.isfile(p):
             os.remove(p)
             return True
         return False
 
-    def list(self, max_depth: int = 4) -> list[dict]:
-        """Every file under the workspace, newest first, as POSIX-relative paths.
+    def _scan(self, max_depth: int) -> "tuple[list[dict], bool]":
+        """Shared implementation behind list()/list_status(): every file under the workspace, plus
+        whether the depth cap cut the walk short.
 
         Depth-capped so a runaway `mkdir -p` inside the container can't make listing the workspace
-        expensive, and symlinked directories are not followed (os.walk defaults to followlinks=False,
-        which is what keeps a symlink from walking us out of the tree)."""
+        unbounded, but the cap has to be generous enough that ordinary container trees (a
+        `node_modules`, a git checkout) don't get silently dropped — safe_path() itself permits
+        unlimited depth, so a low cap here just meant "the model is told the workspace is empty"
+        while writes to it kept working fine (finding 6).
+
+        Symlinks are never followed: symlinked directories are skipped via os.walk's default
+        followlinks=False (which is also what keeps a symlink from walking us out of the tree), and
+        a symlinked FILE is explicitly skipped below — os.path.isfile() follows symlinks, so
+        without that check a symlink to something like /etc/passwd would be listed with the
+        target's size, then read_file would refuse it (right) and delete_file couldn't remove it
+        (wrong, now fixed above) — see finding 5.
+        """
         root_real = os.path.realpath(self.root)
         if not os.path.isdir(root_real):
-            return []
+            return [], False
         out = []
+        truncated = False
         for dirpath, dirnames, filenames in os.walk(root_real):
             depth = 0 if dirpath == root_real else dirpath[len(root_real) + 1:].count(os.sep) + 1
             if depth >= max_depth:
                 dirnames[:] = []
+                truncated = True
                 continue
             for fn in filenames:
                 p = os.path.join(dirpath, fn)
+                if os.path.islink(p):
+                    continue                       # never list a symlink — see finding 5
                 if os.path.isfile(p):
                     out.append({"name": os.path.relpath(p, root_real).replace(os.sep, "/"),
                                 "size": os.path.getsize(p),
                                 "modified": os.path.getmtime(p)})
         out.sort(key=lambda f: f["modified"], reverse=True)
-        return out
+        return out, truncated
+
+    def list(self, max_depth: int = 20) -> list[dict]:
+        """Every file under the workspace, newest first, as POSIX-relative paths. See list_status()
+        for a version that also reports whether the depth cap truncated the walk."""
+        files, _truncated = self._scan(max_depth)
+        return files
+
+    def list_status(self, max_depth: int = 20) -> "tuple[list[dict], bool]":
+        """Same files as list(), plus whether max_depth cut the walk short — used by
+        ListFilesTool so the model is told when the listing may be incomplete, rather than being
+        left to conclude an under-scanned workspace is an empty one (finding 6)."""
+        return self._scan(max_depth)
 
 
 class WriteFileTool(Tool):
@@ -211,11 +259,13 @@ class ListFilesTool(Tool):
         self.ws = ws
 
     async def run(self, args: "ListFilesTool.Params") -> str:
-        files = self.ws.list()
+        files, truncated = self.ws.list_status()
+        note = ("\n(Note: the workspace tree is deeper than this listing scans — some deeply "
+               "nested files may be missing above.)" if truncated else "")
         if not files:
-            return "Your workspace is empty."
-        return "Files in your workspace:\n" + "\n".join(
-            f"  {f['name']}  ({f['size']} bytes)" for f in files)
+            return "Your workspace is empty." + note
+        return ("Files in your workspace:\n" + "\n".join(
+            f"  {f['name']}  ({f['size']} bytes)" for f in files) + note)
 
 
 class DownloadFileTool(Tool):

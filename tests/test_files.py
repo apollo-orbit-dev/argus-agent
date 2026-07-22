@@ -113,6 +113,125 @@ def test_tools_read_list_delete(tmp_path):
     assert "deleted" in asyncio.run(DeleteFileTool(ws).run(DeleteFileTool.Params(name="a.txt")))
 
 
+# ---------------------------------------------------------------------------------------------
+# Finding 5 (fix before merge): a symlink planted in the workspace (trivial for in-container code,
+# impossible before this branch) must not be listed, and must still be removable — before the fix
+# it showed up in list() with the target's size, read_file correctly refused it, and delete_file
+# could not remove it either, leaving the user stuck with an entry they could neither read nor
+# delete.
+# ---------------------------------------------------------------------------------------------
+def test_list_skips_a_symlink_to_a_file_outside_the_workspace(tmp_path):
+    ws = FileWorkspace(str(tmp_path / "ws"))
+    os.makedirs(ws.root, exist_ok=True)
+    outside = tmp_path / "secret.txt"
+    outside.write_text("outside secret" * 1000)   # a size that would stand out if it leaked through
+    os.symlink(str(outside), os.path.join(ws.root, "link.txt"))
+    ws.write_text("real.txt", "a real workspace file")
+
+    files = ws.list()
+
+    names = [f["name"] for f in files]
+    assert "real.txt" in names
+    assert "link.txt" not in names
+
+
+def test_list_files_tool_never_reports_a_symlink(tmp_path):
+    ws = FileWorkspace(str(tmp_path / "ws"))
+    os.makedirs(ws.root, exist_ok=True)
+    outside = tmp_path / "secret.txt"
+    outside.write_text("nope")
+    os.symlink(str(outside), os.path.join(ws.root, "link.txt"))
+
+    out = asyncio.run(ListFilesTool(ws).run(ListFilesTool.Params()))
+    assert "link.txt" not in out
+
+
+def test_delete_removes_a_symlink_without_touching_its_target(tmp_path):
+    ws = FileWorkspace(str(tmp_path / "ws"))
+    os.makedirs(ws.root, exist_ok=True)
+    outside = tmp_path / "secret.txt"
+    outside.write_text("original")
+    leaf = os.path.join(ws.root, "link.txt")
+    os.symlink(str(outside), leaf)
+
+    assert ws.delete("link.txt") is True
+    assert not os.path.exists(leaf) and not os.path.islink(leaf)   # the link itself is gone
+    assert outside.read_text() == "original"                        # the target was never touched
+
+
+def test_delete_file_tool_can_clean_up_a_symlink(tmp_path):
+    ws = FileWorkspace(str(tmp_path / "ws"))
+    os.makedirs(ws.root, exist_ok=True)
+    outside = tmp_path / "secret.txt"
+    outside.write_text("nope")
+    os.symlink(str(outside), os.path.join(ws.root, "link.txt"))
+
+    out = asyncio.run(DeleteFileTool(ws).run(DeleteFileTool.Params(name="link.txt")))
+    assert "deleted" in out.lower()
+    assert not ws.exists("link.txt")
+
+
+def test_delete_still_refuses_traversal_and_reports_missing_files(tmp_path):
+    """The relaxed leaf handling for symlinks must not become a traversal hole: '..' components
+    are still rejected outright (safe_path checks that before resolve_leaf ever matters), and a
+    name that resolves to nothing still reports False rather than raising."""
+    ws = FileWorkspace(str(tmp_path / "ws"))
+    assert ws.delete("../escape.txt") is False
+    assert not (tmp_path / "escape.txt").exists()
+    assert ws.delete("does-not-exist.txt") is False
+
+
+# ---------------------------------------------------------------------------------------------
+# Finding 6 (fix before merge): the listing depth cap must not be lower than what writes actually
+# allow (safe_path permits unlimited depth) — container code routinely makes deep trees (a
+# node_modules, a git checkout) that the old max_depth=4 would make list_files silently omit.
+# ---------------------------------------------------------------------------------------------
+def test_list_reaches_deeper_than_the_old_depth_cap_of_four(tmp_path):
+    ws = FileWorkspace(str(tmp_path / "ws"))
+    deep_name = "/".join(f"d{i}" for i in range(8)) + "/deep.txt"   # 8 levels — past the old cap
+    ws.write_text(deep_name, "buried")
+
+    names = [f["name"] for f in ws.list()]
+    assert deep_name in names
+
+
+def test_list_status_reports_truncation_past_the_cap(tmp_path):
+    ws = FileWorkspace(str(tmp_path / "ws"))
+    ws.write_text("shallow.txt", "x")
+    files, truncated = ws.list_status(max_depth=2)
+    assert truncated is False   # nothing that deep here yet
+
+    deep_name = "a/b/c/deep.txt"   # depth 3, past a max_depth of 2
+    ws.write_text(deep_name, "buried")
+    files, truncated = ws.list_status(max_depth=2)
+    assert truncated is True
+    assert deep_name not in [f["name"] for f in files]
+    assert "shallow.txt" in [f["name"] for f in files]
+
+
+def test_list_files_tool_mentions_truncation_in_its_output(tmp_path):
+    ws = FileWorkspace(str(tmp_path / "ws"))
+    ws.write_text("a/b/c/deep.txt", "buried")
+
+    out = asyncio.run(ListFilesTool(ws).run(ListFilesTool.Params()))
+    # With the new generous default cap, this shallow tree isn't actually truncated — confirm the
+    # tool stays silent about truncation when there is none...
+    assert "may be missing" not in out.lower() and "deeper than" not in out.lower()
+
+
+def test_list_files_tool_says_so_when_the_walk_is_truncated(tmp_path, monkeypatch):
+    """...and confirm it DOES speak up when the walk really was cut short, by forcing a small cap
+    the same way ListFilesTool would see it if the default were ever lowered again."""
+    ws = FileWorkspace(str(tmp_path / "ws"))
+    ws.write_text("a/b/c/deep.txt", "buried")
+
+    real_list_status = ws.list_status
+    monkeypatch.setattr(ws, "list_status", lambda max_depth=20: real_list_status(max_depth=2))
+
+    out = asyncio.run(ListFilesTool(ws).run(ListFilesTool.Params()))
+    assert "may be missing" in out.lower() or "deeper than" in out.lower()
+
+
 # ---- download_file (SSRF-guarded) ----
 
 async def test_download_infers_extension_from_content_type(tmp_path, monkeypatch):

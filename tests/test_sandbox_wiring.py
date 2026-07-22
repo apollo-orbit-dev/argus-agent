@@ -4,12 +4,16 @@ If the owner turns the sandbox ON and the runtime is missing, model-authored cod
 run under the weaker AST sandbox instead — that would hand them less isolation than they asked for,
 silently. exec_python is simply not registered.
 """
+import logging
+import os
 import tempfile
+from pathlib import Path
 
 import pytest
 
 from config import Config
-from engine.engine import Engine
+from engine.engine import Engine, _migrate_legacy_workspace_dir, _workspace_dir_for
+from engine.sandbox.podman import PodmanRuntime
 from engine.sandbox.runtime import ExecResult, FakeRuntime
 from tests.test_config import _mk
 
@@ -277,3 +281,92 @@ def test_engine_startup_reap_is_skipped_when_the_runtime_is_unavailable():
     raises (status() on a missing binary reports available=False with an empty workspace list)."""
     eng = _engine(enable_sandbox=True, sandbox_runtime="definitely-not-a-real-binary")
     assert eng.sandbox is not None   # construction itself must not have raised
+
+
+# ---------------------------------------------------------------------------------------------
+# Finding 1 (CRITICAL): the file tools' workspace and the container's bind-mount target must be
+# the SAME directory — before this fix they were <data_dir>/workspace vs
+# <data_dir>/workspaces/<name>, so exec_python wrote where read_file/list_files never looked. The
+# review noted the suite still passed with the two pointed at each other; these assertions are
+# the thing that was missing.
+# ---------------------------------------------------------------------------------------------
+def test_workspace_dir_matches_the_sandbox_mount_dir_when_sandbox_enabled():
+    eng = _engine(enable_sandbox=True, sandbox_runtime="definitely-not-a-real-binary")
+    assert eng.sandbox is not None
+    assert (os.path.realpath(eng.workspace.root)
+            == eng.sandbox.workspace_dir(eng._config.sandbox_workspace))
+
+
+def test_workspace_dir_matches_the_sandbox_mount_dir_even_when_sandbox_disabled():
+    """The path change is unconditional — the file tools must land on the unified directory
+    whether or not the sandbox feature itself is on."""
+    data_dir = tempfile.mkdtemp()
+    cfg = _mk(enable_sandbox=False)
+    eng = Engine(cfg, data_dir=data_dir)
+    rt = PodmanRuntime(workspaces_root=str(Path(data_dir) / "workspaces"))
+    assert eng.sandbox is None
+    assert os.path.realpath(eng.workspace.root) == rt.workspace_dir(cfg.sandbox_workspace)
+
+
+# ---------------------------------------------------------------------------------------------
+# Finding 1 migration: this directory holds live user data on the owner's server, so the old
+# <data_dir>/workspace layout must be MOVED into the unified location, never orphaned — and never
+# merged/overwritten if both already exist (a wrong guess there destroys the owner's files).
+# ---------------------------------------------------------------------------------------------
+def test_migration_moves_the_old_workspace_when_only_it_exists(tmp_path):
+    old = tmp_path / "workspace"
+    old.mkdir()
+    (old / "notes.txt").write_text("hello")
+    (old / "sub").mkdir()
+    (old / "sub" / "nested.txt").write_text("nested")
+    cfg = _mk()
+
+    _migrate_legacy_workspace_dir(tmp_path, cfg)
+
+    new = _workspace_dir_for(tmp_path, cfg)
+    assert not old.exists()
+    assert (new / "notes.txt").read_text() == "hello"
+    assert (new / "sub" / "nested.txt").read_text() == "nested"
+
+
+def test_migration_leaves_both_untouched_and_warns_when_both_exist(tmp_path, caplog):
+    old = tmp_path / "workspace"
+    old.mkdir()
+    (old / "old.txt").write_text("old")
+    cfg = _mk()
+    new = _workspace_dir_for(tmp_path, cfg)
+    new.mkdir(parents=True)
+    (new / "new.txt").write_text("new")
+
+    with caplog.at_level(logging.WARNING, logger="argus.engine"):
+        _migrate_legacy_workspace_dir(tmp_path, cfg)
+
+    # Never merged, never overwritten — both survive exactly as they were.
+    assert old.exists() and (old / "old.txt").read_text() == "old"
+    assert new.exists() and (new / "new.txt").read_text() == "new"
+    assert any("both" in r.message.lower() and str(old) in r.message and str(new) in r.message
+              for r in caplog.records), "must name BOTH paths in the warning"
+
+
+def test_migration_is_a_noop_on_a_fresh_install(tmp_path):
+    """Neither directory exists yet — nothing to move, nothing to warn about."""
+    cfg = _mk()
+    _migrate_legacy_workspace_dir(tmp_path, cfg)   # must not raise
+    assert not (tmp_path / "workspace").exists()
+    assert not _workspace_dir_for(tmp_path, cfg).exists()
+
+
+def test_engine_init_migrates_the_legacy_workspace_end_to_end(tmp_path):
+    """The migration must actually be wired into Engine.__init__, not just exist as a standalone
+    helper — construct a real Engine over a pre-existing legacy workspace dir and confirm the file
+    tools see the migrated content."""
+    old = tmp_path / "workspace"
+    old.mkdir()
+    (old / "report.md").write_text("hi from the old workspace")
+    cfg = _mk(enable_sandbox=False)
+
+    eng = Engine(cfg, data_dir=str(tmp_path))
+
+    assert not old.exists()
+    assert eng.workspace.exists("report.md")
+    assert eng.workspace.read_text("report.md") == "hi from the old workspace"

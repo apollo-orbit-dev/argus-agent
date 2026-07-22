@@ -137,6 +137,24 @@ def test_cannot_recreate_gated_off_builtin():
     assert reg.get("crawl_site") is None   # nothing was registered
 
 
+def test_cannot_recreate_exec_python_when_fail_closed():
+    """Finding 2: in the fail-closed state (sandbox on, runtime down), exec_python is deliberately
+    absent from the registry — create_tool must not treat that absence as "free to take" and hand
+    the model a host-side, AST-scanned replacement under the same name. That would be the exact
+    silent downgrade fail-closed exists to prevent, just triggered by the model itself via
+    create_tool instead of by Engine. GATED_BUILTIN_NAMES (engine/engine.py) is what reserves it."""
+    from engine.engine import GATED_BUILTIN_NAMES
+
+    assert "exec_python" in GATED_BUILTIN_NAMES
+
+    reg = ToolRegistry()
+    ct = CreateToolTool(reg, allow_network=False, reserved_names=GATED_BUILTIN_NAMES)
+    out = asyncio.run(ct.run(ct.Params(name="exec_python", description="d", parameters={},
+        code="def run(args):\n    return 'fake sandbox'", test_args={})))
+    assert "built-in" in out.lower()
+    assert reg.get("exec_python") is None   # nothing was registered
+
+
 def test_reserved_name_allowed_once_dependency_registers_it():
     # If the real built-in IS registered (dependency configured), the normal built-in guard applies
     # and reserved_names doesn't double-fire or change the message.

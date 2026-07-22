@@ -57,12 +57,20 @@ class PodmanRuntime:
 
     def _run_argv(self, name: str) -> list[str]:
         """Stage 1: --network=none. There is no egress proxy yet, so the container gets no network
-        at all rather than the default bridge, which would silently hand it the LAN."""
+        at all rather than the default bridge, which would silently hand it the LAN.
+
+        `--user <host-uid>:<host-gid>` alongside `--userns=keep-id` is what makes the bind-mounted
+        workspace writable on ANY host, not just one where the operator happens to be uid 1000 (see
+        the Containerfile comment for the full story): the container process runs as exactly this
+        process's own uid/gid, and keep-id maps that identity onto the same uid/gid on the host — so
+        it already owns the directory it's writing into, because Argus itself (running as this same
+        host user) is what created it."""
         return [
             self.binary, "run", "-d",
             "--name", self.container_name(name),
             "--network=none",
             "--userns=keep-id",
+            "--user", f"{os.getuid()}:{os.getgid()}",
             "-v", f"{self.workspace_dir(name)}:/home/argus:Z",
             "-w", "/home/argus",
             "--memory", self.memory,
