@@ -22,7 +22,13 @@ async def check_all(model_base_url: str, model_name: str,
     # configured=False rather than being probed and shown as "unreachable" — it just isn't set up.
     urls = {
         "model": (model_base_url, f"{model_base_url.rstrip('/')}/models"),
-        "searxng": (searxng_base_url, f"{searxng_base_url.rstrip('/')}/search?q=ping&format=json"),
+        # /healthz, NOT /search. This probe used to run a real search for "ping", which SearXNG
+        # forwards to every configured engine — including metered ones like Brave. The dashboard
+        # polls /status every 5s, so an open tab burned ~720 real search-API calls an hour against
+        # the owner's quota just to draw a green dot. /healthz answers in ~3ms and touches no engine.
+        # (On a SearXNG too old to have it the probe 404s, which _probe still counts as reachable —
+        # the server answered — so the worst case is a cosmetic status code, not a false outage.)
+        "searxng": (searxng_base_url, f"{searxng_base_url.rstrip('/')}/healthz"),
         "firecrawl": (firecrawl_base_url, f"{firecrawl_base_url.rstrip('/')}/"),  # 404 = up
         "embedding": (embedding_base_url, f"{embedding_base_url.rstrip('/')}/models"),
     }

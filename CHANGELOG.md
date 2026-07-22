@@ -18,6 +18,13 @@ All notable changes to this project are documented here.
   can't cancel another's, but the dashboard is the owner's view of every session's jobs.
 
 ### Fixed
+- **The SearXNG health probe no longer runs a real search.** `/status` probed SearXNG with
+  `/search?q=ping&format=json` — a genuine query that SearXNG forwards to every configured engine,
+  including metered ones like Brave. The dashboard polls `/status` every 5 seconds, so an open tab
+  spent roughly **720 real search-API calls an hour** of the owner's paid quota to render a green
+  dot. Now probes `/healthz` (200, 2 bytes, ~3ms, no engine touched). A SearXNG too old to have it
+  answers 404, which still counts as reachable, so the worst case is a cosmetic status code rather
+  than a false outage.
 - **Harness-injected nudges no longer look like messages you sent.** The observer's repeat nudge, the
   create-without-verify nudge, and the output-truncated reprompt are injected with `role: "user"`
   (the model has no mid-conversation system slot), so the transcript rendered them as your own
