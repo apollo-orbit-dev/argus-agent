@@ -454,6 +454,15 @@
     padding:10px 12px; font-family:var(--font-display); font-size:11px; font-weight:600; letter-spacing:.1em;
     text-transform:uppercase; color:var(--muted); border-bottom:1px solid var(--border); flex-shrink:0;
   }
+  /* Runs header carries the session id: renaming a session replaces the id in the sidebar, so this
+     is the one place it stays visible (and copyable, for quoting a session when reporting a bug). */
+  .runs-head-row{ display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+  .runs-head-id{
+    font-family:var(--font-mono); font-size:9px; font-weight:400; letter-spacing:0;
+    text-transform:none; color:var(--faint); cursor:pointer;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:62%;
+  }
+  .runs-head-id:hover{ color:var(--cyan); }
   .runs-live{ flex-shrink:0; border-bottom:1px solid var(--border); }
   .runs-live:empty{ border-bottom:none; }
   .runs-past{ flex:1; min-height:0; overflow-y:auto; }

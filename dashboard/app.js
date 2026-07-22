@@ -702,7 +702,33 @@
     renderRunsList();
   }
 
+  // The sidebar shows a session's NAME, so once it's renamed the id has nowhere else to surface.
+  // Pin it to the Runs header, click-to-copy (ephemeral `__`-prefixed sessions have no stored row
+  // but still have an id worth showing).
+  function updateRunsSessionId(){
+    var el = $('runsSessionId');
+    if (!el) return;
+    el.textContent = SESSION || '';
+    el.title = 'Session id: ' + (SESSION || '(none)') + ' — click to copy';
+  }
+  document.addEventListener('click', function(e){
+    var el = e.target.closest ? e.target.closest('#runsSessionId') : null;
+    if (!el || !SESSION) return;
+    // Clipboard needs a secure context; over plain http on the LAN it's undefined, so fall back to
+    // selecting the text rather than throwing and looking broken.
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(SESSION)
+        .then(function(){ toast('Copied ' + SESSION, 'ok'); })
+        .catch(function(){ toast('Copy failed — select it manually', 'err'); });
+    } else {
+      var r = document.createRange(); r.selectNodeContents(el);
+      var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      toast('Press Ctrl+C to copy', 'ok');
+    }
+  });
+
   async function renderSessionList(){
+    updateRunsSessionId();
     var list;
     try { list = await (await fetch('/sessions')).json(); } catch(e){ return; }
     var ul = $('sessionList');
