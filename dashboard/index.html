@@ -549,6 +549,15 @@
                 <option value="podman">podman (recommended)</option>
                 <option value="docker">docker (weaker: root daemon + socket)</option>
               </select></div>
+            <div class="field"><label class="field-label">Network</label>
+              <select id="cfgSandboxNetwork">
+                <option value="proxy">proxy — internet, no LAN (recommended)</option>
+                <option value="lan">lan — full network access</option>
+                <option value="none">none — airgapped</option>
+              </select>
+              <div class="field-note">In <code>proxy</code> mode the container reaches public APIs through a
+                policy-enforcing sidecar and cannot see this LAN. <code>lan</code> removes that boundary.</div>
+            </div>
             <div class="field"><label class="field-label">Idle stop (minutes)</label>
               <input type="number" id="cfgSandboxIdleMinutes" min="1"></div>
           </div>

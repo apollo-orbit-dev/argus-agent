@@ -30,4 +30,9 @@ RUN mkdir -p /home/argus && chmod 1777 /home/argus
 ENV HOME=/home/argus
 WORKDIR /home/argus
 
+# The egress proxy runs from this image as a sidecar. Copied root-owned and read-only to the
+# unprivileged user: the workspace container's code must not be able to rewrite the policy that
+# constrains it. Flat layout (/opt/argus/) so proxy.py's `from egress_policy import ...` resolves.
+COPY engine/sandbox/egress_policy.py engine/sandbox/proxy.py /opt/argus/
+
 CMD ["sleep", "infinity"]

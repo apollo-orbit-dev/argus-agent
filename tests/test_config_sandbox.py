@@ -71,3 +71,22 @@ def test_sandbox_image_rejects_whitespace():
     c = _mk()
     with pytest.raises(ValidationError):
         c.patch({"sandbox_image": "argus sandbox:local"})
+
+
+def test_sandbox_network_defaults_to_proxy():
+    from tests.test_config import _mk
+    assert _mk().sandbox_network == "proxy"
+
+
+@pytest.mark.parametrize("mode", ["proxy", "lan", "none"])
+def test_sandbox_network_accepts_the_three_modes(mode):
+    from tests.test_config import _mk
+    assert _mk(sandbox_network=mode).sandbox_network == mode
+
+
+def test_sandbox_network_rejects_anything_else():
+    """It selects a security posture, so an unrecognised value must fail loudly rather than
+    falling through to some default the operator did not choose."""
+    from tests.test_config import _mk
+    with pytest.raises(ValidationError):
+        _mk(sandbox_network="wide-open")

@@ -189,7 +189,9 @@ _DESC_SOFT_BODY = (
 _DESC_CONTAINER_BODY = (
     "Runs in an isolated container with the full standard library. STATELESS: each call is a fresh "
     "process, so variables do NOT persist between calls and reset has no effect — if you need state "
-    "to carry over, write it to a file instead of relying on a variable."
+    "to carry over, write it to a file instead of relying on a variable. In the container, outbound "
+    "requests go through a proxy that allows public HTTPS and refuses private/LAN addresses; plain "
+    "http:// is not supported — use https://."
 )
 _DESC_TAIL = " For building a REUSABLE tool use create_tool instead. Args: code, and optional reset."
 

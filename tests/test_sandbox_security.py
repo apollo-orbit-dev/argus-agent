@@ -66,8 +66,32 @@ def test_safe_code_still_compiles():
     ("http://[::1]:8700/", False),
     ("http://0.0.0.0:8700/", False),
 ])
-def test_url_is_safe(url, safe):
+def test_url_is_safe(url, safe, monkeypatch):
+    # url_is_safe now DNS-resolves real hostnames (the fix this task ships). Every case here that
+    # is expected False is caught by the blocked-hostname/private-IP-literal checks before any
+    # resolution happens, so stubbing getaddrinfo to a public address cannot mask a regression —
+    # it only keeps the two real-hostname cases (open-meteo, wikipedia) from hitting live DNS.
+    monkeypatch.setattr("socket.getaddrinfo",
+                        lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 443))])
     assert url_is_safe(url) is safe
+
+
+@pytest.mark.parametrize("url", ["http://example.com:99999/", "http://example.com:abc/",
+                                 "http://example.com:-1/"])
+def test_url_is_safe_returns_false_not_raise_on_malformed_port(url):
+    """url_allowed evaluates p.port outside a try/except before this fix, so a malformed port
+    raised ValueError straight out of url_is_safe -- which a created tool's `except
+    httpx.RequestError` cannot catch. It must return False, not raise."""
+    assert url_is_safe(url) is False
+
+
+def test_url_is_safe_rejects_hostname_resolving_to_private_address(monkeypatch):
+    """Mutation guard for the headline fix: url_is_safe delegates to the resolving egress policy,
+    so a hostname that DNS-resolves to a LAN address must be refused even though the literal name
+    looks public. Reverting url_is_safe to a literal-only check leaves this red."""
+    monkeypatch.setattr("socket.getaddrinfo",
+                        lambda *a, **k: [(2, 1, 6, "", ("192.168.0.93", 443))])
+    assert url_is_safe("https://totally-innocent.example.com/") is False
 
 
 def test_created_tool_cannot_reach_localhost():
@@ -84,9 +108,12 @@ def test_created_tool_cannot_reach_localhost():
     assert "blocked" in out.lower()
 
 
-def test_safe_httpx_forces_no_redirect_follow():
+def test_safe_httpx_forces_no_redirect_follow(monkeypatch):
     # a created tool can't set follow_redirects=True to chase a 3xx into the LAN
     from engine.experimental.tool_creation import _SafeHTTPX
+
+    monkeypatch.setattr("socket.getaddrinfo",
+                        lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 443))])
 
     class _Rec:
         RequestError = RuntimeError

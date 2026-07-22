@@ -45,6 +45,7 @@ class ExecResult:
 class SandboxRuntime(Protocol):
     def available(self) -> bool: ...
     def status(self) -> dict: ...
+    def ensure_egress(self) -> None: ...
     def ensure_workspace(self, name: str) -> None: ...
     def exec(self, name: str, argv: list[str], *, stdin: str = "",
              timeout: float = 120.0, run_id: str = "") -> ExecResult: ...
@@ -62,6 +63,7 @@ class FakeRuntime:
     calls: list = field(default_factory=list)
     started: set = field(default_factory=set)
     stopped: list = field(default_factory=list)
+    egress_ready: bool = False
 
     def available(self) -> bool:
         return self.available_
@@ -69,6 +71,11 @@ class FakeRuntime:
     def status(self) -> dict:
         return {"runtime": "fake", "available": self.available_,
                 "workspaces": sorted(self.started)}
+
+    def ensure_egress(self) -> None:
+        if not self.available_:
+            raise SandboxUnavailable("fake runtime is unavailable")
+        self.egress_ready = True
 
     def ensure_workspace(self, name: str) -> None:
         validate_workspace(name)
