@@ -182,7 +182,13 @@ def create_app(engine: Engine) -> FastAPI:
         return engine.get_config()
 
     @app.patch("/config")
-    async def patch_config(patch: dict):
+    async def patch_config(patch: dict, request: Request):
+        # Admin-gated like every other mutating route. This was the one open write on a
+        # token-protected instance: it can repoint model_base_url/model_name at an endpoint the
+        # caller controls (seeing every prompt) and flip any runtime knob. The dashboard reaches it
+        # through the fetch shim that injects X-Admin-Token, so a token-configured instance keeps
+        # working; a LAN caller without the token now gets 401, matching /config/save.
+        _require_admin(request)
         return engine.patch_config(patch)
 
     # ---- model presets / switching (shared by dashboard + Telegram) ----

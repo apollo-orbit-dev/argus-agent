@@ -196,10 +196,16 @@ async def test_admin_token_gates_sensitive_endpoints(tmp_path):
         assert r.status_code == 401
         r = await c.post("/admin/restart")
         assert r.status_code == 401
+        # PATCH /config is a MUTATING write (it can repoint the model endpoint), so it must be gated
+        # like the rest — this was the one open write on a token-protected instance.
+        r = await c.patch("/config", json={"max_steps": 9})
+        assert r.status_code == 401
         # correct header -> allowed
         r = await c.get("/config/env", headers={"X-Admin-Token": "s3cret"})
         assert r.status_code == 200
-        # open endpoints remain open (no token needed)
+        r = await c.patch("/config", json={"max_steps": 9}, headers={"X-Admin-Token": "s3cret"})
+        assert r.status_code == 200 and r.json()["max_steps"] == 9
+        # a READ of config stays open (no token needed) — only writes are gated
         assert (await c.get("/config")).status_code == 200
 
 
