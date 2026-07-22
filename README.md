@@ -36,6 +36,11 @@ point it at a 3B model on your own GPU and the harness is what keeps it honest.
   answering with schema grounding and self-repair.
 - **`exec_python`** — a sandboxed Python REPL for one-off computation, sharing the same soft
   sandbox as created tools, with a persistent per-session namespace.
+- **Container sandbox (opt-in)** — run `exec_python` inside a long-lived, rootless **podman**
+  container instead of the language-level sandbox: the model gets the full Python standard library
+  and a real writable home directory (your file workspace, bind-mounted in), while an egress proxy
+  lets it reach public APIs but not your LAN. Off by default, Linux/macOS. See
+  [Container sandbox](#container-sandbox).
 - **Memory** — persistent facts about the user, with keyword or semantic (embedding-based) recall,
   auto-extraction from conversation, and configurable global (cross-interface) or per-session
   scoping.
@@ -152,6 +157,11 @@ curl -fsSL https://raw.githubusercontent.com/apollo-orbit-dev/argus-agent/main/i
 irm https://raw.githubusercontent.com/apollo-orbit-dev/argus-agent/main/install.ps1 | iex
 ```
 
+> **On Windows, Argus runs best inside [WSL](https://learn.microsoft.com/windows/wsl/install)** — a
+> real Linux environment, where everything (including the [container sandbox](#container-sandbox))
+> works exactly as it does on Linux. The native PowerShell install above works for the core agent,
+> but the container sandbox is not supported on native Windows.
+
 The installer clones the repo, creates a virtualenv, installs Argus, and copies `.env.example` to
 `.env`. Add your model API key, then:
 
@@ -204,6 +214,25 @@ server as a background process (pidfile + port based; cross-platform):
 | `argus run`     | run in the foreground (Ctrl-C to quit)                   |
 | `argus version` | print the installed version                              |
 
+## Updating
+
+Argus updates in place from git — pull the latest code and restart:
+
+```bash
+cd argus
+git pull
+argus restart
+```
+
+`pip install -e .` linked the `argus` command to the source tree, so a `git pull` is usually all
+you need; re-run `pip install -e .` only if `requirements.txt` changed. The dashboard shows an
+**update badge** when a newer release is published on GitHub, so you'll know when there's something
+to pull.
+
+If you've enabled the [container sandbox](#container-sandbox), rebuild its image after updating so it
+matches the new code — click **Set up sandbox** on the dashboard's Settings page, or run
+`bash scripts/setup-sandbox.sh` again.
+
 ## Configuration
 
 All configuration is environment-driven — see [`.env.example`](.env.example) for the full list of
@@ -229,11 +258,57 @@ self-hosted models. Memory's semantic recall similarly accepts any OpenAI-compat
 - Python 3.11+
 - (optional, for full document/OCR support) a system install of `tesseract-ocr`
 
+## Container sandbox
+
+By default, `exec_python` and created tools run in a **language-level** sandbox — an AST gate that
+allows a curated slice of the standard library and blocks file/OS access. It's safe, but tight: no
+`open()`, no `sqlite3`, no `subprocess`, no importing your own modules.
+
+The **container sandbox** is an opt-in upgrade. When it's on, `exec_python` runs inside a long-lived,
+rootless [podman](https://podman.io) container that has the **full** standard library and a **real
+writable home directory** — your file workspace (`data/workspaces/default`), bind-mounted in. The
+container itself is the boundary, so giving the model more capability inside it also makes the host
+*safer*, not less safe: an escape lands as an unprivileged user in a throwaway container, not on your
+machine.
+
+**Network is filtered, not open.** Pick one of three modes with `SANDBOX_NETWORK`:
+
+| Mode | What the sandbox can reach |
+|------|----------------------------|
+| `proxy` *(default)* | The public internet **only**, through a policy-enforcing proxy — public APIs work, but your LAN, your model server, and cloud-metadata endpoints do not. |
+| `none` | Nothing — fully air-gapped. |
+| `lan` | The full network, including your LAN. The deliberate escape hatch; it gives up the boundary. |
+
+**Your files are safe across the toggle.** The workspace is the same host directory whether the
+sandbox is on or off, so you can switch it on and off freely without losing anything the agent has
+written. (In-memory `exec_python` *variables* don't carry between calls in container mode — the
+filesystem is how you keep state there.)
+
+### Setting it up
+
+The sandbox is **off by default** and needs a one-time setup, because it uses a container runtime.
+
+1. **Turn it on and build the image** — on the dashboard, go to **Settings → Sandbox** and click
+   **Set up sandbox**, or from a terminal run:
+   ```bash
+   bash scripts/setup-sandbox.sh
+   ```
+   If `podman` isn't installed, the script prints the exact command to install it (e.g.
+   `sudo apt install podman`) rather than installing it for you.
+2. **Enable it** — flip the toggle on the Settings page, or set `ENABLE_SANDBOX=true` in `.env`, and
+   choose a `SANDBOX_NETWORK` mode.
+
+**Platform:** Linux and macOS. On macOS, podman runs in a lightweight VM (`podman machine`). The
+sandbox is **not supported on native Windows** — use [WSL](https://learn.microsoft.com/windows/wsl/install),
+where it works like Linux.
+
 ## Security
 
 Read [SECURITY.md](SECURITY.md) before enabling agent-created tools/`exec_python`, or before
-exposing the dashboard beyond localhost/a trusted LAN — the sandbox is language-level, not a
-container, and the dashboard has no built-in auth beyond an optional admin token.
+exposing the dashboard beyond localhost/a trusted LAN. By default the sandbox is **language-level**
+(an AST gate), not a container — for OS-level isolation, enable the opt-in
+[container sandbox](#container-sandbox) above. The dashboard has no built-in auth beyond an optional
+admin token.
 
 ## License
 
