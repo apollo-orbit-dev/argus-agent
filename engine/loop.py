@@ -136,6 +136,20 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
     create_names: dict[str, int] = {}  # observer: create_tool/skill NAME -> times (ignores code)
     consecutive_creates = 0            # observer: creates in a row with no tool actually run
     create_verify_nudged = False
+
+    async def observer_repeat_check(step: int, call: "ToolCall", sig: str) -> None:
+        """At the repeat threshold, nudge the model to change approach.
+
+        Called from BOTH the validation-failure path and the executed-tool path. A call that
+        repeats with MALFORMED ARGUMENTS never reached this — the validation branch returned to
+        the top of the loop before it — even though a validation error carries almost nothing the
+        second time, which makes it exactly the repeat worth interrupting."""
+        if not (deps.enable_observer and call_counts[sig] == deps.observer_threshold):
+            return
+        deps.store.append_message(session_id, {"role": "user", "content": OBSERVER_NUDGE})
+        await emit(step, "observer", {"issue": "repeat_nudge", "tool": call.tool,
+                                      "count": call_counts[sig]})
+
     for step in range(1, deps.max_steps + 1):
         conversation = _strip_old_images(deps.store.conversation(session_id))
         req = deps.mode.build_request(deps.system_prompt, conversation, deps.registry)
@@ -238,6 +252,7 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
             for m in deps.mode.tool_result_messages(resp, call, result):
                 deps.store.append_message(session_id, m)
             await emit(step, "tool_result", {"tool": call.tool, "ok": False, "result": result})
+            await observer_repeat_check(step, call, sig)
             continue
 
         tool_obj = deps.registry.get(call.tool)
@@ -286,12 +301,7 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
 
         for m in deps.mode.tool_result_messages(resp, call, result):
             deps.store.append_message(session_id, m)
-
-        # Observer: at the repeat threshold, nudge the model to change approach.
-        if deps.enable_observer and call_counts[sig] == deps.observer_threshold:
-            deps.store.append_message(session_id, {"role": "user", "content": OBSERVER_NUDGE})
-            await emit(step, "observer", {"issue": "repeat_nudge", "tool": call.tool,
-                                          "count": call_counts[sig]})
+        await observer_repeat_check(step, call, sig)
 
         # Observer: building tool after tool without ever RUNNING one to see its real output is
         # a thrash (once made 9 create_tool calls in a row). create_tool only test-runs with

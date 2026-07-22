@@ -110,3 +110,30 @@ async def test_observer_allows_distinct_calls():
     out = await run_loop(d, "s", "r", "two sums")
     assert out == "done"
     assert not any(e.kind == "observer" for e in d.events.recent("s"))
+
+
+def bad_calc_call(cid):
+    """calculator with a misspelled argument — fails schema validation, never executes."""
+    return ModelResponse(content=None, tool_calls=[
+        {"id": cid, "function": {"name": "calculator",
+                                 "arguments": '{"expresion": "1+1"}'}}])
+
+
+async def test_observer_nudges_repeats_that_fail_validation():
+    """The validation-failure branch used to return to the top of the loop before the nudge, so a
+    call repeating with MALFORMED ARGUMENTS was counted toward the abort but never interrupted —
+    even though a validation error carries almost nothing the second time."""
+    d = _deps(_Model([bad_calc_call(f"c{i}") for i in range(8)]), threshold=2)
+    out = await run_loop(d, "s", "r", "loop on bad args")
+    issues = [e.data.get("issue") for e in d.events.recent("s") if e.kind == "observer"]
+    assert "repeat_nudge" in issues
+    assert "stuck_repeating" in issues
+    assert "make progress" in out.lower()
+
+
+async def test_validation_repeats_still_stop_at_the_threshold():
+    """The nudge must not delay the abort: a call that keeps failing validation still ends the turn
+    rather than burning the step budget."""
+    d = _deps(_Model([bad_calc_call(f"c{i}") for i in range(8)]), threshold=2)
+    await run_loop(d, "s", "r", "loop on bad args")
+    assert max(e.step for e in d.events.recent("s")) <= 3
