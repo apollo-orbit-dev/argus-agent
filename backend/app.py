@@ -499,6 +499,11 @@ def create_app(engine: Engine) -> FastAPI:
         """Run the ONE vendored setup script. Deliberately takes no arguments of any kind: there is
         no command parameter to smuggle anything through, so this endpoint cannot become a shell."""
         _require_admin(request)
+        # On Windows the setup script (bash) can't run and the container model doesn't apply, so say
+        # so plainly instead of returning a `bash: not found` error the user can't act on.
+        from engine.sandbox.runtime import SANDBOX_UNSUPPORTED_REASON, sandbox_supported
+        if not sandbox_supported():
+            return {"ok": False, "exit_code": 1, "output": SANDBOX_UNSUPPORTED_REASON}
         script = str(Path(__file__).resolve().parents[1] / "scripts" / "setup-sandbox.sh")
         if not os.path.isfile(script):
             raise HTTPException(404, "setup-sandbox.sh is not present in this install")

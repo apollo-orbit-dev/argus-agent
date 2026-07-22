@@ -8,8 +8,19 @@ logic is tested against FakeRuntime, and the real implementation is exercised on
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
+
+# The sandbox runs Linux containers through a rootless, daemonless runtime, with a host bind-mount
+# and host-uid mapping — none of which the vendored setup script (bash) or the run-time flags handle
+# on native Windows, where podman lives inside a WSL2 VM. Rather than fail on a missing `bash`, we
+# report this plainly and never pretend to set it up. One source of truth for the check and the copy.
+SANDBOX_UNSUPPORTED_REASON = "The sandbox is not supported on Windows at this time."
+
+
+def sandbox_supported() -> bool:
+    return not sys.platform.startswith("win")
 
 # A workspace name is interpolated into a container name and a filesystem path, and ends up in a
 # podman argv. Anything that could be read as a flag, a path component or a shell metacharacter is

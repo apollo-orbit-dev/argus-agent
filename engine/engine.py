@@ -1966,6 +1966,13 @@ class Engine:
     # ---- library / scheduled / memory overviews (for the dashboard) ----
     def sandbox_status(self) -> dict:
         c = self._config
+        from engine.sandbox.runtime import SANDBOX_UNSUPPORTED_REASON, sandbox_supported
+        # Platform check first: on Windows the sandbox can't run at all, and that is more useful to
+        # surface than "disabled" (which reads as "flip the switch") — it can't be flipped on here.
+        if not sandbox_supported():
+            return {"enabled": False, "available": False, "supported": False,
+                    "reason": SANDBOX_UNSUPPORTED_REASON,
+                    "runtime": c.sandbox_runtime, "image": c.sandbox_image, "workspaces": []}
         if not c.enable_sandbox or self.sandbox is None:
             return {"enabled": False, "available": False, "reason": "sandbox is disabled",
                     "runtime": c.sandbox_runtime, "image": c.sandbox_image, "workspaces": []}
