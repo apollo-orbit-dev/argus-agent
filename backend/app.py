@@ -449,6 +449,13 @@ def create_app(engine: Engine) -> FastAPI:
     async def scheduled():
         return engine.scheduled_jobs()
 
+    @app.post("/scheduled/delete")
+    async def scheduled_delete(body: dict, request: Request):
+        _require_admin(request)
+        if not body.get("id"):
+            raise HTTPException(400, "body must include 'id'")
+        return engine.scheduled_delete(body["id"])
+
     # ---- approval-gated dependency installs ----
     @app.get("/deps")
     async def deps():

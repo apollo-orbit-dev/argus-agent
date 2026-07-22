@@ -1451,23 +1451,47 @@
     } catch(e){ $('routineEditMsg').textContent = '✗ ' + e.message; }
   });
 
-  /* ---- scheduled tasks (read-only) ---- */
+  /* ---- scheduled tasks ---- */
   async function loadScheduled(){
     var body = $('scheduledBody');
     try {
       var jobs = await (await fetch('/scheduled')).json();
       if (!Array.isArray(jobs) || !jobs.length){
         $('scheduledCount').textContent = '';
-        body.innerHTML = '<tr><td colspan="4" class="empty"><span class="empty-title">No scheduled tasks</span>the agent creates these itself when you ask it to schedule something.</td></tr>';
+        body.innerHTML = '<tr><td colspan="5" class="empty"><span class="empty-title">No scheduled tasks</span>the agent creates these itself when you ask it to schedule something.</td></tr>';
         return;
       }
       $('scheduledCount').textContent = ' ' + jobs.length;
       body.innerHTML = jobs.map(function(j){
         return '<tr><td>' + esc(j.instruction || '') + '</td><td>' + esc(j.schedule || '') + '</td>' +
-          '<td class="num">' + esc(fmtWhen(j.next_run)) + '</td><td class="num">' + esc(String(j.runs != null ? j.runs : 0)) + '</td></tr>';
+          '<td class="num">' + esc(fmtWhen(j.next_run)) + '</td><td class="num">' + esc(String(j.runs != null ? j.runs : 0)) + '</td>' +
+          '<td class="actions"><button class="act-btn danger" data-sched-delete="' + esc(j.id) +
+          '" title="Cancel this scheduled task">✕</button></td></tr>';
       }).join('');
-    } catch(e){ body.innerHTML = '<tr><td colspan="4" class="panel-error">Failed to load scheduled tasks.</td></tr>'; }
+    } catch(e){ body.innerHTML = '<tr><td colspan="5" class="panel-error">Failed to load scheduled tasks.</td></tr>'; }
   }
+  $('scheduledBody').addEventListener('click', function(e){
+    var b = e.target.closest('[data-sched-delete]');
+    if (!b) return;
+    var id = b.getAttribute('data-sched-delete');
+    var task = b.closest('tr').querySelector('td').textContent;
+    confirmDelete({
+      title: 'Cancel scheduled task',
+      message: 'Cancel "' + task + '"? It will stop running. This can\'t be undone.',
+      onConfirm: async function(){
+        try {
+          // The fetch shim RESOLVES a 401 rather than rejecting, so a failed mutation is only
+          // visible on res.ok — without this check a missing admin token toasts success and the
+          // row silently reappears on the next refresh.
+          var res = await fetch('/scheduled/delete', { method: 'POST',
+            headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) });
+          if (!res.ok) { toast('Cancel failed (' + res.status + ')', 'err'); }
+          else { toast('Cancelled scheduled task', 'ok'); }
+        } catch(e){ toast('Cancel failed: ' + e.message, 'err'); }
+        loadScheduled();
+      }
+    });
+  });
 
   /* ---- watches ---- */
   async function loadWatches(){
@@ -1495,7 +1519,13 @@
     confirmDelete({
       title: 'Stop watching', message: 'Stop watching "' + url + '"? This can\'t be undone.',
       onConfirm: async function(){
-        try { await fetch('/watches/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) }); toast('Stopped watching', 'ok'); }
+        try {
+          // Same as everywhere else: the fetch shim resolves a 401, so success must be read off
+          // res.ok or a missing admin token reports "Stopped watching" and changes nothing.
+          var res = await fetch('/watches/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) });
+          if (!res.ok) { toast('Delete failed (' + res.status + ')', 'err'); }
+          else { toast('Stopped watching', 'ok'); }
+        }
         catch(e){ toast('Delete failed: ' + e.message, 'err'); }
         loadWatches();
       }

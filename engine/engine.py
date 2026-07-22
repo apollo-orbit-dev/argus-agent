@@ -2098,6 +2098,13 @@ class Engine:
     def watch_delete(self, watch_id: str) -> dict:
         return {"ok": self.watches.remove(watch_id), "id": watch_id}
 
+    def scheduled_delete(self, job_id: str) -> dict:
+        """Cancel a scheduled job from the dashboard. No session_id filter: the agent's
+        cancel_scheduled_task scopes to its own session so one chat can't cancel another's, but the
+        dashboard is the owner's admin-gated view of EVERY session's jobs — including the Telegram
+        ones, which is the main reason to want a delete button here at all."""
+        return {"ok": self.scheduler.cancel(job_id), "id": job_id}
+
     def delete_created_tool(self, name: str) -> dict:
         """Dashboard-driven delete of a model-created tool: drop it from the live sink and
         remove its persisted JSON. Built-in tools (not in the created sink) are protected."""

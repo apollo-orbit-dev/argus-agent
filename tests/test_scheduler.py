@@ -192,3 +192,33 @@ async def test_scheduling_tools_are_owner_wide_across_sessions(tmp_path):
     cancel = CancelScheduledTaskTool(sched, "dashboard")
     assert "Cancelled" in await cancel.run(cancel.Params(task_id=job_id))   # can manage it too
     assert "no scheduled tasks" in (await lst.run(lst.Params())).lower()
+
+
+def test_scheduled_delete_cancels_a_job_from_the_dashboard(tmp_path):
+    """The dashboard's delete is deliberately NOT session-scoped: the agent's cancel_scheduled_task
+    filters by session so one chat can't cancel another's, but the owner's admin-gated view lists
+    every session's jobs — including Telegram's, which is the main reason to want the button."""
+    import tempfile
+
+    from config import Config
+    from engine.engine import Engine
+
+    eng = Engine(Config(), data_dir=tempfile.mkdtemp())
+    job = eng.scheduler.add("send the morning briefing", {"type": "daily", "hour": 7, "minute": 0},
+                            session_id="telegram-chat")
+    assert any(j["id"] == job.id for j in eng.scheduled_jobs())
+
+    assert eng.scheduled_delete(job.id) == {"ok": True, "id": job.id}
+    assert not any(j["id"] == job.id for j in eng.scheduled_jobs()), "cancelled job must leave the list"
+
+
+def test_scheduled_delete_reports_a_miss_instead_of_raising(tmp_path):
+    """An unknown/already-cancelled id must come back ok:False so the dashboard can say so, rather
+    than 500 or silently look successful."""
+    import tempfile
+
+    from config import Config
+    from engine.engine import Engine
+
+    eng = Engine(Config(), data_dir=tempfile.mkdtemp())
+    assert eng.scheduled_delete("no-such-job") == {"ok": False, "id": "no-such-job"}
