@@ -16,6 +16,7 @@ import select
 import socket
 import socketserver
 import threading
+import time
 from urllib.parse import urlparse
 
 try:                                    # in-image layout: /opt/argus/{proxy,egress_policy}.py
@@ -27,6 +28,44 @@ log = logging.getLogger("argus.sandbox.proxy")
 
 _RELAY_CHUNK = 65536
 _CONNECT_TIMEOUT = 15.0
+
+_MAX_HEADER_BYTES = 16 * 1024    # 16 KiB — a real CONNECT request has one or two header lines;
+                                  # this is generous slack while still bounding memory for a client
+                                  # that tries to feed the header-drain loop endless header lines.
+_HEADER_DRAIN_TIMEOUT = 5.0      # seconds, wall-clock. Real clients send their headers as part of
+                                  # the same connection setup as the request line; this is not a
+                                  # network RTT budget — it exists so a client that dribbles single
+                                  # bytes just under any per-read socket timeout still cannot pin
+                                  # this thread indefinitely.
+
+# This sidecar is shared by every workspace on the host, so one client opening connections without
+# limit could exhaust threads/fds before the per-connection 60s idle timeout ever fires. Cap it and
+# refuse politely past the cap rather than accepting unboundedly.
+_MAX_CONCURRENT_CONNECTIONS = 128
+_LISTEN_BACKLOG = 256            # stdlib TCPServer default is 5; under a connection burst that
+                                  # drops SYNs silently at the kernel — raise it so bursts are seen
+                                  # and answered (with a 503, once past _MAX_CONCURRENT_CONNECTIONS)
+                                  # at the application layer instead.
+
+_REASON_PHRASES = {
+    400: "Bad Request",
+    403: "Forbidden",
+    501: "Not Implemented",
+    502: "Bad Gateway",
+    503: "Service Unavailable",
+}
+
+
+def _http_denial(code: int, reason: str) -> bytes:
+    """A minimal, compliant HTTP response denying the request, with the status line's reason
+    phrase matching `code` (it used to hardcode "Forbidden" for everything, including 502s and
+    501s). Shared by the per-connection `ProxyHandler._deny` (which has a buffered `self.wfile`)
+    and `_Server.verify_request` (which only has the raw accepted socket, because the concurrency
+    cap is enforced before a handler thread — and its rfile/wfile — exist)."""
+    body = f"argus egress proxy: {reason}\n".encode()
+    phrase = _REASON_PHRASES.get(code, "Error")
+    return (f"HTTP/1.1 {code} {phrase}\r\nContent-Length: {len(body)}\r\n"
+            f"Connection: close\r\n\r\n").encode() + body
 
 
 def parse_connect_target(line: str) -> "tuple[str, int] | None":
@@ -86,6 +125,14 @@ class ProxyHandler(socketserver.StreamRequestHandler):
         if target is None:
             self._deny(400, "malformed or unsupported proxy request")
             return
+        # Drain the request's trailing headers before doing anything else with this connection.
+        # `_relay` later reads the client side from the raw socket, not the buffered `rfile` — any
+        # header bytes left unread here would still be sitting on the socket and would be forwarded
+        # into the tunnel ahead of the client's actual payload (a TLS ClientHello). This has to
+        # happen before the tunnel opens, not merely before the policy check.
+        if not self._drain_headers():
+            self._deny(400, "malformed or incomplete request headers")
+            return
         host, port = target
         ok, reason = host_allowed(host, port)
         if not ok:
@@ -97,11 +144,44 @@ class ProxyHandler(socketserver.StreamRequestHandler):
         else:
             self._deny(501, "plain-HTTP proxying is not supported; use HTTPS (CONNECT)")
 
-    def _deny(self, code: int, reason: str) -> None:
-        body = f"argus egress proxy: {reason}\n".encode()
+    def _drain_headers(self) -> bool:
+        """Consume header lines up to the terminating blank line (or EOF), so nothing the client
+        already sent is left in `rfile`'s buffer when `_relay` switches to reading the raw socket —
+        that hand-off is exactly where an unconsumed header tail becomes a smuggled prefix on the
+        tunnelled connection. Bounded two ways: a wall-clock deadline (a client that trickles bytes
+        one at a time, staying just under any single read's timeout, must not pin this thread
+        indefinitely) and a byte cap (a client sending endless header lines must not grow memory
+        without bound). Returns False — caller must deny and stop, never proceed — if either bound
+        is hit or the client disconnects mid-headers.
+        """
+        deadline = time.monotonic() + _HEADER_DRAIN_TIMEOUT
+        total = 0
         try:
-            self.wfile.write(f"HTTP/1.1 {code} Forbidden\r\nContent-Length: {len(body)}\r\n"
-                             f"Connection: close\r\n\r\n".encode() + body)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                budget = _MAX_HEADER_BYTES - total
+                if budget <= 0:
+                    return False
+                self.connection.settimeout(remaining)
+                line = self.rfile.readline(budget)
+                if not line:
+                    return False                      # EOF before the terminating blank line
+                total += len(line)
+                if line in (b"\r\n", b"\n"):
+                    return True
+        except OSError:
+            return False
+        finally:
+            try:
+                self.connection.settimeout(self.timeout)
+            except OSError:
+                pass
+
+    def _deny(self, code: int, reason: str) -> None:
+        try:
+            self.wfile.write(_http_denial(code, reason))
         except OSError:
             pass
 
@@ -114,6 +194,7 @@ class ProxyHandler(socketserver.StreamRequestHandler):
         try:
             self.wfile.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
             self.wfile.flush()
+            self._flush_buffered_client_bytes(upstream)
             _relay(self.connection, upstream)
         finally:
             try:
@@ -121,16 +202,64 @@ class ProxyHandler(socketserver.StreamRequestHandler):
             except OSError:
                 pass
 
+    def _flush_buffered_client_bytes(self, upstream: socket.socket) -> None:
+        """`_relay` reads the client side from the raw socket, not `rfile` — but `rfile` is
+        buffered, so if any client bytes were already read off the wire into that buffer (e.g. a
+        TLS ClientHello arriving in the same TCP segment as the request headers), the raw socket
+        will never see them again: they'd be silently dropped rather than smuggled, which is
+        quieter but still a real corruption of the tunnel. Forward whatever is already sitting in
+        the buffer before the raw-socket relay takes over. `peek()` returns only what is already
+        buffered without issuing a fresh socket read when the buffer is non-empty, so this cannot
+        introduce a second, competing read of the raw socket.
+        """
+        try:
+            leftover = self.rfile.peek()
+        except OSError:
+            return
+        if not leftover:
+            return
+        try:
+            self.rfile.read(len(leftover))   # consume from the buffer; already forwarded below
+            upstream.sendall(leftover)
+        except OSError:
+            pass
+
 
 class _Server(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
+    request_queue_size = _LISTEN_BACKLOG
+
+    def __init__(self, server_address, handler_cls,
+                 max_connections: int = _MAX_CONCURRENT_CONNECTIONS):
+        super().__init__(server_address, handler_cls)
+        self._slots = threading.Semaphore(max_connections)
+
+    def verify_request(self, request, client_address) -> bool:
+        """Runs synchronously in the accept loop, before ThreadingMixIn spawns a handler thread —
+        so a non-blocking acquire here bounds thread count directly, rather than merely bounding it
+        after the fact. Refuse politely (503) past the cap instead of accepting unboundedly."""
+        if self._slots.acquire(blocking=False):
+            return True
+        try:
+            request.sendall(_http_denial(503, "too many concurrent connections through this proxy"))
+        except OSError:
+            pass
+        return False
+
+    def finish_request(self, request, client_address) -> None:
+        """Only reached when verify_request acquired a slot, so this is always paired with exactly
+        one acquire — release unconditionally, even if the handler raises."""
+        try:
+            super().finish_request(request, client_address)
+        finally:
+            self._slots.release()
 
 
-def serve_forever_in_thread(port: int):
+def serve_forever_in_thread(port: int, max_connections: int = _MAX_CONCURRENT_CONNECTIONS):
     """Start the proxy on 127.0.0.1:port in a background thread. Returns a callable that stops it.
     Used by the tests; the container entrypoint uses serve()."""
-    srv = _Server(("127.0.0.1", port), ProxyHandler)
+    srv = _Server(("127.0.0.1", port), ProxyHandler, max_connections=max_connections)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
     def stop():
