@@ -44,6 +44,10 @@ _CGROUP_TTL_S = _AVAILABILITY_TTL_S
 
 
 class PodmanRuntime:
+    NETWORK_NAME = "argus-internal"
+    EGRESS_NAME = "argus-egress"
+    PROXY_PORT = 3128
+
     def __init__(self, binary: str = "podman", image: str = "argus-sandbox:local",
                  workspaces_root: str = "data/workspaces", memory: str = "2g",
                  pids_limit: int = 256, cpus: str = "2", idle_minutes: int = 30,
@@ -102,6 +106,20 @@ class PodmanRuntime:
             *caps,
             self.image, "sleep", "infinity",
         ]
+
+    def _network_create_argv(self) -> list[str]:
+        """--internal gives the network NO route off itself. Validated on the deploy host: a
+        container on it cannot reach the internet, the LAN model host, or the Argus server."""
+        return [self.binary, "network", "create", "--internal", self.NETWORK_NAME]
+
+    def _proxy_run_argv(self) -> list[str]:
+        return [self.binary, "run", "-d", "--name", self.EGRESS_NAME,
+                "--network", self.NETWORK_NAME, self.image,
+                "python", "/opt/argus/proxy.py", "--port", str(self.PROXY_PORT)]
+
+    def _network_connect_argv(self) -> list[str]:
+        """The sidecar's second leg. Being on BOTH networks is what makes it the only way out."""
+        return [self.binary, "network", "connect", "podman", self.EGRESS_NAME]
 
     def _cgroup_controllers(self) -> frozenset:
         """Which cgroup controllers this host's podman actually has, per
@@ -209,6 +227,29 @@ class PodmanRuntime:
             "dropped_limits": dropped,
             "cgroup_controllers": sorted(controllers),
         }
+
+    def ensure_egress(self) -> None:
+        """Idempotent: internal network + a running proxy sidecar attached to both networks."""
+        if self._run([self.binary, "network", "exists", self.NETWORK_NAME], timeout=20).exit_code != 0:
+            r = self._run(self._network_create_argv(), timeout=30)
+            if not r.ok:
+                raise SandboxUnavailable(
+                    f"could not create the sandbox network: {r.stderr.strip()[:200]}")
+        state = self._run([self.binary, "inspect", "-f", "{{.State.Status}}", self.EGRESS_NAME],
+                          timeout=20)
+        if state.exit_code == 0:
+            if state.stdout.strip() != "running":
+                self._run([self.binary, "start", self.EGRESS_NAME], timeout=30)
+            return
+        r = self._run(self._proxy_run_argv(), timeout=60)
+        if not r.ok:
+            raise SandboxUnavailable(f"could not start the egress proxy: {r.stderr.strip()[:200]}")
+        # Second leg. If this fails the proxy exists but has no way out, which would look like
+        # "the internet is down" from inside — so it is a hard failure, not a warning.
+        c = self._run(self._network_connect_argv(), timeout=30)
+        if not c.ok and "already" not in (c.stderr or "").lower():
+            raise SandboxUnavailable(
+                f"egress proxy has no outbound network: {c.stderr.strip()[:200]}")
 
     def ensure_workspace(self, name: str) -> None:
         cname = self.container_name(name)
