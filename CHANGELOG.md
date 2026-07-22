@@ -2,6 +2,55 @@
 
 All notable changes to this project are documented here.
 
+## 0.10.0
+
+The container-sandbox release.
+
+### Added
+- **Container sandbox (opt-in, off by default).** `exec_python` and the agent's file workspace can
+  now run inside a long-lived, rootless **podman** container instead of the language-level AST
+  sandbox — giving the model the full Python standard library and a real writable home directory,
+  while the container boundary keeps the host safe. Built in two stages:
+  - *Isolation:* a `SandboxRuntime` seam (`FakeRuntime` for tests so CI needs no container runtime;
+    `PodmanRuntime` for real), the workspace as a bind-mounted tree, resource caps gated on the
+    host's actual cgroup controllers, and fail-closed registration — if the sandbox is enabled but
+    the runtime is missing, `exec_python` is disabled rather than silently downgraded.
+  - *Egress:* the container joins a `--internal` podman network whose only exit is a
+    policy-enforcing proxy sidecar it can't bypass. `SANDBOX_NETWORK` selects `proxy` (default —
+    public internet, no LAN), `none` (air-gapped), or `lan` (full network, the escape hatch).
+  - Setup is a one-time `scripts/setup-sandbox.sh` or a **Set up sandbox** button on the dashboard's
+    Settings page; a Sandbox card shows runtime/network/egress health. See the README.
+- **`geocode` tool** (from 0.8.2/0.8.3, first collected here) and **tool composition** — created
+  tools can call any built-in by name.
+
+### Changed
+- **One egress policy** (`engine/sandbox/egress_policy.py`) now backs the created-tool guard, the
+  `download_file`/watch guard, and the in-container proxy — replacing two divergent implementations.
+- **The file workspace is a directory tree.** `safe_path` replaces the old flatten-to-basename
+  behaviour (subdirectories allowed, traversal/symlink-escape/TOCTOU all closed), and the workspace
+  moved to `data/workspaces/<name>` (a legacy `data/workspace` is migrated automatically). The same
+  directory is used whether the sandbox is on or off, so toggling it never loses files.
+
+### Fixed
+- **`PATCH /config` is admin-gated**, like every other mutating route — it was the one open write on
+  a token-protected instance (it can repoint the model endpoint).
+- **A throwaway engine can no longer write the developer's real `.env`** — the persist path follows
+  `data_dir`, so tests and dashboard-driven QA stay isolated.
+- **The dashboard health check no longer runs a metered search** to draw its status dot (from 0.9.0
+  line, restated: SearXNG is probed with `/healthz`).
+- Numerous sandbox correctness fixes found in review and on real hardware: recreate a container when
+  its network no longer matches the mode (so a `lan → proxy` switch can't fail open), verify the
+  egress proxy is actually listening, close a DNS-rebind TOCTOU in the proxy, drain CONNECT headers
+  so nothing is smuggled into the tunnel, and drop unenforceable resource caps rather than refusing
+  to start (the deploy host boots `cgroup_disable=memory`).
+
+### Platform / ops
+- **Windows:** the base agent runs, but the container sandbox is not supported on native Windows —
+  the status readout and setup button say so plainly instead of failing on a missing `bash`. Run
+  Argus under WSL for full support.
+- `deploy.sh` rebuilds the sandbox image when its build inputs change; `.containerignore` keeps
+  secrets and agent data out of the build context.
+
 ## 0.9.0
 
 ### Added
