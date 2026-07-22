@@ -11,7 +11,21 @@ All notable changes to this project are documented here.
   `description` per argument), shown under the args box with an **insert template** button that fills
   in the required keys. Tools with no arguments say so explicitly.
 
+- **Scheduled tasks can be cancelled from the dashboard.** The card was read-only — the agent could
+  cancel a job via `cancel_scheduled_task`, but the owner couldn't, including for jobs created from
+  Telegram. Adds an admin-gated `POST /scheduled/delete` and a ✕ per row with the shared confirm
+  dialog. Deliberately not session-scoped: the agent's tool scopes to its own session so one chat
+  can't cancel another's, but the dashboard is the owner's view of every session's jobs.
+
 ### Fixed
+- **Harness-injected nudges no longer look like messages you sent.** The observer's repeat nudge, the
+  create-without-verify nudge, and the output-truncated reprompt are injected with `role: "user"`
+  (the model has no mid-conversation system slot), so the transcript rendered them as your own
+  bubbles. They now render as a centred, dashed "Argus nudge" note, detected by the `[note] ` prefix
+  those injections already share.
+- **Watches delete reported success on failure.** The fetch shim resolves a 401 rather than rejecting,
+  so a missing admin token toasted "Stopped watching" and changed nothing. Now checks `res.ok`, like
+  the session mutations.
 - **Tool and skill descriptions are no longer truncated** on the Developer page. They were clipped at
   140 characters even though the row already wraps; the longest built-in description is ~1170
   characters, so most of it — including the part explaining *when* to use the tool — was hidden.

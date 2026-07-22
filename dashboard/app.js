@@ -676,6 +676,15 @@
           return '<div class="chat-tool"><span class="chat-tool-label">tool</span>' +
                    '<div class="chat-tool-body">' + esc(raw) + '</div></div>';
         }
+        // The harness injects steering notes mid-turn (the observer's repeat nudge, the
+        // create-without-verify nudge, the output-truncated reprompt). The model has no "system"
+        // slot mid-conversation, so they go in with role:"user" and read in the transcript as if
+        // the owner typed them. They all carry the "[note] " prefix by convention — render those
+        // as a centred system note, not a user bubble.
+        if (role === 'user' && raw.indexOf('[note] ') === 0){
+          return '<div class="chat-note"><span class="chat-note-label">Argus nudge</span>' +
+                   '<div class="chat-note-body">' + esc(raw.slice(7).trim()) + '</div></div>';
+        }
         var side = (role === 'user') ? 'me' : 'them';
         // user text stays literal; Argus's replies render markdown (bold, lists, tables, code).
         var body = (role === 'user') ? esc(raw) : ('<div class="md">' + renderAssistantMd(raw) + '</div>');

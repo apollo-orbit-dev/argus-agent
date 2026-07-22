@@ -420,6 +420,17 @@
     border-bottom-right-radius:5px; }
   .chat-bubble.them{ background:var(--panel-2); border:1px solid var(--border); color:var(--ink);
     border-bottom-left-radius:5px; }
+  /* A harness-injected steering note. Stored with role:"user" (the model has no mid-conversation
+     system slot), so without this it renders as a bubble on the owner's side and reads as if they
+     wrote it. Centred, dashed, and narrower than a bubble so it's obviously not part of the
+     conversation — it's the harness talking to the model. */
+  .chat-note{ align-self:center; max-width:86%; margin:2px 0; text-align:center; }
+  .chat-note-label{ font-family:var(--font-mono); font-size:9px; text-transform:uppercase;
+    letter-spacing:.6px; color:var(--cyan); opacity:.75; }
+  .chat-note-body{ margin-top:3px; padding:7px 12px; background:rgba(56,214,224,.045);
+    border:1px dashed rgba(56,214,224,.3); border-radius:8px; font-size:11px; line-height:1.5;
+    color:var(--muted); font-style:italic; text-align:left; }
+
   .chat-tool{ align-self:stretch; }
   .chat-tool-label{ font-family:var(--font-mono); font-size:9px; text-transform:uppercase; letter-spacing:.6px;
     color:var(--amber); padding-left:2px; }
