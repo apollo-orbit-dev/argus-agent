@@ -345,6 +345,150 @@ def test_ensure_workspace_returns_when_start_succeeds_on_an_exited_container(tmp
     rt.ensure_workspace("default")  # must not raise
 
 
+# ---------------------------------------------------------------------------------------------
+# ensure_egress() state machine. Finding 1 (CRITICAL): a sidecar that came up running-but-not-
+# attached to the outbound network must NOT be adopted forever just because `inspect` reports it
+# "running" — the attachment itself has to be re-checked (and repaired) on every call. Finding 2
+# (CRITICAL): a failed `podman start` on the sidecar must raise, not be silently swallowed. Finding
+# 3 (IMPORTANT): a paused sidecar needs `unpause`, not `start`, same as ensure_workspace.
+# ---------------------------------------------------------------------------------------------
+def _egress_fake_run(calls, *, network_exists=True, sidecar_state="running", attached=True,
+                      network_create_ok=True, run_ok=True, connect_ok=True, start_ok=True,
+                      unpause_ok=True, connect_stderr="", start_stderr="", unpause_stderr="",
+                      run_stderr="", network_create_stderr=""):
+    """Build a fake `_run` that drives the whole ensure_egress() state machine without a real
+    podman binary: network exists/create, sidecar inspect (both the `.State.Status` query and the
+    `.NetworkSettings.Networks` attachment query — dispatched on the format string, since both are
+    `inspect` calls), run/start/unpause, and network connect.
+
+    `sidecar_state=None` means the sidecar container does not exist yet (inspect fails). `attached`
+    controls whether the NetworkSettings inspect reports the outbound ("podman") network already
+    present — this is what finding 1's regression test flips to False on an otherwise-`running`
+    sidecar."""
+    def fake_run(argv, *, stdin="", timeout=30.0):
+        calls.append(list(argv))
+        if argv[1] == "network" and argv[2] == "exists":
+            return ExecResult(0 if network_exists else 1, "", "")
+        if argv[1] == "network" and argv[2] == "create":
+            return ExecResult(0 if network_create_ok else 1, "", network_create_stderr)
+        if argv[1] == "network" and argv[2] == "connect":
+            return ExecResult(0 if connect_ok else 1, "", connect_stderr)
+        if argv[1] == "inspect":
+            fmt = argv[3]
+            if "NetworkSettings" in fmt:
+                if sidecar_state is None:
+                    return ExecResult(1, "", "no such container")
+                networks_json = ('{"argus-internal":{},"podman":{}}' if attached
+                                  else '{"argus-internal":{}}')
+                return ExecResult(0, networks_json, "")
+            if sidecar_state is None:
+                return ExecResult(1, "", "no such container")
+            return ExecResult(0, sidecar_state + "\n", "")
+        if argv[1] == "run":
+            return ExecResult(0 if run_ok else 1, "", run_stderr)
+        if argv[1] == "start":
+            return ExecResult(0 if start_ok else 1, "", start_stderr)
+        if argv[1] == "unpause":
+            return ExecResult(0 if unpause_ok else 1, "", unpause_stderr)
+        raise AssertionError(f"unexpected podman argv: {argv}")
+    return fake_run
+
+
+def _network_calls(calls, subcommand):
+    return [c for c in calls if c[1] == "network" and c[2] == subcommand]
+
+
+def test_ensure_egress_creates_the_network_when_missing(tmp_path):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    calls = []
+    rt._run = _egress_fake_run(calls, network_exists=False)
+    rt.ensure_egress()  # must not raise
+    assert len(_network_calls(calls, "create")) == 1
+
+
+def test_ensure_egress_does_not_recreate_an_existing_network(tmp_path):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    calls = []
+    rt._run = _egress_fake_run(calls, network_exists=True)
+    rt.ensure_egress()
+    assert _network_calls(calls, "create") == []
+
+
+def test_ensure_egress_runs_and_connects_a_missing_sidecar(tmp_path):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    calls = []
+    rt._run = _egress_fake_run(calls, sidecar_state=None, attached=False)
+    rt.ensure_egress()
+    assert any(c[1] == "run" for c in calls)
+    assert len(_network_calls(calls, "connect")) == 1
+
+
+def test_ensure_egress_reattaches_a_running_but_unconnected_sidecar(tmp_path):
+    """Finding 1's regression test. Before the fix, ensure_egress returned the instant `inspect`
+    reported "running", without checking attachment at all — so a sidecar that was running but not
+    on the outbound network would be adopted forever and the connect that would fix it would never
+    run again. This must issue a fresh `network connect` every time it finds that gap, not just once
+    at creation time."""
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    calls = []
+    rt._run = _egress_fake_run(calls, sidecar_state="running", attached=False)
+    rt.ensure_egress()  # must not raise
+    assert len(_network_calls(calls, "connect")) == 1, (
+        "a running-but-unattached sidecar must be reconnected, not silently adopted")
+
+
+def test_ensure_egress_skips_the_redundant_connect_when_already_attached(tmp_path):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    calls = []
+    rt._run = _egress_fake_run(calls, sidecar_state="running", attached=True)
+    rt.ensure_egress()
+    assert _network_calls(calls, "connect") == [], (
+        "an already-attached sidecar must not trigger a redundant `network connect`")
+
+
+def test_ensure_egress_unpauses_a_paused_sidecar(tmp_path):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    calls = []
+    rt._run = _egress_fake_run(calls, sidecar_state="paused", attached=True)
+    rt.ensure_egress()  # must not raise
+    assert any(c[1] == "unpause" for c in calls)
+    assert not any(c[1] == "start" for c in calls)
+
+
+def test_ensure_egress_raises_when_start_fails(tmp_path):
+    """Finding 2. Before the fix, `podman start`'s result on an existing non-running sidecar was
+    discarded entirely — a failed start still returned as if egress were ready."""
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    calls = []
+    rt._run = _egress_fake_run(calls, sidecar_state="exited", start_ok=False,
+                                start_stderr="Error: crun: cannot start: OCI error")
+    with pytest.raises(SandboxUnavailable) as exc_info:
+        rt.ensure_egress()
+    assert "exited" in str(exc_info.value)
+    assert "cannot start" in str(exc_info.value)
+
+
+def test_ensure_egress_raises_when_unpause_fails(tmp_path):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    calls = []
+    rt._run = _egress_fake_run(calls, sidecar_state="paused", unpause_ok=False,
+                                unpause_stderr="Error: cannot unpause: container gone")
+    with pytest.raises(SandboxUnavailable) as exc_info:
+        rt.ensure_egress()
+    assert "paused" in str(exc_info.value)
+    assert "cannot unpause" in str(exc_info.value)
+
+
+def test_ensure_egress_raises_when_connect_fails_for_a_real_reason(tmp_path):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    calls = []
+    rt._run = _egress_fake_run(calls, sidecar_state="running", attached=False, connect_ok=False,
+                                connect_stderr="Error: network not found")
+    with pytest.raises(SandboxUnavailable) as exc_info:
+        rt.ensure_egress()
+    assert "network not found" in str(exc_info.value)
+
+
 @needs_real_sandbox_image
 @pytest.mark.podman
 def test_end_to_end_exec_round_trip(tmp_path):

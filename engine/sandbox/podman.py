@@ -47,6 +47,10 @@ class PodmanRuntime:
     NETWORK_NAME = "argus-internal"
     EGRESS_NAME = "argus-egress"
     PROXY_PORT = 3128
+    # The sidecar's second leg (see _network_connect_argv): the default outbound-capable network
+    # podman creates for every install, named literally "podman". Not to be confused with
+    # self.binary, which happens to have the same value by default.
+    OUTBOUND_NETWORK = "podman"
 
     def __init__(self, binary: str = "podman", image: str = "argus-sandbox:local",
                  workspaces_root: str = "data/workspaces", memory: str = "2g",
@@ -119,7 +123,14 @@ class PodmanRuntime:
 
     def _network_connect_argv(self) -> list[str]:
         """The sidecar's second leg. Being on BOTH networks is what makes it the only way out."""
-        return [self.binary, "network", "connect", "podman", self.EGRESS_NAME]
+        return [self.binary, "network", "connect", self.OUTBOUND_NETWORK, self.EGRESS_NAME]
+
+    def _egress_networks_argv(self) -> list[str]:
+        """Introspect which networks the sidecar is actually attached to right now, so
+        `ensure_egress` can verify the second leg on every call instead of trusting that a past
+        `network connect` succeeded (see `ensure_egress`'s docstring)."""
+        return [self.binary, "inspect", "-f", "{{json .NetworkSettings.Networks}}",
+                self.EGRESS_NAME]
 
     def _cgroup_controllers(self) -> frozenset:
         """Which cgroup controllers this host's podman actually has, per
@@ -229,7 +240,18 @@ class PodmanRuntime:
         }
 
     def ensure_egress(self) -> None:
-        """Idempotent: internal network + a running proxy sidecar attached to both networks."""
+        """Idempotent: internal network + a running proxy sidecar attached to both networks.
+
+        The second network leg is verified on EVERY call, not just performed once when the sidecar
+        is first created. A prior run of this method could have created the sidecar (`podman run`
+        succeeding) and then failed the `network connect` step — e.g. process killed mid-call, host
+        hiccup — leaving a container that is genuinely `running` but only on the internal network,
+        with no way out. Because `inspect` would report it `running`, a version of this method that
+        returned as soon as it saw "running" would adopt that half-wired sidecar forever: every
+        subsequent call sees "running", returns immediately, and the connect that would fix it never
+        runs again. So the shape here is "ensure running" THEN "ensure attached", every time,
+        regardless of which branch got the container to running.
+        """
         if self._run([self.binary, "network", "exists", self.NETWORK_NAME], timeout=20).exit_code != 0:
             r = self._run(self._network_create_argv(), timeout=30)
             if not r.ok:
@@ -238,16 +260,43 @@ class PodmanRuntime:
         state = self._run([self.binary, "inspect", "-f", "{{.State.Status}}", self.EGRESS_NAME],
                           timeout=20)
         if state.exit_code == 0:
-            if state.stdout.strip() != "running":
-                self._run([self.binary, "start", self.EGRESS_NAME], timeout=30)
+            status = state.stdout.strip()
+            if status != "running":
+                # `start` fails on a paused container (it needs `unpause`, not `start`) — same
+                # dispatch ensure_workspace uses, for the same reason.
+                if status == "paused":
+                    resumed = self._run([self.binary, "unpause", self.EGRESS_NAME], timeout=30)
+                else:
+                    resumed = self._run([self.binary, "start", self.EGRESS_NAME], timeout=30)
+                if not resumed.ok:
+                    raise SandboxUnavailable(
+                        f"could not resume the egress proxy (state: {status}): "
+                        f"{resumed.stderr.strip()[:300]}")
+        else:
+            r = self._run(self._proxy_run_argv(), timeout=60)
+            if not r.ok:
+                raise SandboxUnavailable(
+                    f"could not start the egress proxy: {r.stderr.strip()[:200]}")
+        self._ensure_egress_attached()
+
+    def _ensure_egress_attached(self) -> None:
+        """Verify the sidecar is actually attached to the outbound network, and attach it if not.
+        Called every time ensure_egress gets (or adopts) a running sidecar — not just right after
+        creating one — so a sidecar that came up running-but-unconnected on some earlier call gets
+        repaired instead of adopted as-is forever (see ensure_egress's docstring).
+
+        Inspecting `.NetworkSettings.Networks` is the authoritative check: it reflects what the
+        container is actually attached to right now. That is preferred over the previous approach
+        of string-matching "already" in `network connect`'s stderr to tell "already attached" apart
+        from a real failure — that string was never verified against real podman wording, so a
+        phrasing change (or a different podman version) could silently swallow a genuine failure.
+        Inspect-then-connect makes no assumption about error text at all: if the network is missing,
+        connect; if connect then fails, that failure is real."""
+        nets = self._run(self._egress_networks_argv(), timeout=20)
+        if nets.ok and f'"{self.OUTBOUND_NETWORK}":' in (nets.stdout or ""):
             return
-        r = self._run(self._proxy_run_argv(), timeout=60)
-        if not r.ok:
-            raise SandboxUnavailable(f"could not start the egress proxy: {r.stderr.strip()[:200]}")
-        # Second leg. If this fails the proxy exists but has no way out, which would look like
-        # "the internet is down" from inside — so it is a hard failure, not a warning.
         c = self._run(self._network_connect_argv(), timeout=30)
-        if not c.ok and "already" not in (c.stderr or "").lower():
+        if not c.ok:
             raise SandboxUnavailable(
                 f"egress proxy has no outbound network: {c.stderr.strip()[:200]}")
 
