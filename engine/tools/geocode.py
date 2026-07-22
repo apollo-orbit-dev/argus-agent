@@ -13,6 +13,7 @@ built-in is supposed to absorb.
 """
 from __future__ import annotations
 
+import json
 from typing import Optional
 
 import httpx
@@ -81,12 +82,20 @@ class GeocodeTool(Tool):
         try:
             place = await geocode_place(args.location, self.timeout)
         except httpx.HTTPError as e:
-            return f"geocode error: could not reach the geocoding service ({e})"
+            return json.dumps({"error": f"could not reach the geocoding service ({e})"})
         if not place:
-            return f"geocode: location {args.location!r} not found."
-        where = ", ".join(x for x in (place.get("name"), place.get("admin1"),
-                                      place.get("country")) if x)
-        # key=value rather than prose: this output usually feeds another computation, and a small
-        # model extracts labelled numbers far more reliably than it parses a sentence.
-        return (f"{where}: latitude={place.get('latitude')}, longitude={place.get('longitude')}, "
-                f"timezone={place.get('timezone')}")
+            return json.dumps({"error": f"location {args.location!r} not found"})
+        # JSON, because this output has TWO readers and JSON is the only format that serves both:
+        # the model reading a tool result in conversation, and created-tool code calling geocode()
+        # through tool composition. An earlier version returned "name: latitude=..., longitude=..."
+        # — readable, but `json.loads(geocode(...))` (the obvious thing to write) raised, the
+        # created tool fell into its except branch, and the model concluded composition didn't work
+        # and went back to hardcoding coordinates. Structured output is what makes it composable.
+        return json.dumps({
+            "name": place.get("name"),
+            "admin1": place.get("admin1"),
+            "country": place.get("country"),
+            "latitude": place.get("latitude"),
+            "longitude": place.get("longitude"),
+            "timezone": place.get("timezone"),
+        })

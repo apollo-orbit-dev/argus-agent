@@ -532,3 +532,50 @@ def test_discarded_call_tool_detected():
 def test_captured_tool_result_not_flagged():
     code = "def run(args):\n    c = ascii_chart({'chart_type':'line','data':d})\n    return 'r\\n' + c"
     assert _discarded_tool_calls(code, {"ascii_chart"}) == []
+
+
+async def test_created_tool_can_compose_a_builtin(tmp_path):
+    """The whole point of the geocode built-in: a created tool must be able to CALL it rather than
+    re-implement geocoding against the raw API. Every registered tool name is injected as a plain
+    callable into created-tool globals at call time, and the tool's JSON output must survive
+    json.loads() in the caller -- the two halves that make composition actually usable.
+
+    Live session evidence for why this is pinned: with a prose-returning geocode, the model wrote
+    `json.loads(geocode(...))`, it raised, the tool returned "Could not find location", and the
+    model concluded composition was impossible and hardcoded a latitude instead.
+    """
+    import json as _json
+
+    import httpx
+    from pydantic import BaseModel
+
+    from engine.experimental.tool_creation import DynamicTool, _compile_run
+    from engine.tools.base import ToolRegistry
+    from engine.tools.geocode import GeocodeTool
+
+    real_init = httpx.AsyncClient.__init__
+
+    def fake_init(self, *a, **kw):
+        kw["transport"] = httpx.MockTransport(lambda req: httpx.Response(200, json={"results": [
+            {"name": "Milton", "admin1": "Florida", "country": "United States",
+             "latitude": 30.63241, "longitude": -87.03969, "timezone": "America/Chicago"}]}))
+        real_init(self, *a, **kw)
+
+    httpx.AsyncClient.__init__ = fake_init
+    try:
+        reg = ToolRegistry()
+        reg.register(GeocodeTool())
+
+        class P(BaseModel):
+            location: str
+
+        code = ("def run(args):\n"
+                "    import json\n"
+                "    place = json.loads(geocode({'location': args['location']}))\n"
+                "    return f\"{place['latitude']},{place['longitude']}\"\n")
+        t = DynamicTool("compose_probe", "probe", P, _compile_run(code, allow_network=True),
+                        timeout=30)
+        t.registry = reg
+        assert await t.run(P(location="Milton, FL")) == "30.63241,-87.03969"
+    finally:
+        httpx.AsyncClient.__init__ = real_init

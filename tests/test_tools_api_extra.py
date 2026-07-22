@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 
@@ -183,17 +185,20 @@ async def test_crypto_price_http_error():
 
 # ---- geocode ----
 
-async def test_geocode_returns_labelled_coordinates():
-    """Output is key=value, not prose: it normally feeds another computation, and a small model
-    extracts labelled numbers far more reliably than it parses a sentence."""
+async def test_geocode_returns_parseable_json():
+    """JSON, not prose. The output has two readers -- the model reading a tool result, and
+    created-tool code calling geocode() through tool composition -- and only structured output
+    serves both. A prose version shipped briefly and broke composition: `json.loads(geocode(...))`
+    raised, the created tool fell into its except branch, and the model went back to hardcoding."""
     patch_asyncclient.transport = httpx.MockTransport(
         lambda req: httpx.Response(200, json={"results": [
-            {"name": "Nashville", "admin1": "Tennessee", "country": "United States",
-             "latitude": 36.16589, "longitude": -86.78444, "timezone": "America/Chicago"}]}))
-    out = await GeocodeTool().run(GeocodeTool.Params(location="Nashville"))
-    assert "latitude=36.16589" in out and "longitude=-86.78444" in out
-    assert "timezone=America/Chicago" in out
-    assert "Nashville, Tennessee, United States" in out
+            {"name": "Milton", "admin1": "Florida", "country": "United States",
+             "latitude": 30.63241, "longitude": -87.03969, "timezone": "America/Chicago"}]}))
+    out = await GeocodeTool().run(GeocodeTool.Params(location="Milton, FL"))
+    place = json.loads(out)                      # must not raise
+    assert place["latitude"] == 30.63241 and place["longitude"] == -87.03969
+    assert place["name"] == "Milton" and place["admin1"] == "Florida"
+    assert place["timezone"] == "America/Chicago"
 
 
 async def test_geocode_uses_the_state_hint_to_disambiguate():
@@ -205,21 +210,23 @@ async def test_geocode_uses_the_state_hint_to_disambiguate():
              "latitude": 42.10, "longitude": -72.58, "timezone": "America/New_York"},
             {"name": "Springfield", "admin1": "Illinois", "country": "United States",
              "latitude": 39.80, "longitude": -89.64, "timezone": "America/Chicago"}]}))
-    out = await GeocodeTool().run(GeocodeTool.Params(location="Springfield, IL"))
-    assert "Illinois" in out and "latitude=39.8" in out
+    place = json.loads(await GeocodeTool().run(GeocodeTool.Params(location="Springfield, IL")))
+    assert place["admin1"] == "Illinois" and place["latitude"] == 39.80
 
 
-async def test_geocode_location_not_found():
+async def test_geocode_location_not_found_is_json_too():
+    """Errors stay parseable: composed code does json.loads() unconditionally, so a bare prose
+    error string would raise inside the caller instead of being handled."""
     patch_asyncclient.transport = httpx.MockTransport(
         lambda req: httpx.Response(200, json={}))
-    out = await GeocodeTool().run(GeocodeTool.Params(location="Zzxqville"))
-    assert "not found" in out.lower()
+    err = json.loads(await GeocodeTool().run(GeocodeTool.Params(location="Zzxqville")))
+    assert "not found" in err["error"].lower()
 
 
 async def test_geocode_http_error_is_reported_not_swallowed():
-    """A 503 must not read as 'no such place' — that would send the model off correcting a
+    """A 503 must not read as 'no such place' -- that would send the model off correcting a
     spelling that was never wrong."""
     patch_asyncclient.transport = httpx.MockTransport(
         lambda req: httpx.Response(503, text="down"))
-    out = await GeocodeTool().run(GeocodeTool.Params(location="Nashville"))
-    assert "error" in out.lower() and "not found" not in out.lower()
+    err = json.loads(await GeocodeTool().run(GeocodeTool.Params(location="Nashville")))
+    assert "not found" not in err["error"].lower()
