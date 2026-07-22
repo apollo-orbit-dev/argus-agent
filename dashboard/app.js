@@ -1104,6 +1104,7 @@
     reflectBoolSwitch('cfgEnableSandbox', cfg.enable_sandbox);
     setInputVal('cfgSandboxRuntime', cfg.sandbox_runtime);
     setInputVal('cfgSandboxIdleMinutes', cfg.sandbox_idle_minutes);
+    setInputVal('cfgSandboxNetwork', cfg.sandbox_network);
 
     var tok = $('inTgToken');
     if (tok && document.activeElement !== tok)
@@ -1185,6 +1186,12 @@
     patchConfigKey('sandbox_runtime', this.value).catch(function(){ toast('Failed to set sandbox_runtime', 'err'); loadConfig(); });
   });
   wireNumberField('cfgSandboxIdleMinutes', 'sandbox_idle_minutes');
+  $('cfgSandboxNetwork').addEventListener('change', function(){
+    var v = this.value;
+    patchConfigKey('sandbox_network', v)
+      .catch(function(e){ toast('Failed to set sandbox_network: ' + e.message, 'err'); });
+    if (v === 'lan') toast('LAN mode removes the egress boundary — the container can reach this network', 'err');
+  });
   async function loadSandboxStatus(){
     var el = $('sandboxStatus');
     if (!el) return;
@@ -1201,6 +1208,8 @@
         (s.image_present === false ? ' <span class="sb-bad">(not built)</span>' : '') + '</span>');
       if (s.workspaces && s.workspaces.length)
         rows.push('<span>running: ' + esc(s.workspaces.join(', ')) + '</span>');
+      if (s.network) rows.push('<span>network: ' + esc(s.network) +
+        (s.network === 'lan' ? ' <span class="sb-bad">(no egress boundary)</span>' : '') + '</span>');
       // egress_ready is only meaningful in "proxy" mode (null in lan/none — no sidecar exists
       // there to be broken) — surface it so a dead sidecar isn't invisible until exec_python
       // fails opaquely inside a workspace container.
