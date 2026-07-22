@@ -39,8 +39,11 @@ system_prompt.md
 # ============================================================================
 # DEV / PERSONAL — not part of the shippable product (kept local, out of the public repo)
 # ============================================================================
-# personal deploy + research/probe/eval scripts
-scripts/
+# personal deploy + research/probe scripts. `scripts/*` (not `scripts/`) so the
+# skill-eval harness can be re-included — git cannot un-ignore a file whose
+# parent DIRECTORY is excluded.
+scripts/*
+!scripts/skill_eval.py
 docs/RUNBOOK.md
 docs/routines-spec.md
 docs/feature-backlog.md
@@ -84,5 +87,8 @@ node_modules/
 docs/superpowers/
 .superpowers/
 
-# A/B skill-validation batteries (internal testbed scaffolding, like findings-stresstest)
-docs/ab/
+# A/B skill-validation: the batteries + their fixtures ship (they're the harness's
+# input); the reports are local research output.
+docs/ab/*
+!docs/ab/batteries/
+!docs/ab/fixtures/

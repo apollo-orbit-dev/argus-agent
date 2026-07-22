@@ -7,7 +7,7 @@ A single-arm, difficulty-graded benchmark for tracking how well *Argus-on-model-
 ```
 # label each run with the model's param count (billions) — that's the x-axis:
 python -m engine.eval.benchmark run --model main --params 35 --mode native
-python -m engine.eval.benchmark run --model 'fast=http://192.168.0.93:8001/v1|fast' --params 3 --mode manual
+python -m engine.eval.benchmark run --model 'small=http://localhost:8001/v1|Qwen2.5-3B-Instruct' --params 3 --mode manual
 
 # after you have >=1 result, regenerate the curve + report:
 python -m engine.eval.benchmark report

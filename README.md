@@ -55,9 +55,88 @@ point it at a 3B model on your own GPU and the harness is what keeps it honest.
   SMTP email or [ntfy](https://ntfy.sh) push for scheduled results and watch alerts.
 - **Multi-model roles** — separate model connections for chat vs. embeddings, targeting
   OpenRouter, any OpenAI-compatible API, or a local vLLM/Ollama server.
-- **Built for tuning small models** — A/B-switchable tool-calling (native vs. manual), a passive
-  reliability instrument that scores per-tool success, latency, and loop health on a dashboard page,
-  and per-turn adaptive reasoning — the knobs for making a small local model run the loop well.
+- **Built for tuning small models** — a loop-health observer, switchable tool-calling, deterministic
+  execution paths, and a passive reliability instrument. See [Small-model scaffolding](#small-model-scaffolding)
+  below, and [Measuring it](#measuring-it) for the harnesses that tell you whether any of it helped.
+
+## Small-model scaffolding
+
+The list above is what Argus *does*. This is why it holds together on a model that isn't a frontier
+model — the layers that exist because a small model will loop, over-claim, mis-parse a tool call, or
+re-derive a plan it already had.
+
+| Layer | The failure it counters |
+|-------|-------------------------|
+| **Observer** — loop-health watchdog | Thrash. It catches the same call repeating with no progress, the same tool or skill being re-created over and over, and tools being built without ever running one to see its real output. At a threshold it nudges the model to change approach; past that it stops the turn instead of burning the whole step budget. |
+| **Switchable tool-calling** (`native` / `manual` / `native_finish`) | Brittle tool-call parsing. Small models vary enormously at emitting well-formed native calls, and a plain text protocol is often more reliable. It's a config knob, so you can run the same model both ways and separate a real capability gap from a parsing one. |
+| **Deterministic skill steps** | Re-deriving a known plan every time. A skill can pin its procedure as a structured `steps` block that runs through the routines engine — in a live A/B this cut a task to **~5× fewer model calls** than the free-form path, with the model only filling in the gaps. |
+| **Explicit-first skill selection** | Making the model choose its own skill. Trigger phrases match deterministically before any model-driven fallback is consulted. |
+| **Tight tool contracts** | Fabricated or injected arguments. Identifiers are validated, values are bound parameters, and the model never emits raw SQL — `ask_data` compiles natural language against a grounded schema and self-repairs on error. |
+| **Post-action verifier** | Over-claiming. After a turn that created, deleted, or scheduled something, a cheap check tests the claim against what actually happened. |
+| **`clarify`** | Confidently guessing. The model can ask one question instead of inventing the missing detail. |
+| **Reliability instrument** | Flying blind. A passive collector scores per-tool success rate, latency, and loop health, so you can see *which* tool your model fumbles instead of just that it feels unreliable. |
+| **Standing rules + memory** | Repeating yourself. Durable directives and facts persist across sessions and every interface, so instructions don't have to be re-stated in each prompt. |
+
+Every one of these is config-gated (see [`.env.example`](.env.example)). Switch them off and you have
+a plain agent loop — which is exactly the baseline they get measured against.
+
+## Measuring it
+
+Scaffolding is easy to add and hard to justify, so Argus ships the two harnesses used to justify it.
+Both run real, fully isolated engines against a temporary `data_dir`, so an eval never touches your
+tables, memory, or sessions.
+
+### "How far does my model get?" — the capability benchmark
+
+A frozen, difficulty-graded battery (27 tasks across 4 tiers) run once per model under the standard
+config, scored on a deterministic tool-chain predicate plus a 0–3 quality judge. Results accumulate
+as committed JSON labeled by parameter count, so runs from different models on different days compose
+into a single curve.
+
+```bash
+python -m engine.eval.benchmark run --model main --params 35 --mode native
+python -m engine.eval.benchmark run --model 'small=http://localhost:8001/v1|Qwen2.5-3B-Instruct' --params 3
+python -m engine.eval.benchmark report      # regenerate curve.png + report.md from all results
+```
+
+`--params` is the x-axis (billions), so label each run honestly. The judge defaults to `claude:opus`
+via the [Claude Code](https://claude.com/claude-code) CLI; pass `--judge main` to grade with any
+model you've configured instead, or `--judge ''` to score the tool chain only.
+
+The founding run is committed in [`benchmark/`](benchmark/), and it's worth reading for the part that
+isn't flattering — tool-chain pass rate by difficulty tier (the committed
+[report](benchmark/report.md) also carries the judge means):
+
+| model | params | tier 1 | tier 2 | tier 3 | tier 4 | overall |
+|-------|--------|--------|--------|--------|--------|---------|
+| Qwen2.5-3B-Instruct | 3B | 100% | 40% | 29% | 60% | 58% |
+| Agents-A1 | 35B | 86% | 80% | 86% | 100% | 88% |
+
+A 3B model ties a 35B on trivial single-tool tasks and falls off a cliff on multi-step ones. The
+scaffolding above moves that cliff; it does not remove it. Finding where *your* model's cliff sits is
+the point of the instrument.
+
+### "Does this skill actually help?" — the skill A/B
+
+[`scripts/skill_eval.py`](scripts/skill_eval.py) runs a battery in two arms — treatment (skill
+registered) and baseline (that same skill ablated from the registry) — `k` times each, then reports
+pass^k per case and a per-skill **KEEP / no-lift / REGRESSION** verdict. It also checks **over-fire**:
+off-target cases must stay clean in *both* arms, so a skill with greedy triggers can't quietly hijack
+unrelated requests and still look like a win.
+
+```bash
+python scripts/skill_eval.py --battery docs/ab/batteries/table-mutation.json --k 3
+python scripts/skill_eval.py --battery <b> --dry-run     # print the run matrix, call no model
+python scripts/skill_eval.py --battery <b> --judge main  # add a 0-3 model-graded quality score
+```
+
+Batteries are JSON — a prompt, the skill it should activate (or `null` for an off-target control), an
+`expect` chain predicate, and an optional judge rubric. Two are included in
+[`docs/ab/batteries/`](docs/ab/batteries/); reports are written to `docs/ab/reports/`. The
+`evolve_table` and structured-data skills in the library were both cleared this way before shipping.
+
+One lesson worth passing on: run `--dry-run` first and confirm the skill actually activates on your
+cases. A battery where the treatment arm never fires the skill measures nothing, very convincingly.
 
 ## Quickstart
 

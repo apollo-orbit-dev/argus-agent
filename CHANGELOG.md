@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+- **README: "Small-model scaffolding"** — a section naming the layers that exist specifically to make
+  a small model dependable (the loop-health Observer, switchable tool-calling modes, deterministic
+  skill steps, explicit-first skill selection, tight tool contracts, the post-action verifier,
+  `clarify`, the reliability instrument, standing rules + memory) and the failure each one counters.
+- **README: "Measuring it"** — documents the two eval harnesses and how to run them: the
+  cross-model capability benchmark (`python -m engine.eval.benchmark`) with the founding run's
+  numbers, and the pass^k skill A/B (`scripts/skill_eval.py`) with its KEEP / no-lift / REGRESSION
+  and over-fire verdicts.
+- **The skill-eval harness now ships.** `scripts/skill_eval.py` and the A/B batteries + fixtures
+  under `docs/ab/` were previously gitignored, leaving `engine/eval/` public with no entry point.
+  `.gitignore` now un-ignores exactly those (the personal deploy/probe scripts and the local A/B
+  reports stay out).
+
 ## 0.8.1
 
 ### Added
