@@ -6,15 +6,12 @@ reconcile-on-restart free.
 """
 from __future__ import annotations
 
-import logging
 import os
 import shutil
 import subprocess
 import time
 
 from engine.sandbox.runtime import ExecResult, SandboxUnavailable, validate_workspace
-
-log = logging.getLogger("argus.sandbox")
 
 _NAME_PREFIX = "argus-ws-"
 
@@ -106,7 +103,16 @@ class PodmanRuntime:
             status = state.stdout.strip()
             if status == "running":
                 return                                    # adopt it — reconcile is free
-            self._run([self.binary, "start", cname], timeout=30)
+            # `start` fails on a paused container (it needs `unpause`, not `start`) — dispatch on
+            # the reported state rather than let a call we know will fail surface a raw error.
+            if status == "paused":
+                resumed = self._run([self.binary, "unpause", cname], timeout=30)
+            else:
+                resumed = self._run([self.binary, "start", cname], timeout=30)
+            if not resumed.ok:
+                raise SandboxUnavailable(
+                    f"could not resume the sandbox container (state: {status}): "
+                    f"{resumed.stderr.strip()[:300]}")
             return
         created = self._run(self._run_argv(name), timeout=60)
         if not created.ok:
@@ -135,9 +141,9 @@ class PodmanRuntime:
         stopped = []
         for name, last in list(self._last_exec.items()):
             if now - last >= idle_seconds:
-                try:
-                    self.stop(name)
-                    stopped.append(name)
-                except Exception:
-                    log.exception("failed to stop idle sandbox workspace %s", name)
+                # stop() already swallows SandboxUnavailable internally (see its docstring) and
+                # raises nothing else, so there is no exception here to catch — a handler around
+                # it would imply a failure mode that cannot occur.
+                self.stop(name)
+                stopped.append(name)
         return stopped

@@ -10,7 +10,7 @@ import shutil
 import pytest
 
 from engine.sandbox.podman import PodmanRuntime
-from engine.sandbox.runtime import validate_workspace
+from engine.sandbox.runtime import ExecResult, SandboxUnavailable, validate_workspace
 
 needs_podman = pytest.mark.skipif(shutil.which("podman") is None, reason="podman not installed")
 
@@ -68,6 +68,70 @@ def test_stop_on_missing_binary_does_not_raise(tmp_path):
     stop_idle() on a timer where an exception would be noise."""
     rt = PodmanRuntime(binary="definitely-not-a-real-binary", workspaces_root=str(tmp_path))
     rt.stop("default")  # must not raise
+
+
+def _script_run(responses):
+    """Return a fake `_run` that maps the podman subcommand (argv[1]) to a canned ExecResult,
+    so ensure_workspace can be driven without a real podman binary."""
+    def fake_run(argv, *, stdin="", timeout=30.0):
+        return responses[argv[1]]
+    return fake_run
+
+
+def test_ensure_workspace_raises_sandbox_unavailable_when_start_fails_on_a_dead_container(tmp_path):
+    """A container reported as `dead` (or `exited`, `stopping`) makes `podman start` fail. Before
+    the fix, ensure_workspace ignored that and returned as if the workspace were ready — the
+    caller then hit a raw podman error out of exec() instead of a clean SandboxUnavailable."""
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    rt._run = _script_run({
+        "inspect": ExecResult(0, "dead\n", ""),
+        "start": ExecResult(1, "", "Error: crun: cannot start a dead container: OCI error"),
+    })
+    with pytest.raises(SandboxUnavailable) as exc_info:
+        rt.ensure_workspace("default")
+    assert "dead" in str(exc_info.value)
+    assert "cannot start a dead container" in str(exc_info.value)
+
+
+def test_ensure_workspace_raises_sandbox_unavailable_when_start_fails_on_a_paused_container_and_unpause_also_fails(tmp_path):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    rt._run = _script_run({
+        "inspect": ExecResult(0, "paused\n", ""),
+        "unpause": ExecResult(1, "", "Error: cannot unpause: container gone"),
+    })
+    with pytest.raises(SandboxUnavailable) as exc_info:
+        rt.ensure_workspace("default")
+    assert "paused" in str(exc_info.value)
+    assert "cannot unpause" in str(exc_info.value)
+
+
+def test_ensure_workspace_unpauses_rather_than_starts_a_paused_container(tmp_path):
+    """`podman start` fails on a paused container — it needs `unpause` instead. A successful
+    unpause must be treated as the workspace being ready, same as an already-running one."""
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    calls = []
+
+    def fake_run(argv, *, stdin="", timeout=30.0):
+        calls.append(argv[1])
+        if argv[1] == "inspect":
+            return ExecResult(0, "paused\n", "")
+        if argv[1] == "unpause":
+            return ExecResult(0, "", "")
+        raise AssertionError(f"unexpected podman subcommand: {argv[1]}")
+
+    rt._run = fake_run
+    rt.ensure_workspace("default")  # must not raise
+    assert "unpause" in calls
+    assert "start" not in calls
+
+
+def test_ensure_workspace_returns_when_start_succeeds_on_an_exited_container(tmp_path):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    rt._run = _script_run({
+        "inspect": ExecResult(0, "exited\n", ""),
+        "start": ExecResult(0, "", ""),
+    })
+    rt.ensure_workspace("default")  # must not raise
 
 
 @needs_podman
