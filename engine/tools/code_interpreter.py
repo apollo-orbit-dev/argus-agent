@@ -1,14 +1,22 @@
-"""exec_python — a sandboxed Python REPL for quick, exploratory computation.
+"""exec_python — a Python REPL for quick, exploratory computation.
 
 This is the *ephemeral computation* companion to create_tool (which builds *persistent* capabilities):
-run a short snippet, get stdout/stderr/last-value back, keep variables around within a session.
+run a short snippet, get stdout/stderr/last-value back.
 
-It reuses create_tool's exact sandbox gates (engine.experimental.tool_creation): the AST scan, the
-whitelisted builtins, the guarded __import__, and the SSRF-guarded httpx stand-in. What it adds on
-top is (a) stdout/stderr capture (the create_tool runner returns only a value), (b) REPL-style
-"show the last expression's value", and (c) a per-session namespace so variables persist between
-calls. Same soft (language-level) sandbox as create_tool — no seccomp/rlimits/container — so it is
-gated behind ENABLE_CODE_INTERPRETER and runs under a wall-clock timeout on a worker thread.
+There are TWO execution modes, selected by whether a SandboxRuntime is wired in (`runtime=`, see
+engine.sandbox) — and they make different promises to the model, which is why the tool's
+`description` (exec_python_description(), below) is generated per-mode instead of hardcoded:
+
+- No runtime (default; `runtime=None`): the SOFT, in-process AST sandbox shared with create_tool
+  (engine.experimental.tool_creation) — the AST scan, whitelisted builtins, guarded __import__, and
+  the SSRF-guarded httpx stand-in. No seccomp/rlimits/real container. Variables persist per session
+  (reset=true clears them). No file/OS access; a curated stdlib only. Gated behind
+  ENABLE_CODE_INTERPRETER; runs under a wall-clock timeout on a worker thread.
+- A container runtime is wired in (ENABLE_SANDBOX + a live PodmanRuntime): each call is a fresh
+  `python -c` inside an isolated, network-disabled container with the FULL standard library — see
+  run_sandboxed(). This path is STATELESS: every call is a new process, so variables do NOT persist
+  and `reset` is a no-op (run()'s early return skips the in-process namespace entirely). State that
+  needs to survive a call belongs in the bind-mounted workspace, not a Python variable.
 """
 from __future__ import annotations
 
@@ -35,11 +43,14 @@ class CodeInterpreter:
     variables survive across turns even though the tool instance is rebuilt each run."""
 
     def __init__(self, allow_network: bool = False, timeout: float = 10.0,
-                 runtime=None, workspace: str = "default"):
+                 runtime=None, workspace: str = "default", container_timeout: float = 120.0):
         self.allow_network = allow_network
-        self.timeout = timeout
+        self.timeout = timeout            # in-process AST sandbox wall-clock timeout (code_interpreter_timeout)
         self.runtime = runtime            # SandboxRuntime | None. None = the in-process AST sandbox.
         self.workspace = workspace
+        self.container_timeout = container_timeout   # container path timeout (sandbox_exec_timeout);
+        # kept separate from `timeout` because the two paths are configured independently and an
+        # operator raising one must not silently be ignored in favor of the other's default.
         self._sessions: dict[str, dict] = {}
 
     def _new_namespace(self) -> dict:
@@ -71,13 +82,13 @@ class CodeInterpreter:
         try:
             r = await loop.run_in_executor(
                 None, lambda: self.runtime.exec(
-                    self.workspace, ["python", "-c", code], timeout=self.timeout))
+                    self.workspace, ["python", "-c", code], timeout=self.container_timeout))
         except SandboxUnavailable as e:
             return f"exec_python error: the sandbox is unavailable ({e})."
         except Exception as e:                       # noqa: BLE001 - never kill the turn
             return f"exec_python error: {type(e).__name__}: {e}"
         if r.timed_out:
-            return f"exec_python: timed out after {self.timeout}s."
+            return f"exec_python: timed out after {self.container_timeout}s."
         parts = []
         if r.stdout.strip():
             parts.append(r.stdout[:_MAX_OUTPUT])
@@ -165,24 +176,51 @@ def _format_output(out: str, err: str, val) -> str:
     return text
 
 
+_DESC_HEAD = (
+    "Run a short Python snippet for quick one-off computation — math, parsing, reshaping data, "
+    "checking a calculation. Returns stdout, any error/traceback, and the value of the last "
+    "expression (like a REPL). "
+)
+_DESC_SOFT_BODY = (
+    "Variables persist between calls in the same conversation (pass reset=true to start fresh). "
+    "Sandboxed: no file/OS access; a curated stdlib only (math, statistics, datetime, json, re, "
+    "itertools, collections, …)."
+)
+_DESC_CONTAINER_BODY = (
+    "Runs in an isolated container with the full standard library. STATELESS: each call is a fresh "
+    "process, so variables do NOT persist between calls and reset has no effect — if you need state "
+    "to carry over, write it to a file instead of relying on a variable."
+)
+_DESC_TAIL = " For building a REUSABLE tool use create_tool instead. Args: code, and optional reset."
+
+
+def exec_python_description(sandboxed: bool) -> str:
+    """The model-facing description of exec_python, generated per execution mode instead of
+    hardcoded. The soft AST sandbox and the container runtime make OPPOSITE promises about state
+    (persistent vs. stateless) and isolation (curated stdlib vs. full stdlib in a container) — a
+    description written for one mode and shown while the other is active tells the model something
+    false, and a false "variables persist" is what makes it write code that NameErrors on a variable
+    it believed survived. `sandboxed=True` selects the container mode's contract; both
+    ExecPythonTool.__init__ and Engine.tools_overview() call this so the two views of the tool can
+    never drift apart."""
+    return _DESC_HEAD + (_DESC_CONTAINER_BODY if sandboxed else _DESC_SOFT_BODY) + _DESC_TAIL
+
+
 class ExecPythonTool(Tool):
     name = "exec_python"
-    description = (
-        "Run a short Python snippet in a sandbox for quick one-off computation — math, parsing, "
-        "reshaping data, checking a calculation. Returns stdout, any error/traceback, and the value "
-        "of the last expression (like a REPL). Variables persist between calls in the same "
-        "conversation (pass reset=true to start fresh). Sandboxed: no file/OS access; a curated "
-        "stdlib only (math, statistics, datetime, json, re, itertools, collections, …). For building "
-        "a REUSABLE tool use create_tool instead. Args: code, and optional reset."
-    )
 
     class Params(BaseModel):
         code: str = Field(..., description="Python source to execute; the last expression's value is shown")
-        reset: bool = Field(False, description="clear this conversation's variables before running")
+        reset: bool = Field(False, description="clear this conversation's variables before running"
+                            " (ignored when running in the container sandbox — see the description)")
 
     def __init__(self, interp: CodeInterpreter, session_id: str):
         self.interp = interp
         self.session_id = session_id
+        # Reflects whichever mode `interp` is ACTUALLY wired for right now, not the mode the owner
+        # merely asked for — interp.runtime is resolved by Engine.run_task in lockstep with the
+        # fail-closed gate immediately before this tool is constructed (see engine.py).
+        self.description = exec_python_description(sandboxed=interp.runtime is not None)
 
     async def run(self, args: "ExecPythonTool.Params") -> str:
         return await self.interp.run(self.session_id, args.code, reset=args.reset)

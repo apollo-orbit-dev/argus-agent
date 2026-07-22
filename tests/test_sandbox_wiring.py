@@ -73,3 +73,193 @@ async def test_exec_python_reports_a_timeout_as_a_timeout():
     interp = CodeInterpreter(allow_network=False, timeout=10, runtime=fake, workspace="default")
     out = await interp.run("sess", "while True: pass")
     assert "timed out" in out.lower()
+
+
+# ---------------------------------------------------------------------------------------------
+# Finding 1 (CRITICAL): the runtime must be resolved LIVE, in lockstep with the fail-closed gate —
+# never frozen at Engine construction. Reproduces the exact boot sequence from the review: sandbox
+# ON, runtime unavailable at boot -> becomes available mid-process (podman comes up late).
+# ---------------------------------------------------------------------------------------------
+class _CaptureModel:
+    """A model client stub that ends the turn immediately with no tool calls, so run_task's
+    per-run registry-build block (where the sandbox wiring lives) executes for real without a
+    network call or a real model."""
+
+    async def chat(self, messages, tools=None, max_tokens=None, temperature=None,
+                   think=None, reasoning=None):
+        from engine.protocol import ModelResponse
+        return ModelResponse(content="ok", finish_reason="stop")
+
+
+def _wire_capture_model(eng):
+    eng._model_client = lambda: _CaptureModel()
+
+
+async def test_runtime_is_resolved_live_not_frozen_at_construction():
+    """Boot with the container unavailable -> code_interp.runtime stays None and exec_python is not
+    registered. The runtime then becomes available (simulating podman starting up after Argus) ->
+    the VERY NEXT turn must pick that up and route execution through the container. Before the fix,
+    `self.code_interp.runtime` was frozen at Engine.__init__ time (based on a one-time availability
+    check), so this second turn would have run model code through the soft AST sandbox despite the
+    owner's sandbox switch being on — the exact silent weaker-isolation the fail-closed design exists
+    to prevent."""
+    eng = _engine(enable_sandbox=True, enable_code_interpreter=True,
+                 sandbox_runtime="definitely-not-a-real-binary")
+    _wire_capture_model(eng)
+
+    # Boot state: the binary genuinely doesn't exist, so this is a real (not simulated) unavailable
+    # reading — matching "podman is down / socket not ready yet" at process start.
+    await eng.run_task("s1", "hello")
+    assert "exec_python" not in eng.tools_overview_names()
+    assert eng.code_interp.runtime is None, \
+        "unavailable at boot: nothing should be wired for execution"
+
+    # Podman "comes up" mid-process. Flip only the live availability check (never a real binary is
+    # exercised here per the task's constraints) and drive a second turn.
+    eng.sandbox.available = lambda: True
+    await eng.run_task("s1", "hello")
+
+    assert "exec_python" in eng.tools_overview_names(), \
+        "the gate must reflect the NEW live availability, not the boot-time reading"
+    # The critical assertion: exec_python must now execute through the container runtime, never
+    # silently through the soft AST sandbox just because that's what was frozen in at construction.
+    assert eng.code_interp.runtime is eng.sandbox, \
+        "runtime must be resolved live, in lockstep with the gate — never frozen at construction"
+
+
+async def test_runtime_cleared_again_if_the_container_goes_back_down():
+    """Symmetric case: available at boot, then the container disappears mid-process. The next turn
+    must fail closed again — not keep executing through a runtime reference that is no longer live."""
+    eng = _engine(enable_sandbox=True, enable_code_interpreter=True,
+                 sandbox_runtime="definitely-not-a-real-binary")
+    _wire_capture_model(eng)
+    eng.sandbox.available = lambda: True
+
+    await eng.run_task("s1", "hello")
+    assert eng.code_interp.runtime is eng.sandbox
+
+    eng.sandbox.available = lambda: False
+    await eng.run_task("s1", "hello")
+    assert "exec_python" not in eng.tools_overview_names()
+
+
+# ---------------------------------------------------------------------------------------------
+# Finding 3 (IMPORTANT): the description the model sees must be accurate for whichever mode is
+# actually in effect, and tools_overview() must never drift from what the live tool advertises.
+# ---------------------------------------------------------------------------------------------
+async def test_exec_python_description_is_accurate_and_matches_tools_overview_in_soft_mode():
+    from engine.tools.code_interpreter import ExecPythonTool
+
+    eng = _engine(enable_sandbox=False, enable_code_interpreter=True)
+    _wire_capture_model(eng)
+    await eng.run_task("s1", "hello")
+
+    tool = ExecPythonTool(eng.code_interp, "s1")
+    assert "persist" in tool.description.lower()
+    assert "stateless" not in tool.description.lower()
+
+    overview_desc = next(t["description"] for t in eng.tools_overview()["conditional_enabled"]
+                         if t["name"] == "exec_python")
+    assert overview_desc == tool.description
+
+
+async def test_exec_python_description_is_accurate_and_matches_tools_overview_in_container_mode():
+    from engine.tools.code_interpreter import ExecPythonTool
+
+    eng = _engine(enable_sandbox=True, enable_code_interpreter=True,
+                 sandbox_runtime="definitely-not-a-real-binary")
+    _wire_capture_model(eng)
+    eng.sandbox.available = lambda: True
+    await eng.run_task("s1", "hello")
+
+    tool = ExecPythonTool(eng.code_interp, "s1")
+    assert "stateless" in tool.description.lower()
+    assert "do not persist" in tool.description.lower() or "not persist" in tool.description.lower()
+    # must not make the SOFT sandbox's persistence promise while running in container mode
+    assert "variables persist between calls" not in tool.description.lower()
+
+    overview_desc = next(t["description"] for t in eng.tools_overview()["conditional_enabled"]
+                         if t["name"] == "exec_python")
+    assert overview_desc == tool.description
+
+
+# ---------------------------------------------------------------------------------------------
+# Finding 4 (IMPORTANT): sandbox_exec_timeout must be the timeout actually used on the container
+# path, independent of code_interpreter_timeout (the soft-sandbox path's timeout).
+# ---------------------------------------------------------------------------------------------
+def test_sandbox_exec_timeout_flows_to_the_container_path_not_code_interpreter_timeout():
+    eng = _engine(enable_sandbox=True, code_interpreter_timeout=10.0, sandbox_exec_timeout=45.0,
+                 sandbox_runtime="definitely-not-a-real-binary")
+    assert eng.code_interp.timeout == 10.0
+    assert eng.code_interp.container_timeout == 45.0
+
+
+async def test_run_sandboxed_uses_container_timeout_for_the_runtime_exec_call():
+    from engine.tools.code_interpreter import CodeInterpreter
+
+    fake = FakeRuntime(result=ExecResult(0, "hi\n", ""))
+    captured = {}
+    real_exec = fake.exec
+
+    def spy_exec(name, argv, *, stdin="", timeout=120.0, run_id=""):
+        captured["timeout"] = timeout
+        return real_exec(name, argv, stdin=stdin, timeout=timeout, run_id=run_id)
+
+    fake.exec = spy_exec
+    interp = CodeInterpreter(timeout=10.0, runtime=fake, workspace="default",
+                             container_timeout=45.0)
+    await interp.run("sess", "print(1)")
+    assert captured["timeout"] == 45.0
+
+
+# ---------------------------------------------------------------------------------------------
+# Finding 5 (IMPORTANT): sandbox_idle_minutes must actually do something — wired into the runtime,
+# swept opportunistically from exec(), and reaped cross-process at startup.
+# ---------------------------------------------------------------------------------------------
+def test_sandbox_idle_minutes_flows_to_the_runtime():
+    eng = _engine(enable_sandbox=True, sandbox_idle_minutes=5,
+                 sandbox_runtime="definitely-not-a-real-binary")
+    assert eng.sandbox.idle_minutes == 5
+
+
+def test_engine_startup_reaps_leftover_containers(monkeypatch, tmp_path):
+    """The no-op stop_idle() call at Engine.__init__ (always a no-op: _last_exec is empty at
+    construction) is replaced by a real cross-process reaper: stop whatever `podman ps` reports as
+    still running under our naming prefix, since stage-1 containers are stateless and safe to stop."""
+    stopped = []
+
+    class _StubRuntime:
+        def __init__(self, **kw):
+            pass
+
+        def available(self):
+            return True
+
+        def status(self):
+            return {"runtime": "stub", "available": True,
+                    "workspaces": ["default", "orphan"]}
+
+        def stop(self, name):
+            stopped.append(name)
+
+        def stop_idle(self, idle_seconds):
+            return []
+
+        def ensure_workspace(self, name):
+            pass
+
+        def exec(self, *a, **kw):
+            raise NotImplementedError
+
+    import engine.sandbox.podman as podman_mod
+    monkeypatch.setattr(podman_mod, "PodmanRuntime", _StubRuntime)
+
+    _engine(enable_sandbox=True)   # constructs with data_dir=tempfile.mkdtemp(), triggers __init__
+    assert sorted(stopped) == ["default", "orphan"]
+
+
+def test_engine_startup_reap_is_skipped_when_the_runtime_is_unavailable():
+    """No podman here -> nothing to reap, and status()/stop() must not be called in a way that
+    raises (status() on a missing binary reports available=False with an empty workspace list)."""
+    eng = _engine(enable_sandbox=True, sandbox_runtime="definitely-not-a-real-binary")
+    assert eng.sandbox is not None   # construction itself must not have raised

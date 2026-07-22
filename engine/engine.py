@@ -363,7 +363,8 @@ class Engine:
             self.sandbox = PodmanRuntime(
                 binary=config.sandbox_runtime,
                 image=config.sandbox_image,
-                workspaces_root=str(root / "workspaces"))
+                workspaces_root=str(root / "workspaces"),
+                idle_minutes=config.sandbox_idle_minutes)
         self.events = EventBus()
         self.store = SessionStore(str(root / "sessions.db"))
         self.registry = build_base_registry(config, self._data_dir)
@@ -466,18 +467,26 @@ class Engine:
             # NL->SQL front door: writes and runs the SQL for you, grounded in the live schema, with
             # error-driven self-repair. Uses the aux (utility/chat) model to generate the query.
             self.registry.register(AskDataTool(self.tables, self._aux_model_client))
-        # Code interpreter (exec_python): sandboxed REPL for one-off computation. The manager holds
-        # per-session namespaces so variables persist across turns; it's cheap, so build it always
-        # and gate only the tool REGISTRATION on the live enable_code_interpreter flag (in run_task),
-        # which makes the feature toggleable via PATCH /config without a restart. Same soft sandbox as
-        # create_tool.
+        # Code interpreter (exec_python): REPL for one-off computation. The manager holds per-session
+        # namespaces so variables persist across turns in the soft-sandbox path; it's cheap, so build
+        # it always and gate only the tool REGISTRATION on the live enable_code_interpreter flag (in
+        # run_task), which makes the feature toggleable via PATCH /config without a restart.
+        #
+        # `runtime` starts at None here and is NOT resolved from `self.sandbox.available()` at
+        # construction time: availability can change after boot (podman comes up after Argus does),
+        # and freezing it here would decouple the value used for EXECUTION from the value
+        # `_exec_python_ok()` uses for the fail-closed GATE, which is evaluated live on every turn.
+        # If those two diverge, a turn can pass the gate (sandbox now available) while still running
+        # through the old, frozen None — i.e. through the weaker in-process AST sandbox, silently.
+        # run_task resolves `self.code_interp.runtime` fresh, from the same `enable_sandbox` flag, in
+        # the same breath as the gate check, immediately before registering ExecPythonTool.
         from engine.tools.code_interpreter import CodeInterpreter
         self.code_interp = CodeInterpreter(
             allow_network=config.code_interpreter_allow_network,
             timeout=config.code_interpreter_timeout,
-            runtime=self.sandbox if (config.enable_sandbox and self.sandbox
-                                     and self.sandbox.available()) else None,
-            workspace=config.sandbox_workspace)
+            runtime=None,
+            workspace=config.sandbox_workspace,
+            container_timeout=config.sandbox_exec_timeout)
         if config.enable_soul_editing:                    # the agent can revise its OWN persona
             from engine.tools.soul import ReadSoulTool, UpdateSoulTool
             self.registry.register(ReadSoulTool(self.get_soul))
@@ -537,13 +546,21 @@ class Engine:
                 # process from booting — worse than dropping one turn's trace.
                 log.exception("startup trace prune failed; continuing without pruning")
 
-        # Sandbox idle sweep: stop containers that have had no exec for a while, so an operator who
-        # enabled the sandbox doesn't accumulate one running container per workspace forever.
+        # Startup reap: stop any argus-ws-* containers left running from a previous process (crash,
+        # deploy, kill -9 — anything that skips graceful shutdown). This is the CROSS-PROCESS half of
+        # idle cleanup; the in-process half (_maybe_stop_idle) only fires from inside exec(), so a
+        # workspace that is never touched again after this process exits would otherwise run forever.
+        # Safe because stage-1 containers are stateless — the bind-mounted workspace dir holds the
+        # actual state, and ensure_workspace() recreates the container on demand — so stopping one
+        # that happens to still be alive loses nothing.
         if config.enable_sandbox and self.sandbox is not None:
             try:
-                self.sandbox.stop_idle(config.sandbox_idle_minutes * 60)
+                st = self.sandbox.status()
+                if st.get("available"):
+                    for ws in st.get("workspaces", []):
+                        self.sandbox.stop(ws)
             except Exception:
-                log.exception("sandbox idle sweep failed")
+                log.exception("startup sandbox container reap failed")
 
     def _owner_session_id(self) -> str:
         """The owner's primary Telegram chat id — the delivery identity for scheduled routines that
@@ -1293,8 +1310,14 @@ class Engine:
             # Fail closed: if the owner asked for the sandbox and it is not usable, exec_python is
             # NOT registered. Falling back to the in-process AST sandbox would silently give them
             # less isolation than they asked for.
+            #
+            # The runtime that will actually EXECUTE code is resolved right here, from the exact same
+            # `enable_sandbox` flag the gate above just checked, in the same breath — never earlier
+            # (e.g. at Engine construction), so the two can never disagree. See ExecPythonTool.__init__
+            # for how the tool's own description is derived from this same `self.code_interp.runtime`.
             if c.enable_code_interpreter and self._exec_python_ok():
                 from engine.tools.code_interpreter import ExecPythonTool
+                self.code_interp.runtime = self.sandbox if c.enable_sandbox else None
                 run_registry.register(ExecPythonTool(self.code_interp, session_id))
             if tool_creation_on:
                 from engine.experimental.tool_creation import (
@@ -1958,10 +1981,13 @@ class Engine:
             ("run_routine", "Run a saved routine."),
             ("list_routines", "List saved routines."),
         )
-        conditional += group(
-            c.enable_code_interpreter and self._exec_python_ok(),
-            ("exec_python", "Run Python in a sandboxed, session-persistent REPL."),
-        )
+        if c.enable_code_interpreter and self._exec_python_ok():
+            # Same description the tool itself would advertise this turn (exec_python_description()
+            # keyed on the same `enable_sandbox` flag ExecPythonTool.__init__ uses) — kept as one
+            # function so this dashboard-facing list and the live tool schema can't drift apart.
+            from engine.tools.code_interpreter import exec_python_description
+            conditional.append({"name": "exec_python",
+                                "description": exec_python_description(sandboxed=c.enable_sandbox)})
         return {
             "builtin": [{"name": t.name, "description": t.description} for t in self.registry.list()],
             "created": [{"name": t.name, "description": t.description} for t in self._created_tools],

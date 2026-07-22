@@ -6,6 +6,7 @@ without needing a container runtime. The end-to-end tests are marked `podman` an
 binary is absent, which is the case in CI.
 """
 import shutil
+import time
 
 import pytest
 
@@ -68,6 +69,92 @@ def test_stop_on_missing_binary_does_not_raise(tmp_path):
     stop_idle() on a timer where an exception would be noise."""
     rt = PodmanRuntime(binary="definitely-not-a-real-binary", workspaces_root=str(tmp_path))
     rt.stop("default")  # must not raise
+
+
+# ---------------------------------------------------------------------------------------------
+# Finding 2 (IMPORTANT): available() is on a hot per-turn path (plus /library, /tools). A short TTL
+# cache must stop it from shelling out to `podman info` on every single call.
+# ---------------------------------------------------------------------------------------------
+def test_available_result_is_cached_within_the_ttl(tmp_path, monkeypatch):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    monkeypatch.setattr("engine.sandbox.podman.shutil.which", lambda b: "/usr/bin/podman")
+    calls = []
+
+    def fake_run(argv, *, stdin="", timeout=30.0):
+        calls.append(argv)
+        return ExecResult(0, "", "")
+
+    rt._run = fake_run
+    assert rt.available() is True
+    assert rt.available() is True
+    assert rt.available() is True
+    assert len(calls) == 1, "a fresh reading within the TTL must not re-shell out to `podman info`"
+
+
+def test_available_cache_expires_after_the_ttl(tmp_path, monkeypatch):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    monkeypatch.setattr("engine.sandbox.podman.shutil.which", lambda b: "/usr/bin/podman")
+    calls = []
+
+    def fake_run(argv, *, stdin="", timeout=30.0):
+        calls.append(argv)
+        return ExecResult(0, "", "")
+
+    rt._run = fake_run
+    assert rt.available() is True
+    assert len(calls) == 1
+    # Make the cached entry look stale without sleeping in the test.
+    ts, val = rt._avail_cache
+    rt._avail_cache = (ts - 999, val)
+    assert rt.available() is True
+    assert len(calls) == 2, "an expired cache entry must trigger a fresh check"
+
+
+def test_available_caches_the_unavailable_outcome_too(tmp_path):
+    """Both outcomes are cached, not just success — a missing binary is the cheap path already
+    (shutil.which, no subprocess), but the cache must not special-case it."""
+    rt = PodmanRuntime(binary="definitely-not-a-real-binary", workspaces_root=str(tmp_path))
+    assert rt.available() is False
+    assert rt._avail_cache is not None and rt._avail_cache[1] is False
+    assert rt.available() is False
+
+
+# ---------------------------------------------------------------------------------------------
+# Finding 5 (IMPORTANT): the idle sweep must actually fire — from inside exec(), after the calling
+# workspace's own timestamp is bumped, so it can never reap itself.
+# ---------------------------------------------------------------------------------------------
+def test_exec_sweeps_idle_workspaces_but_never_the_one_it_just_used(tmp_path):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path), idle_minutes=1)
+    rt._sweep_interval_s = 0   # sweep on every exec() call for the test
+
+    responses = {"inspect": ExecResult(0, "running\n", ""),
+                "exec": ExecResult(0, "42\n", ""),
+                "stop": ExecResult(0, "", "")}
+    seen = []
+
+    def fake_run(argv, *, stdin="", timeout=30.0):
+        seen.append(argv[1])
+        return responses[argv[1]]
+
+    rt._run = fake_run
+    rt._last_exec["stale"] = time.time() - 999   # idle well past the 1-minute threshold
+
+    rt.exec("default", ["python", "-c", "1"])
+
+    assert "default" in rt._last_exec, "the workspace this call just used must survive its own sweep"
+    assert "stale" not in rt._last_exec, "an idle workspace must actually get reaped"
+    assert "stop" in seen
+
+
+def test_exec_does_not_sweep_before_the_sweep_interval_elapses(tmp_path):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path), idle_minutes=1, sweep_interval_s=3600)
+    responses = {"inspect": ExecResult(0, "running\n", ""), "exec": ExecResult(0, "", "")}
+    rt._run = lambda argv, *, stdin="", timeout=30.0: responses[argv[1]]
+    rt._last_exec["stale"] = time.time() - 999
+
+    rt.exec("default", ["python", "-c", "1"])
+
+    assert "stale" in rt._last_exec, "the sweep interval hasn't elapsed yet — nothing should fire"
 
 
 def _script_run(responses):

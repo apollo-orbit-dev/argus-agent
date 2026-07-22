@@ -15,11 +15,22 @@ from engine.sandbox.runtime import ExecResult, SandboxUnavailable, validate_work
 
 _NAME_PREFIX = "argus-ws-"
 
+# available() is called on the hot per-turn path (Engine.run_task's fail-closed gate) plus every
+# /library and Telegram /tools hit, and each uncached call is a `podman info` subprocess (up to 15s
+# on a slow/loaded host). A few seconds of staleness is a fine trade against blocking the event loop
+# on every single turn; it only needs to stop per-turn hammering, not track podman in real time. A
+# stale reading here only ever feeds ONE decision within a given call to run_task (the gate reads it
+# once; the runtime actually wired into CodeInterpreter is derived from the `enable_sandbox` flag,
+# not from a second, possibly-differently-stale call to available()) — so caching cannot reintroduce
+# the split-brain that finding 1's fix eliminated.
+_AVAILABILITY_TTL_S = 5.0
+
 
 class PodmanRuntime:
     def __init__(self, binary: str = "podman", image: str = "argus-sandbox:local",
                  workspaces_root: str = "data/workspaces", memory: str = "2g",
-                 pids_limit: int = 256, cpus: str = "2"):
+                 pids_limit: int = 256, cpus: str = "2", idle_minutes: int = 30,
+                 sweep_interval_s: float = 60.0):
         self.binary = binary
         self.image = image
         self.workspaces_root = os.path.abspath(workspaces_root)
@@ -27,6 +38,12 @@ class PodmanRuntime:
         self.pids_limit = pids_limit
         self.cpus = cpus
         self._last_exec: dict[str, float] = {}
+        self._avail_cache: "tuple[float, bool] | None" = None
+        # Idle sweep (see _maybe_stop_idle): no background task, just an opportunistic check on
+        # every exec() — same shape as TraceStore._maybe_prune (engine/trace/store.py).
+        self.idle_minutes = idle_minutes
+        self._sweep_interval_s = sweep_interval_s
+        self._last_sweep = time.time()   # avoid a cold-start sweep before any workspace has run
 
     # ---------------- naming & paths ----------------
 
@@ -68,6 +85,14 @@ class PodmanRuntime:
     # ---------------- SandboxRuntime ----------------
 
     def available(self) -> bool:
+        now = time.time()
+        if self._avail_cache is not None and now - self._avail_cache[0] < _AVAILABILITY_TTL_S:
+            return self._avail_cache[1]
+        val = self._available_uncached()
+        self._avail_cache = (now, val)
+        return val
+
+    def _available_uncached(self) -> bool:
         if not shutil.which(self.binary):
             return False
         try:
@@ -123,12 +148,17 @@ class PodmanRuntime:
              timeout: float = 120.0, run_id: str = "") -> ExecResult:
         self.ensure_workspace(name)
         self._last_exec[name] = time.time()
-        return self._run([self.binary, "exec", "-i", self.container_name(name), *argv],
-                         stdin=stdin, timeout=timeout)
+        result = self._run([self.binary, "exec", "-i", self.container_name(name), *argv],
+                           stdin=stdin, timeout=timeout)
+        # After _last_exec[name] is updated, never before — so the workspace this very call just
+        # used can never be the one the sweep reaps.
+        self._maybe_stop_idle()
+        return result
 
     def stop(self, name: str) -> None:
-        """Stopping a container on a runtime that is gone is a no-op, not an error: the engine
-        calls stop_idle() on a timer, where an exception would just be noise."""
+        """Stopping a container on a runtime that is gone is a no-op, not an error: the opportunistic
+        idle sweep (_maybe_stop_idle) calls this from inside exec(), where an exception would just be
+        noise."""
         try:
             self._run([self.binary, "stop", "-t", "2", self.container_name(name)], timeout=30)
         except SandboxUnavailable:
@@ -136,7 +166,8 @@ class PodmanRuntime:
         self._last_exec.pop(name, None)
 
     def stop_idle(self, idle_seconds: float) -> list[str]:
-        """Stop workspaces with no exec for `idle_seconds`. Called by the engine's periodic sweep."""
+        """Stop workspaces with no exec for `idle_seconds`. Called opportunistically by
+        _maybe_stop_idle(); also safe to call directly (e.g. from a dashboard action)."""
         now = time.time()
         stopped = []
         for name, last in list(self._last_exec.items()):
@@ -147,3 +178,23 @@ class PodmanRuntime:
                 self.stop(name)
                 stopped.append(name)
         return stopped
+
+    def _maybe_stop_idle(self) -> None:
+        """Opportunistic idle sweep, same shape as TraceStore._maybe_prune (engine/trace/store.py):
+        no background task, just a check tacked onto a call that was going to happen anyway. Must
+        be called from the END of exec(), after _last_exec[name] is bumped, so a workspace cannot
+        reap itself on the very call that just used it.
+
+        HONEST LIMITATION: this is the only trigger. If the model calls exec_python once and never
+        again, nothing runs the sweep until either another exec() happens (any workspace, since this
+        method lives on the shared runtime, not per-workspace) or the process restarts — there is no
+        timer. Engine.__init__ stopping leftover argus-ws-* containers at startup is the cross-process
+        backstop for exactly that case."""
+        now = time.time()
+        if now - self._last_sweep < self._sweep_interval_s:
+            return
+        self._last_sweep = now
+        try:
+            self.stop_idle(self.idle_minutes * 60)
+        except Exception:
+            pass   # the sweep must never break the exec() call it rode in on
