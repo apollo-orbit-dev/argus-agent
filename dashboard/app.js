@@ -1309,6 +1309,24 @@
   function optTags(list, sel){
     return (list||[]).map(function(x){ return '<option' + (x === sel ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('');
   }
+  // The argument contract for a tool, plus a one-click skeleton for the args box. `tool_params`
+  // may be absent (older backend) — degrade to silence rather than to a broken step card.
+  function rbArgsHintHtml(toolName){
+    var specs = (rbMeta.tool_params || {})[toolName];
+    if (!specs) return '';
+    if (!specs.length) return '<span class="rb-hint-none">takes no arguments — leave this blank</span>';
+    var skeleton = {};
+    specs.forEach(function(p){ if (p.required) skeleton[p.name] = ''; });
+    var rows = specs.map(function(p){
+      return '<div class="rb-hint-row"><code>' + esc(p.name) + '</code>' +
+        '<span class="rb-hint-type">' + esc(p.type) + (p.required ? ', required' : ', optional') + '</span>' +
+        (p.description ? '<span class="rb-hint-desc">' + esc(p.description) + '</span>' : '') + '</div>';
+    }).join('');
+    var fill = Object.keys(skeleton).length ? JSON.stringify(skeleton) : '{}';
+    return rows + '<button type="button" class="rb-hint-fill" data-fill=\'' + esc(fill) +
+           '\'>insert template</button>';
+  }
+
   function rbStepCard(s, i){
     var isTool = s.type === 'tool';
     var card = document.createElement('div');
@@ -1322,13 +1340,25 @@
       (isTool
         ? '<div class="rb-row"><select class="rb-tool">' + optTags(rbMeta.tools, s.tool) + '</select>' +
           '<label class="rb-opt"><input type="checkbox" class="rb-optional"> optional (continue on error)</label></div>' +
-          '<input class="rb-args" placeholder=\'args as JSON, e.g. {"location": "Atlanta, GA"}\'>'
+          '<input class="rb-args" placeholder=\'args as JSON, e.g. {"location": "Atlanta, GA"}\'>' +
+          '<div class="rb-args-hint"></div>'
         : '<textarea class="rb-prompt" placeholder="prompt — reference earlier steps with {{step_id}}"></textarea>' +
           '<div class="rb-row"><span class="rb-opt">skill</span><select class="rb-skill"><option value=""></option>' + optTags(rbMeta.skills, s.skill) + '</select></div>');
     card.querySelector('.rb-id').value = s.id || '';
     if (isTool){
       card.querySelector('.rb-args').value = (s.args && Object.keys(s.args).length) ? JSON.stringify(s.args) : '';
       card.querySelector('.rb-optional').checked = !!s.optional;
+      // A tool step's args are hand-typed JSON, so the step has to state the tool's contract —
+      // otherwise the only way to learn a tool's arguments is to go read its source.
+      var sel = card.querySelector('.rb-tool'), hint = card.querySelector('.rb-args-hint');
+      var paint = function(){ hint.innerHTML = rbArgsHintHtml(sel.value); };
+      sel.addEventListener('change', paint);
+      hint.addEventListener('click', function(e){
+        var b = e.target.closest('[data-fill]');
+        if (!b) return;
+        card.querySelector('.rb-args').value = b.getAttribute('data-fill');
+      });
+      paint();
     } else {
       card.querySelector('.rb-prompt').value = s.prompt || '';
     }
@@ -1957,7 +1987,10 @@
     var isTool = !withTools;   // convention: tool call sites pass withTools=false, skill call sites pass true
     return arr.map(function(o){
       return '<div class="list-item"><div class="list-main"><div class="list-title">' + esc(o.name) +
-        (o.description ? '<div class="list-sub" style="font-family:var(--font-body); color:var(--muted); white-space:normal;">' + esc(truncate(o.description,140)) + '</div>' : '') +
+        // Full description, not truncated: the row already wraps (white-space:normal), and a tool's
+        // description IS its documentation here — clipping it at 140 chars hid the half that says
+        // when to use the tool and what its arguments mean.
+        (o.description ? '<div class="list-sub" style="font-family:var(--font-body); color:var(--muted); white-space:normal;">' + esc(o.description) + '</div>' : '') +
         (withTools && Array.isArray(o.tools) && o.tools.length ? '<div class="list-sub">tools: ' + esc(o.tools.join(', ')) + '</div>' : '') +
         '</div></div>' +   // close .list-title AND .list-main
         (isTool ? permSelectHtml(o.name, permMap) : '') +

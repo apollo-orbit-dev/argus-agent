@@ -705,6 +705,19 @@
   .rb-prompt{ min-height:56px; font-family:var(--font-body); line-height:1.45; }
   .rb-tool, .rb-skill{ min-width:150px; width:auto; }
   .rb-opt{ font-size:11.5px; color:var(--muted); display:flex; align-items:center; gap:4px; }
+  /* A tool step's args are hand-typed JSON — this is where the tool states its contract. */
+  .rb-args-hint{ margin-top:6px; display:flex; flex-direction:column; gap:3px; }
+  .rb-hint-row{ display:flex; align-items:baseline; gap:7px; flex-wrap:wrap; font-size:11px; line-height:1.45; }
+  .rb-hint-row code{ font-family:var(--font-mono); font-size:11px; color:var(--cyan); }
+  .rb-hint-type{ font-family:var(--font-mono); font-size:10px; color:var(--faint); }
+  .rb-hint-desc{ color:var(--muted); flex:1 1 220px; min-width:0; }
+  .rb-hint-none{ font-size:11px; color:var(--faint); font-style:italic; }
+  .rb-hint-fill{
+    align-self:flex-start; margin-top:3px; padding:2px 8px; font-size:10.5px;
+    font-family:var(--font-mono); color:var(--muted); background:transparent;
+    border:1px solid var(--border-strong); border-radius:6px; cursor:pointer;
+  }
+  .rb-hint-fill:hover{ color:var(--cyan); border-color:var(--cyan); }
   .saved-ok{ font-size:11.5px; color:var(--ok); font-weight:600; opacity:0; transition:opacity .2s; margin-left:8px; }
   .saved-ok.show{ opacity:1; }
   .small-btn-row{ display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:center; }

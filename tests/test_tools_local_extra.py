@@ -165,3 +165,54 @@ def test_text_unknown_action_error():
     out = _run(t, action="explode", text="x")
     assert "error" in out.lower()
     assert "unknown action" in out.lower()
+
+
+def test_routine_meta_carries_each_tool_argument_contract():
+    """The routine builder types tool-step args as raw JSON, so the contract has to come from the
+    backend — without it the only way to learn a tool's arguments is to read its source."""
+    import tempfile
+
+    from config import Config
+    from engine.engine import Engine
+
+    m = Engine(Config(), data_dir=tempfile.mkdtemp()).routine_meta()
+    assert sorted(m["tool_params"]) == sorted(m["tools"]), "every offered tool needs a contract"
+
+    loc = {p["name"]: p for p in m["tool_params"]["geocode"]}["location"]
+    assert loc["type"] == "string" and loc["required"] is True and loc["description"]
+
+    # a tool with no arguments must render as an empty list, not be missing
+    assert m["tool_params"]["list_tables"] == []
+
+
+def test_tool_param_specs_survives_a_tool_without_a_params_model():
+    """Created tools can carry no Params model at all; a missing contract must read as 'no
+    arguments' rather than crash the builder."""
+    from engine.engine import _tool_param_specs
+
+    class Bare:
+        name = "bare"
+        Params = None
+
+    assert _tool_param_specs(Bare()) == []
+
+
+def test_tool_param_specs_renders_optional_fields():
+    """pydantic renders Optional[x] as anyOf rather than a plain type; the builder must still show
+    a usable type instead of falling back to 'any'."""
+    from typing import Optional
+
+    from pydantic import BaseModel, Field
+
+    from engine.engine import _tool_param_specs
+
+    class T:
+        name = "t"
+
+        class Params(BaseModel):
+            a: str = Field(..., description="required one")
+            b: Optional[int] = Field(None, description="optional one")
+
+    specs = {p["name"]: p for p in _tool_param_specs(T())}
+    assert specs["a"]["required"] is True and specs["a"]["type"] == "string"
+    assert specs["b"]["required"] is False and specs["b"]["type"] == "integer"

@@ -253,6 +253,30 @@ SKILL_CREATION_DIRECTIVE = (
 GATED_BUILTIN_NAMES = {"web_search", "fetch_page", "map_site", "crawl_site", "extract_data"}
 
 
+def _tool_param_specs(tool) -> list[dict]:
+    """A tool's argument contract, flattened for the dashboard: [{name, type, required, description}].
+
+    Created tools may carry no Params model at all, and pydantic renders Optional[x] as an `anyOf`
+    rather than a `type`, so both cases are handled — a missing contract must render as "no
+    arguments", never as a crash in the routine builder."""
+    params = getattr(tool, "Params", None)
+    if params is None or not hasattr(params, "model_json_schema"):
+        return []
+    try:
+        schema = params.model_json_schema()
+    except Exception:                       # a hand-built model can fail to render; not fatal here
+        return []
+    required = set(schema.get("required") or [])
+    out = []
+    for pname, info in (schema.get("properties") or {}).items():
+        ptype = info.get("type")
+        if not ptype and isinstance(info.get("anyOf"), list):   # Optional[x] -> anyOf [x, null]
+            ptype = "|".join(a.get("type") for a in info["anyOf"] if a.get("type") != "null") or None
+        out.append({"name": pname, "type": ptype or "any", "required": pname in required,
+                    "description": info.get("description") or ""})
+    return out
+
+
 def build_base_registry(config: Config, data_dir: Path) -> ToolRegistry:
     reg = ToolRegistry()
     # core
@@ -1972,9 +1996,16 @@ class Engine:
 
     def routine_meta(self) -> dict:
         """The building blocks the dashboard's routine builder offers: the tools a routine can call
-        (the same set routine tool-steps resolve against), skills a model step can activate, channels."""
+        (the same set routine tool-steps resolve against), skills a model step can activate, channels.
+
+        `tool_params` carries each tool's argument contract, because a tool-step's args are typed by
+        hand as JSON — without it the builder offers a tool dropdown and a blank box, and the only
+        way to learn a tool's arguments is to read the source. `tools` stays a plain name list so
+        existing callers (and the dropdown) are unaffected."""
+        reg = self._routine_registry("__dash__")
         return {
-            "tools": sorted(self._routine_registry("__dash__").names()),
+            "tools": sorted(reg.names()),
+            "tool_params": {t.name: _tool_param_specs(t) for t in reg.list()},
             "skills": sorted(s.name for s in self.skill_registry.list()),
             "channels": ["telegram", "email", "push", "none"],
         }
