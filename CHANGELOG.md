@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented here.
 
+## 0.8.3
+
+### Fixed
+- **`geocode` now returns JSON**, so created tools can actually use it. Its output has two readers —
+  the model reading a tool result, and created-tool code calling `geocode()` through tool
+  composition — and only structured output serves both. With the prose format shipped in 0.8.2,
+  `json.loads(geocode({...}))` raised inside a created tool, the tool fell into its `except` branch
+  and reported "Could not find location", and the model concluded composition was impossible and
+  hardcoded a latitude into the tool source — the exact value `geocode` had just returned. Errors
+  are JSON too, since composed code calls `json.loads` unconditionally.
+- **The tool-creation directive now documents tool composition.** Every registered tool name is
+  injected as a plain callable into created-tool globals at call time, and the AST validator has
+  dedicated handling for those calls — but nothing ever told the model the capability existed. Added
+  a `COMPOSE` section with a worked `geocode` example, plus an explicit rule against hardcoding a
+  value obtained from a tool call ("that tool works for every input, and your hardcoded copy works
+  for exactly one").
+- **`geocode` added to the directive's list of built-ins** — it was missing, so the model would have
+  classified it as a *created* tool it could delete on request.
+
 ## 0.8.2
 
 ### Added
