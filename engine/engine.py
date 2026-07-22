@@ -274,6 +274,9 @@ def build_base_registry(config: Config, data_dir: Path) -> ToolRegistry:
     # keyless public-API tools
     t = config.request_timeout
     reg.register(WeatherTool(timeout=t))
+    from engine.tools.geocode import GeocodeTool
+    reg.register(GeocodeTool(timeout=t))   # weather/time use the helper internally; this exposes
+                                           # it as a step, so created tools needn't re-implement it
     reg.register(WikipediaTool(timeout=t))
     reg.register(DictionaryTool(timeout=t))
     reg.register(CurrencyConvertTool(timeout=t))

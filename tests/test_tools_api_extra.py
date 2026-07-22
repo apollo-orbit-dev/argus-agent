@@ -6,6 +6,7 @@ from engine.tools.wikipedia import WikipediaTool
 from engine.tools.dictionary import DictionaryTool
 from engine.tools.currency_convert import CurrencyConvertTool
 from engine.tools.crypto_price import CryptoPriceTool
+from engine.tools.geocode import GeocodeTool
 
 
 @pytest.fixture(autouse=True)
@@ -178,3 +179,47 @@ async def test_crypto_price_http_error():
         lambda req: httpx.Response(429, text="rate limited"))
     out = await CryptoPriceTool().run(CryptoPriceTool.Params(coin="bitcoin"))
     assert "error" in out.lower() and "429" in out
+
+
+# ---- geocode ----
+
+async def test_geocode_returns_labelled_coordinates():
+    """Output is key=value, not prose: it normally feeds another computation, and a small model
+    extracts labelled numbers far more reliably than it parses a sentence."""
+    patch_asyncclient.transport = httpx.MockTransport(
+        lambda req: httpx.Response(200, json={"results": [
+            {"name": "Nashville", "admin1": "Tennessee", "country": "United States",
+             "latitude": 36.16589, "longitude": -86.78444, "timezone": "America/Chicago"}]}))
+    out = await GeocodeTool().run(GeocodeTool.Params(location="Nashville"))
+    assert "latitude=36.16589" in out and "longitude=-86.78444" in out
+    assert "timezone=America/Chicago" in out
+    assert "Nashville, Tennessee, United States" in out
+
+
+async def test_geocode_uses_the_state_hint_to_disambiguate():
+    """The reason this is a built-in rather than something each created tool re-implements:
+    'Springfield, IL' must pick Illinois, not the first Springfield the API returns."""
+    patch_asyncclient.transport = httpx.MockTransport(
+        lambda req: httpx.Response(200, json={"results": [
+            {"name": "Springfield", "admin1": "Massachusetts", "country": "United States",
+             "latitude": 42.10, "longitude": -72.58, "timezone": "America/New_York"},
+            {"name": "Springfield", "admin1": "Illinois", "country": "United States",
+             "latitude": 39.80, "longitude": -89.64, "timezone": "America/Chicago"}]}))
+    out = await GeocodeTool().run(GeocodeTool.Params(location="Springfield, IL"))
+    assert "Illinois" in out and "latitude=39.8" in out
+
+
+async def test_geocode_location_not_found():
+    patch_asyncclient.transport = httpx.MockTransport(
+        lambda req: httpx.Response(200, json={}))
+    out = await GeocodeTool().run(GeocodeTool.Params(location="Zzxqville"))
+    assert "not found" in out.lower()
+
+
+async def test_geocode_http_error_is_reported_not_swallowed():
+    """A 503 must not read as 'no such place' — that would send the model off correcting a
+    spelling that was never wrong."""
+    patch_asyncclient.transport = httpx.MockTransport(
+        lambda req: httpx.Response(503, text="down"))
+    out = await GeocodeTool().run(GeocodeTool.Params(location="Nashville"))
+    assert "error" in out.lower() and "not found" not in out.lower()
