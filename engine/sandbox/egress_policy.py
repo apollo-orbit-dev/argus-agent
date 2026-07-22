@@ -38,8 +38,25 @@ def ip_is_public(addr: str) -> bool:
                 or ip.is_multicast or ip.is_unspecified)
 
 
-def host_allowed(host: str, port: int = 443, *, resolve: bool = True) -> "tuple[bool, str]":
-    """(allowed, reason). `reason` is '' when allowed, else a short human-readable refusal.
+def _connect_info(ip: str, port: int) -> tuple:
+    """Synthesize a getaddrinfo-shaped 5-tuple for an IP literal, so callers of `resolve_allowed`
+    can treat the literal-address and resolved-hostname cases identically — one connect-address
+    list, regardless of which path produced it."""
+    family = socket.AF_INET6 if ipaddress.ip_address(ip).version == 6 else socket.AF_INET
+    return (family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port))
+
+
+def resolve_allowed(host: str, port: int = 443, *,
+                     resolve: bool = True) -> "tuple[bool, str, list]":
+    """(allowed, reason, addrs). Like `host_allowed`, but also returns the getaddrinfo-shaped
+    address list that was actually vetted.
+
+    This is the DNS-rebind fix: a caller that re-resolves the hostname to get an address to connect
+    to (a second `getaddrinfo`/`create_connection(host, ...)` call) can get back something entirely
+    different from what was just checked here — a second lookup racing a TTL-expired or
+    attacker-controlled record. The only way to guarantee "the address that gets connected to is
+    the address that was vetted" is to hand back that exact address and have the caller connect to
+    it directly, never to the hostname again. `addrs` is `[]` whenever `allowed` is False.
 
     With resolve=True (the default) EVERY address the name resolves to must be public. That is the
     property a literal-only check cannot provide: a hostname pointing at 192.168.x.x looks innocent
@@ -48,12 +65,14 @@ def host_allowed(host: str, port: int = 443, *, resolve: bool = True) -> "tuple[
     """
     host = (host or "").strip().lower().rstrip(".")
     if not host:
-        return False, "no host"
+        return False, "no host", []
     if host in BLOCKED_HOSTNAMES:
-        return False, f"host {host!r} is blocked"
+        return False, f"host {host!r} is blocked", []
     try:                                       # an IP literal needs no DNS
         ipaddress.ip_address(host)
-        return (True, "") if ip_is_public(host) else (False, f"{host} is not a public address")
+        if not ip_is_public(host):
+            return False, f"{host} is not a public address", []
+        return True, "", [_connect_info(host, port)]
     except ValueError:
         pass
     if not resolve:
@@ -62,17 +81,30 @@ def host_allowed(host: str, port: int = 443, *, resolve: bool = True) -> "tuple[
         # so they'd otherwise fall through this literal-only path unresolved and unchecked. Fail
         # closed rather than claim a name is safe when resolution — the thing that actually proves
         # it — was skipped.
-        return False, f"{host!r} cannot be verified without resolving (resolve=False)"
+        return False, f"{host!r} cannot be verified without resolving (resolve=False)", []
     try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
     except Exception as e:
-        return False, f"could not resolve {host!r} ({type(e).__name__})"
+        return False, f"could not resolve {host!r} ({type(e).__name__})", []
     if not infos:
-        return False, f"{host!r} resolved to nothing"
+        return False, f"{host!r} resolved to nothing", []
     bad = [i[4][0] for i in infos if not ip_is_public(i[4][0])]
     if bad:
-        return False, f"{host} resolves to a non-public address ({bad[0]})"
-    return True, ""
+        return False, f"{host} resolves to a non-public address ({bad[0]})", []
+    return True, "", infos
+
+
+def host_allowed(host: str, port: int = 443, *, resolve: bool = True) -> "tuple[bool, str]":
+    """(allowed, reason). `reason` is '' when allowed, else a short human-readable refusal.
+
+    A thin wrapper around `resolve_allowed` that drops the vetted address list — for callers (the
+    host-side guards in tool_creation/net_guard) that only ever ask "is this allowed?" and issue
+    their own connection through a full HTTP client rather than a raw socket, so there is no single
+    vetted address for them to hold onto anyway. The in-container proxy, which DOES connect exactly
+    one raw socket per request, uses `resolve_allowed` directly instead — see its `_tunnel`.
+    """
+    ok, reason, _addrs = resolve_allowed(host, port, resolve=resolve)
+    return ok, reason
 
 
 def url_allowed(url: str) -> "tuple[bool, str]":

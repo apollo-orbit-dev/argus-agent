@@ -202,6 +202,26 @@ async def test_exec_python_description_is_accurate_and_matches_tools_overview_in
 
 
 # ---------------------------------------------------------------------------------------------
+# This review's Finding 6 (MINOR): the container-mode description said nothing about the network,
+# so plain http:// returns a bare 501 the model has no way to make sense of. It must name the
+# proxy, what it allows/refuses, and that https:// is the fix.
+# ---------------------------------------------------------------------------------------------
+async def test_exec_python_description_explains_the_egress_proxy_in_container_mode():
+    from engine.tools.code_interpreter import ExecPythonTool
+
+    eng = _engine(enable_sandbox=True, enable_code_interpreter=True,
+                 sandbox_runtime="definitely-not-a-real-binary")
+    _wire_capture_model(eng)
+    eng.sandbox.available = lambda: True
+    await eng.run_task("s1", "hello")
+
+    desc = ExecPythonTool(eng.code_interp, "s1").description.lower()
+    assert "proxy" in desc
+    assert "https://" in desc
+    assert "http://" in desc, "must name plain http:// as the thing that doesn't work"
+
+
+# ---------------------------------------------------------------------------------------------
 # Finding 4 (IMPORTANT): sandbox_exec_timeout must be the timeout actually used on the container
 # path, independent of code_interpreter_timeout (the soft-sandbox path's timeout).
 # ---------------------------------------------------------------------------------------------

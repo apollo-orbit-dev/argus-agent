@@ -20,9 +20,9 @@ import time
 from urllib.parse import urlparse
 
 try:                                    # in-image layout: /opt/argus/{proxy,egress_policy}.py
-    from egress_policy import host_allowed
+    from egress_policy import resolve_allowed
 except ImportError:                     # repo layout, for the tests
-    from engine.sandbox.egress_policy import host_allowed
+    from engine.sandbox.egress_policy import resolve_allowed
 
 log = logging.getLogger("argus.sandbox.proxy")
 
@@ -94,6 +94,25 @@ def parse_absolute_request(line: str) -> "tuple[str, int] | None":
     return p.hostname, (p.port or (443 if p.scheme.lower() == "https" else 80))
 
 
+def _connect_to_vetted(addrs: list, timeout: float) -> socket.socket:
+    """Connect to one of the addresses `resolve_allowed` already vetted — never re-resolve the
+    hostname. Mirrors `socket.create_connection`'s own try-each-address-in-order fallback, but over
+    a fixed, pre-vetted address list instead of a hostname, which is exactly what closes the DNS-
+    rebind TOCTOU: the address connected to is provably the address that was checked, because it is
+    the very same tuple, not a fresh lookup that could have changed in between."""
+    last_err: "OSError | None" = None
+    for family, socktype, proto, _canonname, sockaddr in addrs:
+        sock = socket.socket(family, socktype, proto)
+        try:
+            sock.settimeout(timeout)
+            sock.connect(sockaddr)
+            return sock
+        except OSError as e:
+            last_err = e
+            sock.close()
+    raise last_err or OSError("no vetted addresses to connect to")
+
+
 def _relay(a: socket.socket, b: socket.socket) -> None:
     """Pump bytes both ways until either side closes. The proxy never inspects tunnelled bytes —
     for CONNECT it cannot (that is the point of TLS), and the policy decision was already made on
@@ -134,13 +153,19 @@ class ProxyHandler(socketserver.StreamRequestHandler):
             self._deny(400, "malformed or incomplete request headers")
             return
         host, port = target
-        ok, reason = host_allowed(host, port)
+        # `addrs` is the SAME lookup that was just vetted — never re-resolved. Re-resolving here
+        # (e.g. `socket.create_connection((host, port))` down in `_tunnel`) would be a DNS-rebind
+        # TOCTOU: the model controls `host`, this proxy is the only boundary for sandboxed egress,
+        # and a second lookup between the check and the connect can return a different — unvetted —
+        # address (a short-TTL record flipped mid-request, or an attacker-controlled authoritative
+        # server racing the two lookups on purpose).
+        ok, reason, addrs = resolve_allowed(host, port)
         if not ok:
             log.warning("egress DENIED %s:%s — %s", host, port, reason)
             self._deny(403, reason)
             return
         if parse_connect_target(line):
-            self._tunnel(host, port)
+            self._tunnel(host, port, addrs)
         else:
             self._deny(501, "plain-HTTP proxying is not supported; use HTTPS (CONNECT)")
 
@@ -185,9 +210,9 @@ class ProxyHandler(socketserver.StreamRequestHandler):
         except OSError:
             pass
 
-    def _tunnel(self, host: str, port: int) -> None:
+    def _tunnel(self, host: str, port: int, addrs: list) -> None:
         try:
-            upstream = socket.create_connection((host, port), _CONNECT_TIMEOUT)
+            upstream = _connect_to_vetted(addrs, _CONNECT_TIMEOUT)
         except OSError as e:
             self._deny(502, f"could not reach {host}:{port} ({type(e).__name__})")
             return

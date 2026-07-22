@@ -270,6 +270,11 @@ def test_exec_sweeps_idle_workspaces_but_never_the_one_it_just_used(tmp_path):
 
     def fake_run(argv, *, stdin="", timeout=30.0):
         seen.append(argv[1])
+        # ensure_workspace's finding-1 network-mismatch check also shells out as `inspect` (with a
+        # different format string) — not under test here, so hand back a network that matches this
+        # runtime's default `proxy` mode rather than letting it be misread as a mismatch.
+        if argv[1] == "inspect" and "NetworkSettings" in argv[3]:
+            return ExecResult(0, '{"argus-internal":{}}', "")
         return responses[argv[1]]
 
     rt._run = fake_run
@@ -286,7 +291,13 @@ def test_exec_does_not_sweep_before_the_sweep_interval_elapses(tmp_path):
     rt = PodmanRuntime(workspaces_root=str(tmp_path), idle_minutes=1, sweep_interval_s=3600)
     rt._egress_cache = (time.time(), True, "")   # not under test here — see the sibling test above
     responses = {"inspect": ExecResult(0, "running\n", ""), "exec": ExecResult(0, "", "")}
-    rt._run = lambda argv, *, stdin="", timeout=30.0: responses[argv[1]]
+
+    def fake_run(argv, *, stdin="", timeout=30.0):
+        if argv[1] == "inspect" and "NetworkSettings" in argv[3]:
+            return ExecResult(0, '{"argus-internal":{}}', "")   # matches default `proxy` mode
+        return responses[argv[1]]
+
+    rt._run = fake_run
     rt._last_exec["stale"] = time.time() - 999
 
     rt.exec("default", ["python", "-c", "1"])
@@ -294,10 +305,17 @@ def test_exec_does_not_sweep_before_the_sweep_interval_elapses(tmp_path):
     assert "stale" in rt._last_exec, "the sweep interval hasn't elapsed yet — nothing should fire"
 
 
-def _script_run(responses):
-    """Return a fake `_run` that maps the podman subcommand (argv[1]) to a canned ExecResult,
-    so ensure_workspace can be driven without a real podman binary."""
+def _script_run(responses, *, networks_json='{"argus-internal":{}}'):
+    """Return a fake `_run` that maps the podman subcommand (argv[1]) to a canned ExecResult, so
+    ensure_workspace can be driven without a real podman binary. ensure_workspace now issues TWO
+    different `inspect` calls (container state, then — finding 1 — its real network attachment),
+    both with argv[1] == "inspect" but a different format string (argv[3]); they're disambiguated
+    here the same way `_egress_fake_run` already disambiguates the sidecar's two inspect calls.
+    `networks_json` defaults to a value that matches `proxy` (these tests' default network_mode),
+    so a test that isn't about network-mismatch detection doesn't have to know this call exists."""
     def fake_run(argv, *, stdin="", timeout=30.0):
+        if argv[1] == "inspect" and "NetworkSettings" in argv[3]:
+            return ExecResult(0, networks_json, "")
         return responses[argv[1]]
     return fake_run
 
@@ -341,6 +359,8 @@ def test_ensure_workspace_unpauses_rather_than_starts_a_paused_container(tmp_pat
     def fake_run(argv, *, stdin="", timeout=30.0):
         calls.append(argv[1])
         if argv[1] == "inspect":
+            if "NetworkSettings" in argv[3]:
+                return ExecResult(0, '{"argus-internal":{}}', "")   # matches default `proxy` mode
             return ExecResult(0, "paused\n", "")
         if argv[1] == "unpause":
             return ExecResult(0, "", "")
@@ -363,6 +383,139 @@ def test_ensure_workspace_returns_when_start_succeeds_on_an_exited_container(tmp
 
 
 # ---------------------------------------------------------------------------------------------
+# This review's Finding 1 (CRITICAL): a workspace container's network is fixed at CREATE time —
+# `podman start` on an exited container replays the ORIGINAL create-time config, it never re-applies
+# --network/--network=none. Every operator who ran stage 1 has an `argus-ws-default` created with
+# `--network=none`; after this branch merges, `ensure_workspace` must notice that its REAL
+# attachment no longer matches the configured `sandbox_network` and recreate it (`podman rm -f` +
+# create) rather than silently adopting or resurrecting the stale container.
+# ---------------------------------------------------------------------------------------------
+def _workspace_fake_run(calls, *, state="running", networks_json='{"argus-internal":{}}',
+                         start_ok=True, run_ok=True, rm_ok=True):
+    """Drive ensure_workspace's whole container-adoption state machine without a real podman
+    binary: the `.State.Status` inspect, the `.NetworkSettings.Networks` inspect (this review's
+    finding 1), start/unpause, `rm -f`, and `run` (creation)."""
+    def fake_run(argv, *, stdin="", timeout=30.0):
+        calls.append(list(argv))
+        if argv[1] == "inspect":
+            if "NetworkSettings" in argv[3]:
+                return ExecResult(0, networks_json, "")
+            if state is None:
+                return ExecResult(1, "", "no such container")
+            return ExecResult(0, state + "\n", "")
+        if argv[1] == "start":
+            return ExecResult(0 if start_ok else 1, "", "")
+        if argv[1] == "unpause":
+            return ExecResult(0, "", "")
+        if argv[1] == "rm":
+            return ExecResult(0 if rm_ok else 1, "", "")
+        if argv[1] == "run":
+            return ExecResult(0 if run_ok else 1, "", "")
+        raise AssertionError(f"unexpected podman argv: {argv}")
+    return fake_run
+
+
+def test_ensure_workspace_recreates_a_running_container_with_the_wrong_network(tmp_path):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path), network_mode="proxy")
+    rt._egress_cache = (time.time(), True, "")   # not under test here
+    calls = []
+    rt._run = _workspace_fake_run(calls, state="running", networks_json='{"podman":{}}')  # lan-shaped
+    rt.ensure_workspace("default")
+    subcommands = [c[1] for c in calls]
+    assert "rm" in subcommands, "a container attached to the wrong network must be removed"
+    assert "run" in subcommands, "...and recreated so the configured network actually takes effect"
+    assert "start" not in subcommands, "a mismatched container must never just be started"
+
+
+def test_ensure_workspace_leaves_a_correctly_networked_running_container_alone(tmp_path):
+    """The negative case: a running container that IS on the right network must not be touched —
+    no `rm`, no `run`, and (since it's already running) no `start` either."""
+    rt = PodmanRuntime(workspaces_root=str(tmp_path), network_mode="proxy")
+    rt._egress_cache = (time.time(), True, "")
+    calls = []
+    rt._run = _workspace_fake_run(calls, state="running", networks_json='{"argus-internal":{}}')
+    rt.ensure_workspace("default")
+    subcommands = [c[1] for c in calls]
+    assert "rm" not in subcommands, "a correctly-networked container must not be removed"
+    assert "run" not in subcommands
+    assert "start" not in subcommands
+
+
+def test_ensure_workspace_recreates_an_exited_container_with_the_wrong_network_instead_of_starting_it(tmp_path):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path), network_mode="proxy")
+    rt._egress_cache = (time.time(), True, "")
+    calls = []
+    rt._run = _workspace_fake_run(calls, state="exited", networks_json='{"podman":{}}')
+    rt.ensure_workspace("default")
+    subcommands = [c[1] for c in calls]
+    assert "rm" in subcommands
+    assert "run" in subcommands
+    assert "start" not in subcommands, "a mismatched exited container must be recreated, not started"
+
+
+def test_ensure_workspace_starts_a_correctly_networked_exited_container_without_recreating_it(tmp_path):
+    """The negative case for the exited path: matching network -> just start it, same as before
+    this fix — recreation is only for a real mismatch."""
+    rt = PodmanRuntime(workspaces_root=str(tmp_path), network_mode="proxy")
+    rt._egress_cache = (time.time(), True, "")
+    calls = []
+    rt._run = _workspace_fake_run(calls, state="exited", networks_json='{"argus-internal":{}}')
+    rt.ensure_workspace("default")
+    subcommands = [c[1] for c in calls]
+    assert "start" in subcommands
+    assert "rm" not in subcommands
+    assert "run" not in subcommands
+
+
+@pytest.mark.parametrize("mode,matching_networks_json", [
+    ("none", "{}"),
+    ("lan", '{"podman":{}}'),
+])
+def test_ensure_workspace_leaves_a_correctly_networked_container_alone_in_lan_and_none_modes(
+        tmp_path, mode, matching_networks_json):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path), network_mode=mode)
+    calls = []
+    rt._run = _workspace_fake_run(calls, state="running", networks_json=matching_networks_json)
+    rt.ensure_workspace("default")
+    subcommands = [c[1] for c in calls]
+    assert "rm" not in subcommands
+
+
+@pytest.mark.parametrize("mode,mismatched_networks_json", [
+    ("none", '{"argus-internal":{}}'),
+    ("lan", '{"argus-internal":{}}'),
+    ("proxy", "{}"),
+])
+def test_ensure_workspace_recreates_in_every_mode_when_the_network_does_not_match(
+        tmp_path, mode, mismatched_networks_json):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path), network_mode=mode)
+    rt._egress_cache = (time.time(), True, "")   # not under test here — only proxy mode reads it
+    calls = []
+    rt._run = _workspace_fake_run(calls, state="running", networks_json=mismatched_networks_json)
+    rt.ensure_workspace("default")
+    subcommands = [c[1] for c in calls]
+    assert "rm" in subcommands
+
+
+# ---------------------------------------------------------------------------------------------
+# This review's Finding 5 (IMPORTANT, test coverage): the proxy-mode egress repair inside
+# ensure_workspace (`self._egress_ready_cached()`) had zero coverage — deleting the whole block
+# left the suite green. It must fire in `proxy` mode and must NOT fire in `lan`/`none`, where there
+# is no sidecar to repair.
+# ---------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("mode,should_check", [("proxy", True), ("lan", False), ("none", False)])
+def test_ensure_workspace_checks_egress_only_in_proxy_mode(tmp_path, mode, should_check):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path), network_mode=mode)
+    calls = []
+    rt._egress_ready_cached = lambda: (calls.append(1), (True, ""))[1]
+    rt._run = _workspace_fake_run(calls=[], state="running",
+                                  networks_json=('{"argus-internal":{}}' if mode == "proxy" else
+                                                 ('{}' if mode == "none" else '{"podman":{}}')))
+    rt.ensure_workspace("default")
+    assert (len(calls) == 1) is should_check
+
+
+# ---------------------------------------------------------------------------------------------
 # ensure_egress() state machine. Finding 1 (CRITICAL): a sidecar that came up running-but-not-
 # attached to the outbound network must NOT be adopted forever just because `inspect` reports it
 # "running" — the attachment itself has to be re-checked (and repaired) on every call. Finding 2
@@ -371,17 +524,19 @@ def test_ensure_workspace_returns_when_start_succeeds_on_an_exited_container(tmp
 # ---------------------------------------------------------------------------------------------
 def _egress_fake_run(calls, *, network_exists=True, sidecar_state="running", attached=True,
                       network_create_ok=True, run_ok=True, connect_ok=True, start_ok=True,
-                      unpause_ok=True, connect_stderr="", start_stderr="", unpause_stderr="",
-                      run_stderr="", network_create_stderr=""):
+                      unpause_ok=True, live_ok=True, connect_stderr="", start_stderr="",
+                      unpause_stderr="", run_stderr="", network_create_stderr="", live_stderr=""):
     """Build a fake `_run` that drives the whole ensure_egress() state machine without a real
     podman binary: network exists/create, sidecar inspect (both the `.State.Status` query and the
     `.NetworkSettings.Networks` attachment query — dispatched on the format string, since both are
-    `inspect` calls), run/start/unpause, and network connect.
+    `inspect` calls), run/start/unpause, network connect, and (this review's finding 2) the
+    liveness probe `podman exec` that confirms the proxy is actually listening.
 
     `sidecar_state=None` means the sidecar container does not exist yet (inspect fails). `attached`
     controls whether the NetworkSettings inspect reports the outbound ("podman") network already
     present — this is what finding 1's regression test flips to False on an otherwise-`running`
-    sidecar."""
+    sidecar. `live_ok` (default True, so existing tests don't need to know this call exists) controls
+    whether the liveness probe succeeds."""
     def fake_run(argv, *, stdin="", timeout=30.0):
         calls.append(list(argv))
         if argv[1] == "network" and argv[2] == "exists":
@@ -390,6 +545,8 @@ def _egress_fake_run(calls, *, network_exists=True, sidecar_state="running", att
             return ExecResult(0 if network_create_ok else 1, "", network_create_stderr)
         if argv[1] == "network" and argv[2] == "connect":
             return ExecResult(0 if connect_ok else 1, "", connect_stderr)
+        if argv[1] == "exec":
+            return ExecResult(0 if live_ok else 1, "", live_stderr)
         if argv[1] == "inspect":
             fmt = argv[3]
             if "NetworkSettings" in fmt:
@@ -494,6 +651,35 @@ def test_ensure_egress_raises_when_unpause_fails(tmp_path):
         rt.ensure_egress()
     assert "paused" in str(exc_info.value)
     assert "cannot unpause" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------------------------
+# This review's Finding 2 (IMPORTANT): `podman run -d` exits 0 the instant the sidecar container
+# STARTS, whether or not `python /opt/argus/proxy.py` itself then dies — which it will on any image
+# built before this branch, since /opt/argus/ did not exist then. `ensure_egress` must confirm
+# something is actually listening on the proxy port, not just that the container state says
+# "running".
+# ---------------------------------------------------------------------------------------------
+def test_ensure_egress_raises_when_the_proxy_is_not_actually_listening(tmp_path):
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    calls = []
+    rt._run = _egress_fake_run(calls, sidecar_state="running", attached=True, live_ok=False,
+                                live_stderr="Connection refused")
+    with pytest.raises(SandboxUnavailable) as exc_info:
+        rt.ensure_egress()
+    msg = str(exc_info.value)
+    assert "listening" in msg.lower()
+    assert "setup-sandbox.sh" in msg, "the message must name the actionable fix, not just fail"
+
+
+def test_ensure_egress_liveness_probe_runs_after_state_and_attachment_are_confirmed(tmp_path):
+    """The probe must actually execute (not be skipped/short-circuited) on the ordinary success
+    path — this is the regression test for the liveness check having zero coverage at all."""
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    calls = []
+    rt._run = _egress_fake_run(calls, sidecar_state="running", attached=True)
+    rt.ensure_egress()  # must not raise
+    assert any(c[1] == "exec" for c in calls), "the liveness probe must actually run"
 
 
 def test_ensure_egress_raises_when_connect_fails_for_a_real_reason(tmp_path):

@@ -153,12 +153,23 @@ class PodmanRuntime:
         """The sidecar's second leg. Being on BOTH networks is what makes it the only way out."""
         return [self.binary, "network", "connect", self.OUTBOUND_NETWORK, self.EGRESS_NAME]
 
-    def _egress_networks_argv(self) -> list[str]:
-        """Introspect which networks the sidecar is actually attached to right now, so
-        `ensure_egress` can verify the second leg on every call instead of trusting that a past
-        `network connect` succeeded (see `ensure_egress`'s docstring)."""
-        return [self.binary, "inspect", "-f", "{{json .NetworkSettings.Networks}}",
-                self.EGRESS_NAME]
+    def _networks_argv(self, cname: str) -> list[str]:
+        """Introspect which networks a container is actually attached to right now — the
+        authoritative source, as opposed to a label or the argv it was (maybe) created with. Shared
+        by `ensure_egress`'s sidecar-attachment check and `ensure_workspace`'s network-mismatch
+        check (finding 1): both need "what is this container REALLY on", not what we assume."""
+        return [self.binary, "inspect", "-f", "{{json .NetworkSettings.Networks}}", cname]
+
+    def _proxy_liveness_argv(self) -> list[str]:
+        """A short `podman exec` that opens a TCP connection to 127.0.0.1:PROXY_PORT from INSIDE
+        the sidecar — the only way to prove something is actually LISTENING there, as opposed to
+        merely `running`: `podman run -d` exits 0 the instant the container process starts, even
+        if `python /opt/argus/proxy.py` dies immediately after — which it will on any image built
+        before this branch, since /opt/argus/ did not exist then. python3 is guaranteed present
+        (the proxy itself is python), so this needs no extra tooling in the image."""
+        probe = ("import socket; s = socket.socket(); s.settimeout(3); "
+                 f"s.connect(('127.0.0.1', {self.PROXY_PORT})); s.close()")
+        return [self.binary, "exec", self.EGRESS_NAME, "python3", "-c", probe]
 
     def _cgroup_controllers(self) -> frozenset:
         """Which cgroup controllers this host's podman actually has, per
@@ -322,6 +333,10 @@ class PodmanRuntime:
         subsequent call sees "running", returns immediately, and the connect that would fix it never
         runs again. So the shape here is "ensure running" THEN "ensure attached", every time,
         regardless of which branch got the container to running.
+
+        A THIRD check follows attachment: "ensure listening" (`_ensure_egress_listening`, finding
+        2). `running` and `attached` are both still just container/network state — neither proves
+        the proxy process itself is alive and bound to its port.
         """
         if self._run([self.binary, "network", "exists", self.NETWORK_NAME], timeout=20).exit_code != 0:
             r = self._run(self._network_create_argv(), timeout=30)
@@ -349,6 +364,7 @@ class PodmanRuntime:
                 raise SandboxUnavailable(
                     f"could not start the egress proxy: {r.stderr.strip()[:200]}")
         self._ensure_egress_attached()
+        self._ensure_egress_listening()
 
     def _ensure_egress_attached(self) -> None:
         """Verify the sidecar is actually attached to the outbound network, and attach it if not.
@@ -363,13 +379,56 @@ class PodmanRuntime:
         phrasing change (or a different podman version) could silently swallow a genuine failure.
         Inspect-then-connect makes no assumption about error text at all: if the network is missing,
         connect; if connect then fails, that failure is real."""
-        nets = self._run(self._egress_networks_argv(), timeout=20)
+        nets = self._run(self._networks_argv(self.EGRESS_NAME), timeout=20)
         if nets.ok and f'"{self.OUTBOUND_NETWORK}":' in (nets.stdout or ""):
             return
         c = self._run(self._network_connect_argv(), timeout=30)
         if not c.ok:
             raise SandboxUnavailable(
                 f"egress proxy has no outbound network: {c.stderr.strip()[:200]}")
+
+    def _ensure_egress_listening(self) -> None:
+        """Finding 2 (IMPORTANT): container *state* is not proof the proxy inside it is listening.
+        `podman run -d` reports success the instant the sidecar process starts, whether or not
+        `python /opt/argus/proxy.py` itself then dies (e.g. because it doesn't exist in an image
+        built before this branch). Confirm something actually accepts a TCP connection on the
+        proxy port from inside the container before calling egress ready — never trust `running`
+        alone. This runs inside `ensure_egress()`, which is only ever invoked through
+        `_egress_ready_cached()`'s TTL cache on the hot path, so it does not add a probe to every
+        single exec()."""
+        live = self._run(self._proxy_liveness_argv(), timeout=10)
+        if not live.ok:
+            raise SandboxUnavailable(
+                "the egress proxy container is running but nothing is listening on "
+                f"127.0.0.1:{self.PROXY_PORT} inside it — this usually means the image predates "
+                "the egress proxy (/opt/argus/proxy.py did not exist when it was built); rebuild "
+                f"the sandbox image via scripts/setup-sandbox.sh ({live.stderr.strip()[:200]})")
+
+    def _container_network_matches_mode(self, cname: str) -> bool:
+        """Finding 1 (CRITICAL): a container's network is fixed at CREATE time — `podman start` on
+        an exited container replays the original create-time config, it never re-applies
+        `--network`/`--network=none`. So a container created under yesterday's `sandbox_network`
+        (or created before this stage existed at all) keeps that stale network forever unless it is
+        actually recreated. This inspects the container's REAL attachment (`.NetworkSettings.Networks`
+        — never a label we wrote ourselves, which could just be stale in the same way) and compares
+        it against `self.network_mode` right now.
+
+        `none` matches only an empty/absent network map; `proxy` matches only if `NETWORK_NAME` is
+        among the attached networks; `lan` matches anything else non-empty (the default bridge, by
+        name, differs across podman versions/hosts, so "attached to something, and specifically not
+        the internal-only network" is the honest thing to check rather than guessing a literal
+        name). An inspect that fails outright (e.g. the container vanished between the state check
+        and here) is treated as a mismatch — recreating is always safe (see ensure_workspace), so
+        that is the conservative direction to fail in."""
+        nets = self._run(self._networks_argv(cname), timeout=20)
+        networks_json = (nets.stdout or "").strip() if nets.ok else ""
+        is_empty = networks_json in ("", "null", "{}")
+        has_internal = f'"{self.NETWORK_NAME}":' in networks_json
+        if self.network_mode == "none":
+            return is_empty
+        if self.network_mode == "proxy":
+            return has_internal
+        return not is_empty and not has_internal   # lan
 
     def ensure_workspace(self, name: str) -> None:
         if self.network_mode == "proxy":
@@ -384,20 +443,33 @@ class PodmanRuntime:
         os.makedirs(self.workspace_dir(name), exist_ok=True)
         state = self._run([self.binary, "inspect", "-f", "{{.State.Status}}", cname], timeout=20)
         if state.exit_code == 0:
-            status = state.stdout.strip()
-            if status == "running":
-                return                                    # adopt it — reconcile is free
-            # `start` fails on a paused container (it needs `unpause`, not `start`) — dispatch on
-            # the reported state rather than let a call we know will fail surface a raw error.
-            if status == "paused":
-                resumed = self._run([self.binary, "unpause", cname], timeout=30)
+            if not self._container_network_matches_mode(cname):
+                # Recreating is safe: these containers are stateless, the bind-mounted workspace
+                # holds all state, and the create path right below already handles "the container
+                # doesn't exist" — this just makes that path reachable for "it exists but is wrong"
+                # too, instead of adopting (running) or resurrecting (start/unpause) a container
+                # whose network will never match `sandbox_network` again until the process restarts.
+                log.info(
+                    "sandbox: %s's network attachment does not match the configured sandbox_network "
+                    "(%r) — removing and recreating it so the new network mode actually takes "
+                    "effect", cname, self.network_mode)
+                self._run([self.binary, "rm", "-f", cname], timeout=30)
+                # fall through to the create path below, exactly as if it never existed
             else:
-                resumed = self._run([self.binary, "start", cname], timeout=30)
-            if not resumed.ok:
-                raise SandboxUnavailable(
-                    f"could not resume the sandbox container (state: {status}): "
-                    f"{resumed.stderr.strip()[:300]}")
-            return
+                status = state.stdout.strip()
+                if status == "running":
+                    return                                # adopt it — reconcile is free
+                # `start` fails on a paused container (it needs `unpause`, not `start`) — dispatch
+                # on the reported state rather than let a call we know will fail surface a raw error.
+                if status == "paused":
+                    resumed = self._run([self.binary, "unpause", cname], timeout=30)
+                else:
+                    resumed = self._run([self.binary, "start", cname], timeout=30)
+                if not resumed.ok:
+                    raise SandboxUnavailable(
+                        f"could not resume the sandbox container (state: {status}): "
+                        f"{resumed.stderr.strip()[:300]}")
+                return
         created = self._run(self._run_argv(name), timeout=60)
         if not created.ok:
             raise SandboxUnavailable(
