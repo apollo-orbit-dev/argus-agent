@@ -737,6 +737,13 @@
   .saved-ok{ font-size:11.5px; color:var(--ok); font-weight:600; opacity:0; transition:opacity .2s; margin-left:8px; }
   .saved-ok.show{ opacity:1; }
   .small-btn-row{ display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:center; }
+  .sandbox-status{ margin:8px 0; font-family:var(--font-mono); font-size:11px; color:var(--muted);
+    display:flex; flex-direction:column; gap:2px; }
+  .sandbox-status .sb-ok{ color:var(--ok); }
+  .sandbox-status .sb-bad{ color:var(--danger); }
+  .sandbox-output{ margin-top:8px; padding:9px 11px; max-height:260px; overflow:auto;
+    background:var(--panel-2); border:1px solid var(--border); border-radius:7px;
+    font-family:var(--font-mono); font-size:10.5px; color:var(--muted); white-space:pre-wrap; }
   .fld-row{ display:flex; gap:6px; align-items:stretch; }
   .sec-note{ font-size:11px; color:var(--faint); line-height:1.5; margin-top:8px; }
   .sec-note.warn{ color:var(--amber); }
