@@ -10,6 +10,7 @@ that broke that promise.
 Every persistence path — the engine's own save, and the backend's two .env-writing endpoints — must
 honour the engine's env_path, which follows data_dir.
 """
+import os
 import tempfile
 from pathlib import Path
 
@@ -61,3 +62,43 @@ def test_persist_to_env_still_takes_an_explicit_path():
     target = Path(tmp) / "x.env"
     persist_to_env(_mk(max_steps=7), str(target))
     assert "MAX_STEPS=7" in target.read_text()
+
+
+def test_load_dotenv_skips_config_keys_but_loads_extras(tmp_path, monkeypatch):
+    """The restart bug: load_dotenv_into_environ copied CONFIG keys (ENABLE_SANDBOX, ...) into
+    os.environ, where a stale value survived an os.execv restart and shadowed the updated .env
+    (env vars outrank the .env file). Config keys must NOT be loaded; arbitrary secret vars must be.
+    """
+    from config import load_dotenv_into_environ
+
+    env = tmp_path / ".env"
+    env.write_text("ENABLE_SANDBOX=true\nMODEL_NAME=main\nARGUS_TEST_SECRET_XYZ=s3cret\n")
+    # ensure a clean slate for both
+    monkeypatch.delenv("ENABLE_SANDBOX", raising=False)
+    monkeypatch.delenv("ARGUS_TEST_SECRET_XYZ", raising=False)
+
+    loaded = load_dotenv_into_environ(str(env))
+
+    # the function's contract is "returns the keys it set" — config keys are NOT among them
+    # (MODEL_NAME may already be a real env var here, so assert on `loaded`, not os.environ)
+    assert "ENABLE_SANDBOX" not in loaded
+    assert "MODEL_NAME" not in loaded
+    assert "ENABLE_SANDBOX" not in os.environ   # this one we cleared, so it's a clean check
+    # ...but a genuine extra var IS set, so tool secrets still work
+    assert os.environ.get("ARGUS_TEST_SECRET_XYZ") == "s3cret"
+    assert "ARGUS_TEST_SECRET_XYZ" in loaded
+    os.environ.pop("ARGUS_TEST_SECRET_XYZ", None)   # don't leak into other tests
+
+
+def test_a_toggled_config_key_survives_the_reload_cycle(tmp_path, monkeypatch):
+    """End to end: a config key set to false in the OLD boot's os.environ must not win over a .env
+    that now says true — because load_dotenv_into_environ no longer copies config keys, pydantic
+    reads the fresh .env value. Reproduces the restart-doesn't-stick scenario."""
+    from config import Config, load_dotenv_into_environ
+
+    env = tmp_path / ".env"
+    env.write_text("MODEL_BASE_URL=http://x/v1\nMODEL_NAME=main\nENABLE_SANDBOX=true\n")
+    monkeypatch.delenv("ENABLE_SANDBOX", raising=False)   # simulate a clean-ish restart
+
+    load_dotenv_into_environ(str(env))                    # must NOT set ENABLE_SANDBOX in environ
+    assert "ENABLE_SANDBOX" not in os.environ, "the stale-shadow path must be gone"

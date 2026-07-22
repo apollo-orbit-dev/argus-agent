@@ -318,11 +318,17 @@ class Config(BaseSettings):
 
 
 def load_dotenv_into_environ(env_path=None) -> list[str]:
-    """Load KEY=VALUE lines from .env into os.environ (without overriding vars already set).
+    """Load the operator's NON-config .env vars into os.environ (without overriding vars already set).
 
-    pydantic-settings reads .env only for its own Config fields — arbitrary vars the operator
-    adds (e.g. SERVICE_PASSWORD) never reach os.environ, so tool code and `_tool_secrets` can't see
-    them. This makes .env behave like a real environment file. Returns the keys it set.
+    Purpose: pydantic-settings only surfaces its own Config fields, so arbitrary vars the operator
+    adds (e.g. SERVICE_PASSWORD) never reach os.environ, and tool code / `_tool_secrets` can't read
+    them. This loads those.
+
+    CONFIG keys are deliberately SKIPPED. pydantic already reads them from .env on every boot;
+    copying them into os.environ would let a stale value from a previous boot survive an os.execv
+    restart (which inherits the environment) and then shadow the updated .env, because an env var
+    outranks the .env file. That was the exact bug where a dashboard config toggle didn't survive a
+    restart. Returns the keys it set.
     """
     import os
     from pathlib import Path
@@ -330,6 +336,7 @@ def load_dotenv_into_environ(env_path=None) -> list[str]:
     p = Path(env_path) if env_path else Path(__file__).resolve().parent / ".env"
     if not p.exists():
         return []
+    config_keys = {name.upper() for name in Config.model_fields}
     set_keys = []
     for line in p.read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -338,7 +345,9 @@ def load_dotenv_into_environ(env_path=None) -> list[str]:
         key, _, val = line.partition("=")
         key = key.strip()
         val = val.strip().strip('"').strip("'")   # tolerate quotes / stray spaces
-        if key and key not in os.environ:
+        if not key or key.upper() in config_keys:
+            continue                              # pydantic owns config keys; don't shadow .env
+        if key not in os.environ:
             os.environ[key] = val
             set_keys.append(key)
     return set_keys
