@@ -28,9 +28,10 @@ def test_write_read_traversal_safe(tmp_path):
     ws = FileWorkspace(str(tmp_path / "ws"))
     wt = WriteFileTool(ws)
     out = asyncio.run(wt.run(wt.Params(name="../evil.txt", content="x")))
-    assert "evil.txt" in out
-    # it was written as a flat basename inside the workspace, not outside
-    assert ws.exists("evil.txt")
+    # safe_path rejects traversal outright now (it no longer silently flattens it to a
+    # basename inside the workspace) — nothing is written, inside or outside.
+    assert "error" in out.lower() and "traversal" in out.lower()
+    assert not ws.exists("evil.txt")
     assert not (tmp_path / "evil.txt").exists()
 
 
