@@ -19,10 +19,15 @@ SemanticRecall = Literal["auto", "on", "off"]
 # arbitrary path. Constraining it to a Literal means an unauthenticated/under-authorized PATCH
 # /config (or any other config consumer) is rejected by pydantic before it ever reaches a
 # subprocess, rather than relying on the caller to have validated it.
-SandboxRuntimeName = Literal["podman", "docker"]
-# sandbox_network selects a security posture (see the field docstring below), so it gets the same
-# Literal treatment as sandbox_runtime: PATCH /config is not admin-gated, and an unrecognised value
-# must be rejected by pydantic before it can weaken isolation silently.
+SandboxRuntimeName = Literal["podman"]
+# Only podman is implemented. `PodmanRuntime` uses podman-specific flags/subcommands
+# (`--userns=keep-id`, `podman info {{.Host.CgroupControllers}}`, `image exists`, `network exists`)
+# that docker does not support, so a docker backend would fail at container setup — exposing it was a
+# footgun. A legacy `docker` value is coerced to `podman` at load (see the validator) rather than
+# hard-rejected, so an existing .env doesn't crash startup; if podman is then missing, the sandbox
+# fails closed, which is the correct safe outcome. Re-add docker here only when a real DockerRuntime
+# exists. sandbox_network below gets the same Literal treatment: PATCH /config is not admin-gated, and
+# an unrecognised value must be rejected by pydantic before it can weaken isolation silently.
 SandboxNetwork = Literal["proxy", "lan", "none"]
 # sandbox_image becomes an argument to `podman build -t <image>` / `podman run <image> ...`. Legal
 # image reference only: lowercase alphanumerics plus '.', '_', '-', '/', optional ':tag'. Anchored
@@ -111,7 +116,7 @@ class Config(BaseSettings):
     # they never fall back to the weaker soft sandbox, because that would silently give the user
     # less isolation than they asked for.
     enable_sandbox: bool = False
-    sandbox_runtime: SandboxRuntimeName = "podman"  # podman | docker (docker = weaker: root daemon + socket)
+    sandbox_runtime: SandboxRuntimeName = "podman"  # podman only; a legacy "docker" is coerced to podman
     sandbox_image: str = Field("argus-sandbox:local", pattern=_SANDBOX_IMAGE_RE)
     # Container egress. "proxy" (default): the container joins an --internal network with no route
     # off it and reaches the internet only through a policy-enforcing sidecar, so it can call public
@@ -253,6 +258,19 @@ class Config(BaseSettings):
     # save, restart, system-prompt edit). Empty = open (matches the spec's open local
     # dashboard). Set it to require an X-Admin-Token header on those endpoints.
     admin_token: str = ""
+
+    @field_validator("sandbox_runtime", mode="before")
+    @classmethod
+    def _coerce_legacy_docker(cls, v):
+        # docker was never actually supported (PodmanRuntime is podman-only). Coerce a legacy
+        # "docker" to "podman" so an existing .env doesn't crash on load; any other unknown value
+        # still falls through to the Literal and is rejected.
+        if isinstance(v, str) and v.strip().lower() == "docker":
+            import logging
+            logging.getLogger("argus.config").warning(
+                "sandbox_runtime=docker is not supported (podman only); using podman instead.")
+            return "podman"
+        return v
 
     @field_validator("allowed_chat_ids", mode="before")
     @classmethod

@@ -31,11 +31,14 @@ def test_sandbox_fields_round_trip_through_env():
 # $RUNTIME; sandbox_image becomes a `podman build -t` argument), and PATCH /config has no
 # admin gate. The schema itself must reject anything dangerous, so every consumer is covered.
 # ---------------------------------------------------------------------------------------------
-def test_sandbox_runtime_accepts_docker_and_round_trips():
+def test_sandbox_runtime_docker_is_coerced_to_podman():
+    """docker was never actually implemented (PodmanRuntime is podman-only), so the dashboard option
+    and config value were a footgun. A legacy `docker` value is coerced to podman rather than
+    hard-rejected, so an existing .env doesn't crash on load — both at construction and via patch()."""
     c = _mk(sandbox_runtime="docker")
-    assert c.sandbox_runtime == "docker"
+    assert c.sandbox_runtime == "podman"
     c2 = c.patch({"sandbox_runtime": "docker"})
-    assert c2.sandbox_runtime == "docker"
+    assert c2.sandbox_runtime == "podman"
 
 
 def test_sandbox_image_valid_value_round_trips():
@@ -48,7 +51,7 @@ def test_sandbox_image_valid_value_round_trips():
 def test_sandbox_runtime_rejects_an_arbitrary_path():
     """The confused-deputy finding: PATCH /config had no admin gate and could set sandbox_runtime
     to an absolute path that setup-sandbox.sh would later exec as the Argus user. Constraining the
-    field to Literal["podman", "docker"] makes pydantic reject this before it reaches a subprocess."""
+    field to Literal["podman"] makes pydantic reject this before it reaches a subprocess."""
     with pytest.raises(ValidationError):
         _mk(sandbox_runtime="/tmp/evil")
     c = _mk()
