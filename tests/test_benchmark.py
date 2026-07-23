@@ -1,6 +1,19 @@
 """Benchmark pure helpers: task_verdict, aggregate, build_series, resolve_config."""
+import importlib.util
+
 from engine.eval.benchmark import (_backfill_solved, aggregate, build_series, render_report,
                                     resolve_config, task_verdict, _write_result)
+
+
+def _load_validator():
+    spec = importlib.util.spec_from_file_location("vb", "benchmark/cap-2/validate_battery.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+
+
+def test_cap2_battery_validates():
+    vb = _load_validator()
+    problems = vb.validate("benchmark/cap-2/battery.json")
+    assert problems == [], "cap-2 battery invalid:\n" + "\n".join(problems)
 
 
 def test_task_verdict_chain_threshold_and_judge_mean():

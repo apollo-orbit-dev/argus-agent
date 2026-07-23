@@ -1,0 +1,795 @@
+{
+  "battery_version": "cap-2",
+  "tiers": {
+    "1": "one obvious tool",
+    "2": "right-tool selection",
+    "3": "2-3 step ordered chain",
+    "4": "3+ step chain with a judgment call"
+  },
+  "tasks": [
+    {
+      "id": "t1_stub_01",
+      "tier": 1,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t1_stub_02",
+      "tier": 1,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t1_stub_03",
+      "tier": 1,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t1_stub_04",
+      "tier": 1,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t1_stub_05",
+      "tier": 1,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t1_stub_06",
+      "tier": 1,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t1_stub_07",
+      "tier": 1,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t1_stub_08",
+      "tier": 1,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t1_stub_09",
+      "tier": 1,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t1_stub_10",
+      "tier": 1,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t1_stub_11",
+      "tier": 1,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t1_stub_12",
+      "tier": 1,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t1_stub_13",
+      "tier": 1,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t1_stub_14",
+      "tier": 1,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t2_stub_01",
+      "tier": 2,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t2_stub_02",
+      "tier": 2,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t2_stub_03",
+      "tier": 2,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t2_stub_04",
+      "tier": 2,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t2_stub_05",
+      "tier": 2,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t2_stub_06",
+      "tier": 2,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t2_stub_07",
+      "tier": 2,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t2_stub_08",
+      "tier": 2,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t2_stub_09",
+      "tier": 2,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t2_stub_10",
+      "tier": 2,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t2_stub_11",
+      "tier": 2,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t2_stub_12",
+      "tier": 2,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t2_stub_13",
+      "tier": 2,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t2_stub_14",
+      "tier": 2,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t3_stub_01",
+      "tier": 3,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t3_stub_02",
+      "tier": 3,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t3_stub_03",
+      "tier": 3,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t3_stub_04",
+      "tier": 3,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t3_stub_05",
+      "tier": 3,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t3_stub_06",
+      "tier": 3,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t3_stub_07",
+      "tier": 3,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t3_stub_08",
+      "tier": 3,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t3_stub_09",
+      "tier": 3,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t3_stub_10",
+      "tier": 3,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t3_stub_11",
+      "tier": 3,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t3_stub_12",
+      "tier": 3,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t3_stub_13",
+      "tier": 3,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t3_stub_14",
+      "tier": 3,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t4_stub_01",
+      "tier": 4,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t4_stub_02",
+      "tier": 4,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t4_stub_03",
+      "tier": 4,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t4_stub_04",
+      "tier": 4,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t4_stub_05",
+      "tier": 4,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t4_stub_06",
+      "tier": 4,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t4_stub_07",
+      "tier": 4,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t4_stub_08",
+      "tier": 4,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t4_stub_09",
+      "tier": 4,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t4_stub_10",
+      "tier": 4,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t4_stub_11",
+      "tier": 4,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t4_stub_12",
+      "tier": 4,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t4_stub_13",
+      "tier": 4,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    },
+    {
+      "id": "t4_stub_14",
+      "tier": 4,
+      "category": "compute",
+      "prompt": "What is 2+2?",
+      "expect": {
+        "tools_in_order": [
+          "calculator"
+        ]
+      },
+      "rubric": [
+        "returns 4"
+      ]
+    }
+  ]
+}
