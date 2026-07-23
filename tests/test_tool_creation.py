@@ -808,3 +808,28 @@ def test_load_persisted_tool_without_flag_is_host_side():
                    "code": "def run(args): return 'x'"}, fh)   # no sandboxed key
     tools = load_persisted_tools(persist)
     assert len(tools) == 1 and tools[0].sandboxed is False
+
+
+# ---- end-to-end: a real podman container ----
+import shutil
+
+needs_podman = pytest.mark.skipif(shutil.which("podman") is None, reason="podman not installed")
+
+
+@needs_podman
+@pytest.mark.podman
+async def test_end_to_end_sandboxed_tool_uses_full_stdlib(tmp_path):
+    """The payoff: a created tool that imports os runs in a real container. Needs the built image;
+    skips without podman. Skips (not fails) if argus-sandbox:local isn't built."""
+    from engine.sandbox.podman import PodmanRuntime
+    rt = PodmanRuntime(workspaces_root=str(tmp_path / "workspaces"))
+    if not rt.available() or rt.status().get("image_present") is False:
+        pytest.skip("argus-sandbox:local not built — run scripts/setup-sandbox.sh")
+    try:
+        t = DynamicTool("os_probe", "d", _P, sandboxed=True,
+                        code="import os\ndef run(args):\n    return os.uname().sysname",
+                        runtime=rt, workspace="default", timeout=60)
+        out = await t.run(_P())
+        assert "Linux" in out
+    finally:
+        rt.stop("default")
