@@ -2,6 +2,35 @@
 
 All notable changes to this project are documented here.
 
+## 0.11.0
+
+Sandboxed created tools.
+
+### Added
+- **Created tools can run inside the container sandbox.** A model-authored (`create_tool`) tool can
+  now execute inside the long-lived, rootless **podman** container with the full Python standard
+  library and the real writable workspace, selected per tool by a `sandboxed` flag (defaults on when
+  the sandbox is available). The two paths are explicit: a *host-side* tool keeps the AST-restricted
+  sandbox and can still **compose** — call any other Argus tool by name — while a *container* tool
+  gets the full stdlib but runs in isolation, with no tool composition. A stdlib-only in-container
+  runner marshals `{code, args}` over stdin/stdout; args are validated host-side (the tool's pydantic
+  model) before they cross into the container.
+- The tool-creation directive now tells the model about the trade-off, so it picks `sandboxed=false`
+  when a tool needs to call another tool, and leaves it on otherwise.
+
+### Fixed
+- **Fails closed.** A `sandboxed=true` tool refuses to run when the sandbox is off or unavailable
+  rather than silently falling back to host execution — the code was authored assuming the full
+  stdlib. The executing runtime is resolved from the same per-run `enable_sandbox` flag the gate
+  checks, so the two can never disagree.
+- A dashboard config toggle (e.g. enabling the sandbox) now survives a server restart — a stale value
+  left in the process environment no longer shadows the updated `.env`.
+- The sandbox setup output no longer emits raw ANSI colour codes to the dashboard's log view.
+
+### Docs
+- README: a "What makes it different" highlights section, CI/version/Python/license badges, and a
+  table of contents.
+
 ## 0.10.0
 
 The container-sandbox release.
