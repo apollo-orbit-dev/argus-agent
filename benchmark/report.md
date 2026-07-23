@@ -1,9 +1,10 @@
 # Model-Capability Benchmark — `cap-1`
 
-8 model(s), by param count. Chain = deterministic tool-chain pass-rate; Judge = Opus quality mean (0–3). A tier's line falling off below some size is the shelf.
+9 model(s), by param count. Chain = deterministic tool-chain pass-rate; Judge = Opus quality mean (0–3). A tier's line falling off below some size is the shelf.
 
 | model | params (B) | mode | scaffold | max_tok | T1 chain / judge | T2 chain / judge | T3 chain / judge | T4 chain / judge | overall |
 |---|---|---|---|---|---|---|---|---|---|
+| Qwen2.5-3B-Instruct | 3 | manual | off | 2048 | 100% / 3.0 | 40% / 1.8 | 29% / 0.2 | 60% / 1.8 | 58% / 1.7 |
 | Qwen2.5-3B-Instruct | 3 | manual | on | — | 100% / 3.0 | 40% / 1.6 | 29% / 1.2 | 60% / 2.0 | 58% / 2.0 |
 | gemma-4-E4B-it | 4 | native | on | 16384 | 86% / 2.7 | 60% / 2.7 | 86% / 2.2 | 80% / 2.7 | 79% / 2.6 |
 | gemma-4-E4B-it | 4 | manual | on | 16384 | 100% / 2.7 | 60% / 2.7 | 86% / 2.6 | 80% / 2.7 | 83% / 2.7 |

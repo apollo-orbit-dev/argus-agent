@@ -62,5 +62,13 @@
     "battery_version": "cap-1",
     "date": "2026-07-23T18:30:20+00:00",
     "file": "gemma-4-E4B-it-cap-1-20260723T183020.json"
+  },
+  {
+    "model": "Qwen2.5-3B-Instruct",
+    "params": 3,
+    "mode": "manual",
+    "battery_version": "cap-1",
+    "date": "2026-07-23T18:57:17+00:00",
+    "file": "Qwen2.5-3B-Instruct-cap-1-20260723T185717.json"
   }
 ]
