@@ -1125,10 +1125,13 @@
     $('statsReadout').textContent = mn.indexOf('/') > -1 ? mn.split('/').pop() : mn;
     $('statsReadout').title = mn;
   }
+  // Mirror of ModelClient._resolve_provider('auto') for the dashboard's detected-provider hint.
+  var OAI_COMPATIBLE_HOSTS = ['fireworks.ai','together.ai','together.xyz','groq.com','deepinfra.com','lepton.ai','anyscale.com','endpoints.huggingface.cloud'];
   function providerOf(url){
     url = (url||'').toLowerCase();
     if (url.includes('openrouter.ai')) return 'openrouter';
     if (url.includes('api.openai.com')) return 'openai';
+    if (OAI_COMPATIBLE_HOSTS.some(function(h){ return url.includes(h); })) return 'openai-compatible';
     return 'vllm';
   }
   async function loadConfig(){

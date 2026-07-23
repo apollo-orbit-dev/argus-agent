@@ -195,6 +195,54 @@ def test_reasoning_translation_per_provider():
     oa = ModelClient("https://api.openai.com/v1", "o4-mini")
     assert oa._reasoning_params("medium") == {"reasoning_effort": "medium"}
     assert oa._reasoning_params("off") == {}
+    # generic OpenAI-compatible: never translates reasoning (providers differ; an unknown param 400s)
+    oc = ModelClient("https://api.fireworks.ai/inference/v1", "accounts/fireworks/models/x")
+    assert oc._reasoning_params("high") == {}
+    assert oc._reasoning_params("off") == {}
+
+
+def test_auto_detects_openai_compatible_clouds():
+    """Fireworks/Together/Groq/etc. speak plain OpenAI — auto must resolve them to the generic
+    provider, not to 'vllm' (which would send vLLM-only params and probe /tokenize)."""
+    for url in ("https://api.fireworks.ai/inference/v1", "https://api.together.xyz/v1",
+                "https://api.groq.com/openai/v1", "https://api.deepinfra.com/v1/openai"):
+        assert ModelClient(url, "m").provider == "openai-compatible", url
+    # a bare local server is still assumed to be vLLM/Ollama
+    assert ModelClient("http://vllm.local/v1", "m").provider == "vllm"
+
+
+def test_openai_compatible_aliases_normalize():
+    for alias in ("openai-compatible", "openai_compatible", "generic", "compatible"):
+        assert ModelClient("http://my-proxy.internal/v1", "m", provider=alias).provider == "openai-compatible"
+
+
+async def test_openai_compatible_sends_only_standard_params():
+    """The generic provider must send NO vendor-specific params (chat_template_kwargs, top_k) and
+    NO X-Title header, even with think=False and top_k set — only the plain OpenAI payload."""
+    seen = {}
+    def handler(req):
+        import json as _j
+        seen["body"] = _j.loads(req.content)
+        seen["xtitle"] = req.headers.get("X-Title")
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"},
+                                                      "finish_reason": "stop"}], "usage": {}})
+    patch_asyncclient.transport = httpx.MockTransport(handler)
+    c = ModelClient("https://api.fireworks.ai/inference/v1", "accounts/fireworks/models/x", top_k=40)
+    assert c.provider == "openai-compatible"
+    await c.chat([{"role": "user", "content": "hi"}], think=False)
+    assert "chat_template_kwargs" not in seen["body"]
+    assert "top_k" not in seen["body"]
+    assert "reasoning_effort" not in seen["body"] and "reasoning" not in seen["body"]
+    assert seen["xtitle"] is None
+
+
+async def test_openai_compatible_token_count_estimates_without_tokenize():
+    """Generic backends have no vLLM /tokenize; token_count must estimate with no HTTP call."""
+    def handler(req):
+        return httpx.Response(500)   # would fail the test if /tokenize were called
+    patch_asyncclient.transport = httpx.MockTransport(handler)
+    c = ModelClient("https://api.fireworks.ai/inference/v1", "accounts/fireworks/models/x")
+    assert await c.token_count("abcd" * 10) == 10
 
 
 async def test_configured_reasoning_sent_on_main_call():

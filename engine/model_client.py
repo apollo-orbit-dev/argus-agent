@@ -47,11 +47,24 @@ class ModelClient:
         self.provider = self._resolve_provider(provider)
         self.reasoning = (reasoning or "auto").strip().lower()
 
+    # Cloud hosts that speak the plain OpenAI wire format — no vLLM-only params, no /tokenize,
+    # no vendor headers. Auto-detected so pointing the base URL at one just works; anything not
+    # listed falls back to "vllm" (the local-server assumption). This is a convenience for the
+    # common cases — for any other OpenAI-compatible endpoint, pick "openai-compatible" explicitly.
+    _OPENAI_COMPATIBLE_HOSTS = ("fireworks.ai", "together.ai", "together.xyz", "groq.com",
+                                "deepinfra.com", "lepton.ai", "anyscale.com", "endpoints.huggingface.cloud")
+    _COMPAT_ALIASES = ("openai-compatible", "openai_compatible", "oai-compatible", "compatible", "generic")
+
     def _resolve_provider(self, provider: str) -> str:
         """Which backend this points at, so we send only params it accepts. 'auto' infers from
-        the base URL — so pointing model_base_url at OpenRouter/OpenAI is enough; vLLM-only params
-        (chat_template_kwargs, top_k, the /tokenize endpoint) are then skipped automatically."""
+        the base URL — OpenRouter/OpenAI and the well-known OpenAI-compatible clouds are detected;
+        anything else is assumed to be a local vLLM/Ollama server. 'openai-compatible' is the
+        explicit generic choice: it sends ONLY the standard OpenAI params (no chat_template_kwargs,
+        no top_k, no /tokenize, no vendor headers, no reasoning translation), for any endpoint that
+        isn't one of the specifically-handled backends."""
         p = (provider or "auto").strip().lower()
+        if p in self._COMPAT_ALIASES:
+            return "openai-compatible"
         if p != "auto":
             return p
         host = self.base_url.lower()
@@ -59,6 +72,8 @@ class ModelClient:
             return "openrouter"
         if "api.openai.com" in host:
             return "openai"
+        if any(h in host for h in self._OPENAI_COMPATIBLE_HOSTS):
+            return "openai-compatible"
         return "vllm"
 
     def _reasoning_params(self, level: str) -> dict:
@@ -80,6 +95,9 @@ class ModelClient:
         if self.provider == "openai":
             # o-series can't be fully disabled and base models ignore it, so 'off' just omits.
             return {} if lvl == "off" else {"reasoning_effort": lvl}
+        # "openai-compatible" and any other backend: send no reasoning param. OpenAI-compatible
+        # clouds differ on whether they accept reasoning_effort, and an unknown param can 400 —
+        # so we let the model's own default stand rather than guess a wire format.
         return {}
 
     async def chat(self, messages: list[dict], tools: Optional[list[dict]] = None,

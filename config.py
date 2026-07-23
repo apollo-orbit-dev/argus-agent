@@ -67,6 +67,8 @@ class Config(BaseSettings):
     # api.openai.com -> openai, else vllm) and gates vLLM-only params. Point model_base_url at
     # https://openrouter.ai/api/v1, set model_api_key to an OpenRouter key, and model_name to an
     # OpenRouter model id (e.g. "anthropic/claude-sonnet-4.5") to test any model you have access to.
+    # auto | openrouter | openai | openai-compatible (Fireworks/Together/Groq/… generic) | vllm.
+    # auto infers from the base URL; openai-compatible sends only standard OpenAI params.
     model_provider: str = "auto"
     model_context_window: Optional[int] = None   # for /usage %; falls back to a built-in map
     # Reasoning/thinking control for the MAIN loop, translated per backend: "auto" (model default),
