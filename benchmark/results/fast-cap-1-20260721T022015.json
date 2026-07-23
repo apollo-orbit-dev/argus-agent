@@ -1,5 +1,5 @@
 {
-  "model": "fast",
+  "model": "Qwen2.5-3B-Instruct",
   "params": 3,
   "mode": "manual",
   "battery_version": "cap-1",
