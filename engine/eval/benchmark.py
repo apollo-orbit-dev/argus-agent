@@ -62,14 +62,20 @@ def build_series(results: list, battery_version: str) -> dict:
     """Group committed result dicts (of one battery_version) into per-tier series sorted by params:
     {tier: [(params, chain_pass, judge_mean), ...]}."""
     rows = [r for r in results if r.get("battery_version") == battery_version]
-    # One point per model size on the curve: when the same params was run more than once (e.g. a
-    # model re-run at a higher token budget), plot the run with the highest max_tokens so the line
-    # stays single-valued. The report TABLE still lists every run.
+    # One point per model size on the curve: when the same params was run more than once (a re-run
+    # at a higher token budget, or the same model in native vs manual mode), plot the best-demonstrated
+    # run — highest max_tokens first, then highest overall chain-pass. The report TABLE still lists
+    # every run.
+    def _rank(r):
+        # scaffold-on always wins (the size curve shows the product's real capability; a baseline/
+        # ablation run is a separate view), then higher token budget, then higher chain-pass.
+        return (1 if r.get("scaffold", "on") == "on" else 0,
+                (r.get("max_tokens") or 0), (r.get("overall", {}) or {}).get("chain_pass") or 0)
     best = {}
     for r in rows:
         p = r.get("params", 0)
         cur = best.get(p)
-        if cur is None or (r.get("max_tokens") or 0) > (cur.get("max_tokens") or 0):
+        if cur is None or _rank(r) > _rank(cur):
             best[p] = r
     rows = sorted(best.values(), key=lambda r: r.get("params", 0))
     tiers = sorted({t for r in rows for t in r.get("per_tier", {})}, key=int)
@@ -84,9 +90,27 @@ def build_series(results: list, battery_version: str) -> dict:
     return series
 
 
-def resolve_config(model_spec: str, mode: str | None):
+# The scaffolding the `--baseline` arm switches OFF, to measure Argus's lift over a plain agent loop.
+# These are the config-gated *behavioral* layers (README "Small-model scaffolding"). NOT disabled:
+# the tools themselves, the tight tool contracts (structural — validated identifiers, bound params),
+# the base loop/prompt, and the tool-calling mode (a separate axis, held constant per run). So a
+# baseline number is "same model + same tools, minus the toggleable scaffolding", not a naive harness.
+BASELINE_OVERRIDES = {
+    "enable_observer": False,          # loop-health watchdog: no nudge/stop on thrash
+    "enable_action_verify": False,     # no post-action over-claim verifier
+    "enable_clarify": False,           # no clarify tool — the model must guess, not ask
+    "enable_rules": False,             # no standing behavioral rules injected each turn
+    "enable_rules_autodetect": False,
+    "enable_memory": False,            # no memory recall/injection (empty in isolated runs anyway)
+    "enable_memory_autoextract": False,
+    "adaptive_thinking": False,        # no per-turn reasoning router
+    "skill_selection_mode": "model_driven",  # drop explicit-first / deterministic skill selection
+}
+
+
+def resolve_config(model_spec: str, mode: str | None, baseline: bool = False):
     """Build a Config with the model endpoint + mode overridden. model_spec: 'main' (configured default)
-    or 'name=base_url|model'."""
+    or 'name=base_url|model'. baseline=True additionally disables the toggleable scaffolding."""
     from config import Config
     cfg = Config()
     updates = {}
@@ -98,6 +122,8 @@ def resolve_config(model_spec: str, mode: str | None):
             updates["model_name"] = model.strip()
     if mode:
         updates["tool_calling_mode"] = mode
+    if baseline:
+        updates.update(BASELINE_OVERRIDES)
     return cfg.model_copy(update=updates) if updates else cfg
 
 
@@ -167,10 +193,10 @@ async def _run_task(cfg, judge_fn, task: dict, k: int, timeout: float) -> dict:
 
 
 async def run_model(model_spec: str, params: int, mode: str | None, k: int, judge_spec: str,
-                    battery_path: Path, timeout: float) -> dict:
+                    battery_path: Path, timeout: float, baseline: bool = False) -> dict:
     from engine.eval.judge_runner import make_judge
     battery = json.loads(battery_path.read_text())
-    cfg = resolve_config(model_spec, mode)
+    cfg = resolve_config(model_spec, mode, baseline)
     judge_fn = make_judge(judge_spec)
     results = []
     for task in battery["tasks"]:
@@ -178,6 +204,7 @@ async def run_model(model_spec: str, params: int, mode: str | None, k: int, judg
     agg = aggregate(results)
     name = model_spec.partition("=")[0]
     return {"model": name, "params": params, "mode": mode or cfg.tool_calling_mode,
+            "scaffold": "off" if baseline else "on",   # Argus scaffolding on (full config) vs off (baseline arm)
             "max_tokens": cfg.model_max_tokens,   # completion cap this run used (reasoning models need headroom)
             "battery_version": battery["battery_version"], "k": k,
             "date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -213,8 +240,8 @@ def render_report(battery_version: str) -> tuple[str, bool]:
     lines = [f"# Model-Capability Benchmark — `{battery_version}`", "",
              f"{len(results)} model(s), by param count. Chain = deterministic tool-chain pass-rate; "
              "Judge = Opus quality mean (0–3). A tier's line falling off below some size is the shelf.", "",
-             "| model | params (B) | mode | max_tok | " + " | ".join(f"T{t} chain / judge" for t in tiers) + " | overall |",
-             "|---|---|---|---|" + "|".join(["---"] * (len(tiers) + 1)) + "|"]
+             "| model | params (B) | mode | scaffold | max_tok | " + " | ".join(f"T{t} chain / judge" for t in tiers) + " | overall |",
+             "|---|---|---|---|---|" + "|".join(["---"] * (len(tiers) + 1)) + "|"]
     def _pct(x):
         return "—" if x is None else f"{x:.0%}"
 
@@ -229,8 +256,8 @@ def render_report(battery_version: str) -> tuple[str, bool]:
         ov = r.get("overall", {})
         cells.append(f"{_pct(ov.get('chain_pass'))} / {_q(ov.get('judge_mean'))}")
         mt = r.get("max_tokens")
-        lines.append(f"| {r['model']} | {r['params']} | {r.get('mode', '?')} | {mt if mt is not None else '—'} | "
-                     + " | ".join(cells) + " |")
+        lines.append(f"| {r['model']} | {r['params']} | {r.get('mode', '?')} | {r.get('scaffold', 'on')} | "
+                     f"{mt if mt is not None else '—'} | " + " | ".join(cells) + " |")
     lines += ["",
               "`max_tok` = the completion-token cap for the run. `—` = not recorded (runs predating this "
               "field; the standard-config default is 2048). Runs at different caps are not strictly "
@@ -278,13 +305,16 @@ def main(argv=None):
     r.add_argument("--judge", default="claude:opus")
     r.add_argument("--battery", default=str(BENCH / "battery.json"))
     r.add_argument("--timeout", type=float, default=180.0)
+    r.add_argument("--baseline", action="store_true",
+                   help="disable the toggleable scaffolding (observer/verifier/clarify/rules/…) to "
+                        "measure Argus's lift over a plain agent loop")
     rep = sub.add_parser("report", help="regenerate report.md + curve.png from the results")
     rep.add_argument("--battery-version", default=None)
     args = p.parse_args(argv)
 
     if args.cmd == "run":
         result = asyncio.run(run_model(args.model, args.params, args.mode, args.k, args.judge,
-                                       Path(args.battery), args.timeout))
+                                       Path(args.battery), args.timeout, args.baseline))
         out = _write_result(result)
         print(f"\nresult: {out}")
         bv = result["battery_version"]
