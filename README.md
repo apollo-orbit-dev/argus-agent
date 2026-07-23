@@ -5,6 +5,13 @@
   </picture>
 </p>
 
+<p align="center">
+  <a href="https://github.com/apollo-orbit-dev/argus-agent/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/apollo-orbit-dev/argus-agent/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/apollo-orbit-dev/argus-agent/tags"><img alt="Version" src="https://img.shields.io/github/v/tag/apollo-orbit-dev/argus-agent?label=version&color=blue"></a>
+  <img alt="Python" src="https://img.shields.io/badge/python-3.11%2B-blue">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
+</p>
+
 A harness that makes a small (or modest) LLM reliably run multi-step agentic tasks — tools,
 skills, memory, scheduling — with a live-trace control dashboard so you can watch, and steer,
 every step it takes.
@@ -16,6 +23,29 @@ over-claiming — to be dependable. Point it at a frontier model over an API and
 point it at a 3B model on your own GPU and the harness is what keeps it honest.
 
 ![The Argus dashboard — the live trace after a calculator tool call](docs/screenshot.png)
+
+## What makes it different
+
+- **Watch and steer every step** — a live-trace dashboard (the "Observatory") shows each tool call
+  and model turn as it happens, and can pause the turn for your approval before a sensitive action runs.
+- **A reliability monitor watching the model** — a loop-health observer catches thrash (the same call
+  repeating, tools re-created but never run) and nudges or stops the turn; a post-action verifier
+  catches the model over-claiming what it actually did.
+- **The model can build its own tools** — `create_tool` lets it author new tools at runtime under a
+  soft, AST-gated sandbox with an SSRF egress guard.
+- **Real filesystem autonomy, contained** — opt in to run created tools and `exec_python` inside a
+  long-lived, rootless **podman** container: the full Python standard library and a real writable
+  workspace, egress-proxied so it reaches public APIs but not your LAN (or open up LAN access, or cut
+  the network entirely — your choice).
+- **Routines pin the plan** — named, ordered multi-step sequences run deterministically, on command
+  or on a schedule, so a recurring task isn't re-derived every time (skills can embed the same steps —
+  **~5× fewer model calls** in a live A/B).
+- **Rules that stick** — standing behavioral directives persist across every session and interface,
+  a distinct layer from factual memory.
+
+## Contents
+
+[Features](#features) · [Small-model scaffolding](#small-model-scaffolding) · [Measuring it](#measuring-it) · [Quickstart](#quickstart) · [CLI](#cli) · [Updating](#updating) · [Configuration](#configuration) · [Models](#models) · [Requirements](#requirements) · [Container sandbox](#container-sandbox) · [Security](#security) · [License](#license)
 
 ## Features
 
