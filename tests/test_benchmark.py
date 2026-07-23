@@ -16,6 +16,25 @@ def test_cap2_battery_validates():
     assert problems == [], "cap-2 battery invalid:\n" + "\n".join(problems)
 
 
+def test_cap2_battery_is_complete_and_balanced():
+    import json
+    b = json.loads(open("benchmark/cap-2/battery.json").read())
+    tasks = b["tasks"]
+    assert len(tasks) == 56
+    from collections import Counter
+    fam = Counter(t["category"] for t in tasks)
+    assert set(fam) == {"compute", "tool-selection", "retrieve", "data-transform", "synthesis", "restraint"}
+    assert all(v >= 4 for v in fam.values()), f"a family is under-represented: {fam}"
+    searxng = sum(1 for t in tasks if t.get("requires") == "searxng")
+    assert searxng <= 2
+    nodep = sum(1 for t in tasks if not t.get("requires"))
+    assert nodep >= 45
+    # every T3/T4 task has a real chain AND rubric (the cap-1 fix)
+    for t in tasks:
+        if t["tier"] in (3, 4):
+            assert (t.get("expect") or {}).get("tools_in_order") and t.get("rubric")
+
+
 def test_task_verdict_chain_threshold_and_judge_mean():
     # k=3, need >=ceil(1.8)=2 chain-correct to pass
     runs = [{"chain_correct": True, "judge_score": 3}, {"chain_correct": True, "judge_score": 2},
