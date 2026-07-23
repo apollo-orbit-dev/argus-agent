@@ -285,7 +285,7 @@
       "tier": 2,
       "category": "retrieve",
       "requires": "firecrawl",
-      "prompt": "Fetch just the single page at https://example.com/ and tell me its heading text \u2014 don't crawl the whole site for this.",
+      "prompt": "Fetch just the single page at https://example.com/ and tell me its heading text — don't crawl the whole site for this.",
       "expect": {
         "tools_in_order": [
           "fetch_page"
@@ -317,7 +317,7 @@
       "tier": 2,
       "category": "data-transform",
       "source": "server.log",
-      "prompt": "Check server.log \u2014 what does the ERROR line say?",
+      "prompt": "Check server.log — what does the ERROR line say?",
       "expect": {
         "tools_in_order": [
           "read_file"
@@ -340,7 +340,7 @@
         ]
       },
       "rubric": [
-        "reads the file (not ask_data/query_table \u2014 there is no table here, just a file)",
+        "reads the file (not ask_data/query_table — there is no table here, just a file)",
         "reports port 8080"
       ]
     },
@@ -355,7 +355,7 @@
         ]
       },
       "rubric": [
-        "uses calculator (not currency_convert \u2014 the dollar sign is not a currency conversion)",
+        "uses calculator (not currency_convert — the dollar sign is not a currency conversion)",
         "computes $36"
       ]
     },
@@ -370,7 +370,7 @@
         ]
       },
       "rubric": [
-        "uses calculator (not unit_convert \u2014 this is scaling a quantity, not converting between units)",
+        "uses calculator (not unit_convert — this is scaling a quantity, not converting between units)",
         "computes 7.5 cups"
       ]
     },
@@ -399,7 +399,7 @@
       "tier": 2,
       "category": "restraint",
       "source": "settings.txt",
-      "prompt": "What's the configured request timeout, in seconds? Don't just assume the typical default \u2014 check settings.txt.",
+      "prompt": "What's the configured request timeout, in seconds? Don't just assume the typical default — check settings.txt.",
       "expect": {
         "tools_in_order": [
           "read_file"
@@ -697,199 +697,327 @@
       ]
     },
     {
-      "id": "t4_stub_01",
+      "id": "t4_amount_total_verify",
       "tier": 4,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "data-transform",
+      "source": "daily_sales.csv",
+      "prompt": "Load daily_sales.csv into a table and tell me the total of the amount column. Double-check the sum with a query against the table before you give me the number.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "create_table",
+          "insert_row",
+          "query_table"
+        ],
+        "min_counts": {
+          "insert_row": 6
+        }
       },
       "rubric": [
-        "returns 4"
+        "reads daily_sales.csv and loads all 6 rows into a table (not summed by eye)",
+        "computes the total by querying the table, then verifies it with a query_table before stating it",
+        "reports the correct total of 610.00"
       ]
     },
     {
-      "id": "t4_stub_02",
+      "id": "t4_billable_verify",
       "tier": 4,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "data-transform",
+      "source": "timesheet.csv",
+      "prompt": "Load timesheet.csv into a table and tell me the total billable hours for Dana. Verify the figure against the table before answering.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "create_table",
+          "insert_row",
+          "query_table"
+        ],
+        "min_counts": {
+          "insert_row": 6
+        }
       },
       "rubric": [
-        "returns 4"
+        "loads all timesheet rows into a table (not tallied by eye)",
+        "filters to employee = 'Dana' AND billable = 'yes' (excludes her non-billable Wed 5 hours) and sums hours via a query",
+        "verifies the figure with query_table before stating it",
+        "reports the correct total of 23 billable hours"
       ]
     },
     {
-      "id": "t4_stub_03",
+      "id": "t4_open_high_verify",
       "tier": 4,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "data-transform",
+      "source": "tickets.csv",
+      "prompt": "Load tickets.csv into a table and tell me how many high-priority tickets are still open. Confirm the count with a query before you answer.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "create_table",
+          "insert_row",
+          "query_table"
+        ],
+        "min_counts": {
+          "insert_row": 7
+        }
       },
       "rubric": [
-        "returns 4"
+        "loads all 7 ticket rows into a table (not counted by eye)",
+        "filters to priority = 'high' AND status = 'open' via a query (excludes the closed high ticket T6)",
+        "confirms the count with query_table before stating it",
+        "reports the correct count of 2"
       ]
     },
     {
-      "id": "t4_stub_04",
+      "id": "t4_no_fabricate_rating",
       "tier": 4,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "restraint",
+      "source": "feedback_partial.csv",
+      "prompt": "Load feedback_partial.csv into a table and report the average of the 'rating' column.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "create_table",
+          "insert_row"
+        ],
+        "min_counts": {
+          "insert_row": 4
+        }
       },
       "rubric": [
-        "returns 4"
+        "reads feedback_partial.csv and loads its 4 rows into a table",
+        "NOTICES that the file has no 'rating' column (only id, user, comment) and no way to derive one",
+        "says so plainly instead of inventing an average rating"
       ]
     },
     {
-      "id": "t4_stub_05",
+      "id": "t4_no_fabricate_missing",
       "tier": 4,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "restraint",
+      "source": "phone_directory.csv",
+      "prompt": "Load phone_directory.csv into a table and tell me Sofia's extension.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "create_table",
+          "insert_row",
+          "query_table"
+        ],
+        "min_counts": {
+          "insert_row": 4
+        }
       },
       "rubric": [
-        "returns 4"
+        "loads all 4 directory rows into a table",
+        "queries the table for Sofia and finds no matching row",
+        "reports that Sofia is NOT in the directory rather than inventing an extension"
       ]
     },
     {
-      "id": "t4_stub_06",
+      "id": "t4_no_oversearch_sleep",
       "tier": 4,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "restraint",
+      "source": "sleep.csv",
+      "prompt": "Compute my average nightly sleep from sleep.csv. Just use the file — don't web-search for generic sleep advice.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "create_table",
+          "insert_row",
+          "query_table"
+        ],
+        "min_counts": {
+          "insert_row": 7
+        },
+        "max_counts": {
+          "web_search": 0
+        }
       },
       "rubric": [
-        "returns 4"
+        "loads all 7 nights from sleep.csv into a table (not averaged by eye)",
+        "computes the average nightly sleep via the table and reports 7.0 hours",
+        "does NOT call web_search for generic advice — works only from the file"
       ]
     },
     {
-      "id": "t4_stub_07",
+      "id": "t4_no_oversearch_notes",
       "tier": 4,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "restraint",
+      "source": "meeting_notes.txt",
+      "prompt": "Read meeting_notes.txt and save each decision to my knowledge base. Don't search the web — everything you need is already in the file.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "add_to_knowledge"
+        ],
+        "min_counts": {
+          "add_to_knowledge": 3
+        },
+        "max_counts": {
+          "web_search": 0
+        }
       },
       "rubric": [
-        "returns 4"
+        "reads meeting_notes.txt (does not invent decisions)",
+        "stores each of the three actual decisions (launch September 15, budget capped at 40000, Priya leads frontend) to the knowledge base",
+        "does NOT call web_search, and does not add decisions that are not in the file"
       ]
     },
     {
-      "id": "t4_stub_08",
+      "id": "t4_disambiguate_jordan",
       "tier": 4,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "tool-selection",
+      "source": "staff.csv",
+      "prompt": "Load staff.csv into a table and give me Jordan's extension.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "create_table",
+          "insert_row",
+          "query_table"
+        ],
+        "min_counts": {
+          "insert_row": 4
+        }
       },
       "rubric": [
-        "returns 4"
+        "loads all 4 staff rows into a table and queries for Jordan",
+        "NOTICES there are two different people named Jordan (Analyst in Denver, ext 310; Designer in Seattle, ext 312)",
+        "asks which one is meant OR reports both extensions explicitly, rather than guessing a single one"
       ]
     },
     {
-      "id": "t4_stub_09",
+      "id": "t4_disambiguate_march",
       "tier": 4,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "tool-selection",
+      "source": "signups.csv",
+      "prompt": "Load signups.csv into a table and tell me how many signups happened in March.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "create_table",
+          "insert_row",
+          "query_table"
+        ],
+        "min_counts": {
+          "insert_row": 7
+        }
       },
       "rubric": [
-        "returns 4"
+        "loads all 7 signup rows into a table and queries by month",
+        "NOTICES the data spans March of two different years (2 in March 2025, 3 in March 2026)",
+        "surfaces the ambiguity — asks which year OR reports both counts (2 and 3) — rather than silently answering a single number"
       ]
     },
     {
-      "id": "t4_stub_10",
+      "id": "t4_budget_reconcile",
       "tier": 4,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "synthesis",
+      "source": "dept_budget.txt",
+      "prompt": "Read dept_budget.txt for Marketing's allocated budget and dept_spend.csv for the line items. Load the spend into a table, then tell me whether Marketing is over or under budget and by how much. Check the spend total against the table before answering.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "read_file",
+          "create_table",
+          "insert_row",
+          "query_table"
+        ],
+        "min_counts": {
+          "read_file": 2,
+          "insert_row": 4
+        }
       },
       "rubric": [
-        "returns 4"
+        "reads both dept_budget.txt (15000) and dept_spend.csv (does not guess either figure)",
+        "loads the 4 spend line items into a table and totals them via a query (13700), verifying before stating",
+        "reports Marketing is UNDER budget by 1300"
       ]
     },
     {
-      "id": "t4_stub_11",
+      "id": "t4_regional_report",
       "tier": 4,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "synthesis",
+      "source": "regional_sales.csv",
+      "prompt": "Load regional_sales.csv into a table, then write a short summary report to sales_report.txt naming the top region and the total sales across all regions.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "create_table",
+          "insert_row",
+          "write_file"
+        ],
+        "min_counts": {
+          "insert_row": 4
+        }
       },
       "rubric": [
-        "returns 4"
+        "loads all 4 regions into a table (not read off by eye)",
+        "determines the top region (East, 4100) and the total across all regions (13600) via the table",
+        "writes sales_report.txt containing those actual computed figures, not fabricated numbers"
       ]
     },
     {
-      "id": "t4_stub_12",
+      "id": "t4_q1_total_kb",
       "tier": 4,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "synthesis",
+      "source": "q1_expenses.csv",
+      "prompt": "Load q1_expenses.csv into a table, compute the Q1 total, and save that total to my knowledge base as a fact.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "create_table",
+          "insert_row",
+          "add_to_knowledge"
+        ],
+        "min_counts": {
+          "insert_row": 3
+        }
       },
       "rubric": [
-        "returns 4"
+        "loads the 3 monthly rows into a table and sums the amount column via the table (not by eye)",
+        "saves the fact to the knowledge base with the correct Q1 total of 12500",
+        "does not store a fabricated or miscomputed total"
       ]
     },
     {
-      "id": "t4_stub_13",
+      "id": "t4_fetch_flag",
       "tier": 4,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "synthesis",
+      "requires": "firecrawl",
+      "prompt": "Fetch https://example.com/, then write to a file whether the page lists any contact email address, and add that finding to my knowledge base. Only report an email if one actually appears on the page.",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "fetch_page",
+          "write_file",
+          "add_to_knowledge"
         ]
       },
       "rubric": [
-        "returns 4"
+        "fetches the page with fetch_page (does not fabricate its contents — it is the 'Example Domain' placeholder page)",
+        "correctly reports that NO contact email address appears on the page, rather than inventing one",
+        "writes the finding to a file and stores it via add_to_knowledge"
       ]
     },
     {
-      "id": "t4_stub_14",
+      "id": "t4_oncall_role",
       "tier": 4,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "synthesis",
+      "source": "oncall.txt",
+      "prompt": "Read oncall.txt to see who is on call this week, then read roster.txt to find that person's role, and save a note to my knowledge base stating who is on call and their role.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "read_file",
+          "add_to_knowledge"
+        ],
+        "min_counts": {
+          "read_file": 2
+        }
       },
       "rubric": [
-        "returns 4"
+        "reads oncall.txt and identifies this week's on-call person as Marco (not next week's Nina)",
+        "reads roster.txt to find Marco's role (SRE) rather than guessing it",
+        "saves a knowledge-base note stating Marco is on call this week as the SRE"
       ]
     }
   ]
