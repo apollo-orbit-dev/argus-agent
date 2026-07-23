@@ -1425,7 +1425,12 @@ class Engine:
                     trust_store=self.trust, allow_trusted=c.enable_trusted_tools,
                     reserved_names=GATED_BUILTIN_NAMES,
                     approvals=(self.approvals if (c.enable_interactive_approvals and c.enable_dep_approval) else None),
-                    sandbox_runtime=self.sandbox, sandbox_workspace=c.sandbox_workspace,
+                    # Gate the runtime on the SAME per-run flag as sandbox_enabled (mirroring
+                    # exec_python at the top of this block): if the two disagreed, an explicit
+                    # sandboxed=true tool could execute in a live container while enable_sandbox
+                    # reads false for this run. Both derive from c.enable_sandbox, so they can't.
+                    sandbox_runtime=self.sandbox if c.enable_sandbox else None,
+                    sandbox_workspace=c.sandbox_workspace,
                     sandbox_enabled=c.enable_sandbox,
                     run_id=run_id, origin=origin))
                 system_prompt = system_prompt + "\n\n" + TOOL_CREATION_DIRECTIVE
