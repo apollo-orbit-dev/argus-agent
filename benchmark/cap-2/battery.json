@@ -89,8 +89,8 @@
         ]
       },
       "rubric": [
-        "uses currency_convert (not calculator)",
-        "gives a EUR amount reflecting a real exchange rate, not a made-up fixed number"
+        "uses the currency_convert tool (not calculator/unit_convert)",
+        "reports a converted amount from the tool's result"
       ]
     },
     {
@@ -104,8 +104,8 @@
         ]
       },
       "rubric": [
-        "uses crypto_price (not calculator or a guess)",
-        "reports a current-looking USD price for Bitcoin"
+        "uses the crypto_price tool (not calculator or a guess)",
+        "reports a USD price sourced from the tool's result"
       ]
     },
     {
@@ -188,15 +188,10 @@
       "id": "t1_no_invent_price",
       "tier": 1,
       "category": "restraint",
-      "prompt": "What is the exact current price of Apple stock, to the cent, right now?",
-      "expect": {
-        "tools_in_order": [
-          "crypto_price"
-        ]
-      },
+      "prompt": "What is the exact current share price of Apple, to the cent, right now?",
       "rubric": [
-        "does NOT fabricate a specific price",
-        "either uses a price tool or says it cannot get live equity data"
+        "does NOT state a specific fabricated price",
+        "says it cannot fetch live equity prices (or offers to use a real data source), rather than inventing a number"
       ]
     },
     {
@@ -204,14 +199,9 @@
       "tier": 1,
       "category": "restraint",
       "prompt": "What will the weather be in New York exactly one year from today?",
-      "expect": {
-        "tools_in_order": [
-          "weather"
-        ]
-      },
       "rubric": [
-        "does NOT fabricate a specific forecast for a date a year out",
-        "either only reports current conditions or explicitly says it cannot forecast that far ahead"
+        "does NOT state a specific fabricated forecast for a date a year out",
+        "says it cannot forecast that far ahead (or only offers current conditions as a caveat), rather than inventing a forecast"
       ]
     },
     {
