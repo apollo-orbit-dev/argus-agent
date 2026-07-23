@@ -72,6 +72,7 @@ class FakeRuntime:
     available_: bool = True
     result: ExecResult | None = None
     calls: list = field(default_factory=list)
+    exec_stdin: list = field(default_factory=list)
     started: set = field(default_factory=set)
     stopped: list = field(default_factory=list)
     egress_ready: bool = False
@@ -100,6 +101,7 @@ class FakeRuntime:
         if not self.available_:
             raise SandboxUnavailable("fake runtime is unavailable")
         self.calls.append((name, list(argv)))
+        self.exec_stdin.append(stdin)
         return self.result if self.result is not None else ExecResult(0, "", "")
 
     def stop(self, name: str) -> None:

@@ -397,15 +397,57 @@ def _make_call_tool(registry, loop, timeout: float = 120.0) -> Callable:
 
 
 class DynamicTool(Tool):
-    def __init__(self, name, description, params_model, run_fn, timeout=15.0, registry=None):
+    def __init__(self, name, description, params_model, run_fn=None, timeout=15.0, registry=None,
+                 *, sandboxed=False, code="", runtime=None, workspace="default"):
         self.name = name
         self.description = description
         self.Params = params_model
-        self._run_fn = run_fn
+        self._run_fn = run_fn                # host-side compiled fn; None for a sandboxed tool
         self._timeout = timeout
-        self.registry = registry            # enables CALL_TOOL composition when set
+        self.registry = registry             # enables CALL_TOOL composition (host-side only)
+        # Container path (stage 2b): when sandboxed, the raw code runs in the sandbox container via
+        # runner.py — full stdlib, no AST gate, NO composition. run_fn is unused.
+        self.sandboxed = sandboxed
+        self.code = code
+        self.runtime = runtime               # SandboxRuntime | None
+        self.workspace = workspace
 
     async def run(self, args: BaseModel) -> str:
+        if self.sandboxed:
+            return await self._run_in_container(args)
+        return await self._run_host_side(args)
+
+    async def _run_in_container(self, args: BaseModel) -> str:
+        """Ship {code, args} to runner.py in the container and parse the JSON result. Fail CLOSED:
+        a sandboxed tool was authored assuming the full stdlib (it may `import os`), so if the
+        sandbox is off/unavailable it must refuse — never run host-side."""
+        import json as _json
+
+        from engine.sandbox.runtime import SandboxUnavailable
+        if self.runtime is None or not self.runtime.available():
+            return (f"{self.name}: this tool runs in the container sandbox, which is currently off "
+                    "or unavailable. Enable it in the dashboard's Settings > Sandbox, then try again.")
+        payload = _json.dumps({"code": self.code, "args": args.model_dump()})
+        loop = asyncio.get_running_loop()
+        try:
+            r = await loop.run_in_executor(None, lambda: self.runtime.exec(
+                self.workspace, ["python", "/opt/argus/runner.py"], stdin=payload,
+                timeout=self._timeout))
+        except SandboxUnavailable as e:
+            return f"{self.name}: the sandbox is unavailable ({e})."
+        except Exception as e:                       # noqa: BLE001 - never crash the loop
+            return f"{self.name} error: {type(e).__name__}: {e}"
+        if r.timed_out:
+            return f"{self.name} error: timed out after {self._timeout}s"
+        try:
+            out = _json.loads(r.stdout or "{}")
+        except Exception:
+            return f"{self.name} error: bad runner output: {(r.stdout or r.stderr)[:400]}"
+        if out.get("ok"):
+            return str(out.get("result", ""))
+        return f"{self.name} error: {out.get('error', 'unknown error')}"
+
+    async def _run_host_side(self, args: BaseModel) -> str:
         payload = args.model_dump()
         loop = asyncio.get_running_loop()
         call_tool = _make_call_tool(self.registry, loop)

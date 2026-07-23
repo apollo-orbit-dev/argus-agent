@@ -597,3 +597,61 @@ async def test_created_tool_can_compose_a_builtin(tmp_path):
         assert await t.run(P(location="Milton, FL")) == "30.63241,-87.03969"
     finally:
         httpx.AsyncClient.__init__ = real_init
+
+
+# ---- sandboxed DynamicTool (stage 2b: container execution path) ----
+
+import json as _json
+
+from engine.sandbox.runtime import ExecResult, FakeRuntime
+
+
+class _P(BaseModel):
+    a: int = 0
+
+
+async def test_sandboxed_tool_runs_via_the_runtime():
+    """A sandboxed tool ships {code, args} to runner.py in the container and parses the JSON back."""
+    fake = FakeRuntime(result=ExecResult(0, _json.dumps({"ok": True, "result": "42"}), ""))
+    t = DynamicTool("mytool", "d", _P, run_fn=None, timeout=30, sandboxed=True,
+                    code="def run(args): return '42'", runtime=fake, workspace="default")
+    out = await t.run(_P(a=1))
+    assert out == "42"
+    # it called exec on the right workspace, running runner.py, with the code+args on stdin
+    name, argv = fake.calls[0]
+    assert name == "default"
+    assert argv == ["python", "/opt/argus/runner.py"]
+    stdin = fake.exec_stdin[0]
+    payload = _json.loads(stdin)
+    assert payload["code"] == "def run(args): return '42'" and payload["args"] == {"a": 1}
+
+
+async def test_sandboxed_tool_surfaces_a_container_error():
+    fake = FakeRuntime(result=ExecResult(0, _json.dumps(
+        {"ok": False, "error": "ValueError: boom", "traceback": "..."}), ""))
+    t = DynamicTool("mytool", "d", _P, sandboxed=True, code="x", runtime=fake)
+    out = await t.run(_P())
+    assert "mytool error" in out and "ValueError: boom" in out
+
+
+async def test_sandboxed_tool_refuses_when_the_sandbox_is_unavailable():
+    """Fail closed: authored assuming the full stdlib, so it must NOT run host-side when off."""
+    t = DynamicTool("mytool", "d", _P, sandboxed=True, code="x",
+                    runtime=FakeRuntime(available_=False))
+    out = await t.run(_P())
+    assert "sandbox" in out.lower() and "mytool" in out
+    # and it did NOT execute anything
+    assert FakeRuntime(available_=False).calls == []
+
+
+async def test_sandboxed_tool_refuses_when_runtime_is_none():
+    t = DynamicTool("mytool", "d", _P, sandboxed=True, code="x", runtime=None)
+    out = await t.run(_P())
+    assert "sandbox" in out.lower()
+
+
+async def test_sandboxed_tool_reports_a_container_timeout():
+    fake = FakeRuntime(result=ExecResult(124, "", "", timed_out=True))
+    t = DynamicTool("mytool", "d", _P, sandboxed=True, code="x", runtime=fake, timeout=30)
+    out = await t.run(_P())
+    assert "timed out" in out.lower()
