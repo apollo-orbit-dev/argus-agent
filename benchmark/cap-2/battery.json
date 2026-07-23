@@ -411,199 +411,289 @@
       ]
     },
     {
-      "id": "t3_stub_01",
+      "id": "t3_orders_shipped",
       "tier": 3,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "data-transform",
+      "source": "orders.csv",
+      "prompt": "Load orders.csv into a table and tell me how many orders have a status of 'shipped'.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "create_table",
+          "insert_row"
+        ],
+        "min_counts": {
+          "insert_row": 8
+        }
       },
       "rubric": [
-        "returns 4"
+        "reads orders.csv and loads its rows into a table (not counted by eye)",
+        "queries the table for status = 'shipped'",
+        "reports the correct count of 4 shipped orders"
       ]
     },
     {
-      "id": "t3_stub_02",
+      "id": "t3_invoice_total",
       "tier": 3,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "data-transform",
+      "source": "invoice.csv",
+      "prompt": "Load the line items from invoice.csv into a table and give me the total of the line_total column.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "create_table",
+          "insert_row"
+        ],
+        "min_counts": {
+          "insert_row": 5
+        }
       },
       "rubric": [
-        "returns 4"
+        "one table row per line item (5 items)",
+        "computes the total by summing the line_total column via the table, not by eye",
+        "reports the correct total of 840.00"
       ]
     },
     {
-      "id": "t3_stub_03",
+      "id": "t3_expenses_travel",
       "tier": 3,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "data-transform",
+      "source": "expenses.csv",
+      "prompt": "Load expenses.csv into a table and tell me the total amount spent in the 'Travel' category.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "create_table",
+          "insert_row"
+        ],
+        "min_counts": {
+          "insert_row": 7
+        }
       },
       "rubric": [
-        "returns 4"
+        "loads the expense rows into a table (not summed by eye)",
+        "filters to category = 'Travel' and sums the amount",
+        "reports the correct Travel total of 400.00"
       ]
     },
     {
-      "id": "t3_stub_04",
+      "id": "t3_inventory_reorder",
       "tier": 3,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "data-transform",
+      "source": "inventory.csv",
+      "prompt": "Load inventory.csv into a table and tell me how many items are below their reorder level (on_hand less than reorder_level).",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "create_table",
+          "insert_row"
+        ],
+        "min_counts": {
+          "insert_row": 7
+        }
       },
       "rubric": [
-        "returns 4"
+        "loads the inventory rows into a table (not judged by eye)",
+        "queries for rows where on_hand < reorder_level",
+        "reports the correct count of 4 items below reorder level"
       ]
     },
     {
-      "id": "t3_stub_05",
+      "id": "t3_sales_topproduct",
       "tier": 3,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "data-transform",
+      "source": "sales.csv",
+      "prompt": "Load sales.csv into a table and tell me which product has the highest total revenue, and what that total is.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "create_table",
+          "insert_row"
+        ],
+        "min_counts": {
+          "insert_row": 9
+        }
       },
       "rubric": [
-        "returns 4"
+        "loads the sales rows into a table (not eyeballed)",
+        "aggregates revenue per product via the table",
+        "reports Widget A as the top product with a total revenue of 780.00"
       ]
     },
     {
-      "id": "t3_stub_06",
+      "id": "t3_budget_remaining",
       "tier": 3,
       "category": "compute",
-      "prompt": "What is 2+2?",
+      "source": "budget.txt",
+      "prompt": "Read budget.txt and tell me how much of the budget is remaining (total budget minus spent to date).",
       "expect": {
         "tools_in_order": [
+          "read_file",
           "calculator"
         ]
       },
       "rubric": [
-        "returns 4"
+        "reads budget.txt for the total budget and spent-to-date figures (does not guess)",
+        "subtracts spent from total using the calculator",
+        "reports the correct remaining amount of 17550"
       ]
     },
     {
-      "id": "t3_stub_07",
+      "id": "t3_receipt_total",
       "tier": 3,
       "category": "compute",
-      "prompt": "What is 2+2?",
+      "source": "receipt.txt",
+      "prompt": "Read receipt.txt and tell me the final total including tax.",
       "expect": {
         "tools_in_order": [
+          "read_file",
           "calculator"
         ]
       },
       "rubric": [
-        "returns 4"
+        "reads receipt.txt for the subtotal (80.00) and tax rate (8%)",
+        "applies the 8% tax with the calculator",
+        "reports the correct final total of 86.40"
       ]
     },
     {
-      "id": "t3_stub_08",
+      "id": "t3_headcount_cost",
       "tier": 3,
       "category": "compute",
-      "prompt": "What is 2+2?",
+      "source": "staffing.txt",
+      "prompt": "Read staffing.txt and tell me the total monthly staff cost.",
       "expect": {
         "tools_in_order": [
+          "read_file",
           "calculator"
         ]
       },
       "rubric": [
-        "returns 4"
+        "reads staffing.txt for the headcounts and per-person costs (does not fabricate)",
+        "computes 4*9000 + 2*7000 with the calculator",
+        "reports the correct total monthly cost of 50000"
       ]
     },
     {
-      "id": "t3_stub_09",
+      "id": "t3_actions_to_kb",
       "tier": 3,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "retrieve",
+      "source": "standup.txt",
+      "prompt": "Read standup.txt and save each action item to my knowledge base.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "add_to_knowledge"
+        ],
+        "min_counts": {
+          "add_to_knowledge": 3
+        }
       },
       "rubric": [
-        "returns 4"
+        "reads standup.txt (does not invent items)",
+        "stores each of the three distinct action items to the knowledge base",
+        "does not add items that are not in the file"
       ]
     },
     {
-      "id": "t3_stub_10",
+      "id": "t3_specs_to_kb",
       "tier": 3,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "retrieve",
+      "source": "product_specs.txt",
+      "prompt": "Read product_specs.txt and save each key spec to my knowledge base.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "add_to_knowledge"
+        ],
+        "min_counts": {
+          "add_to_knowledge": 3
+        }
       },
       "rubric": [
-        "returns 4"
+        "reads product_specs.txt (does not fabricate specs)",
+        "stores each of the three key specs (battery life, weight, waterproof rating) to the knowledge base",
+        "does not invent specs not present in the file"
       ]
     },
     {
-      "id": "t3_stub_11",
+      "id": "t3_quarterly_total",
       "tier": 3,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "synthesis",
+      "source": "quarterly.csv",
+      "prompt": "Load quarterly.csv into a table and tell me the full-year total revenue across all four quarters.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "create_table",
+          "insert_row"
+        ],
+        "min_counts": {
+          "insert_row": 4
+        }
       },
       "rubric": [
-        "returns 4"
+        "loads the four quarterly rows into a table (not summed by eye)",
+        "sums the revenue column across all quarters via the table",
+        "reports the correct full-year total of 585000"
       ]
     },
     {
-      "id": "t3_stub_12",
+      "id": "t3_survey_winner",
       "tier": 3,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "synthesis",
+      "source": "survey.csv",
+      "prompt": "Load survey.csv into a table and tell me which choice got the most votes, and how many votes it got.",
       "expect": {
         "tools_in_order": [
-          "calculator"
-        ]
+          "read_file",
+          "create_table",
+          "insert_row"
+        ],
+        "min_counts": {
+          "insert_row": 8
+        }
       },
       "rubric": [
-        "returns 4"
+        "loads the survey responses into a table (not tallied by eye)",
+        "counts votes per choice via the table",
+        "reports 'Blue' as the winning choice with 4 votes"
       ]
     },
     {
-      "id": "t3_stub_13",
+      "id": "t3_fetch_to_kb",
       "tier": 3,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "synthesis",
+      "requires": "firecrawl",
+      "prompt": "Fetch https://example.com/ and save a short note to my knowledge base describing what that page is.",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "fetch_page",
+          "add_to_knowledge"
         ]
       },
       "rubric": [
-        "returns 4"
+        "fetches the page (does not fabricate its contents)",
+        "the saved note reflects the page's actual content (the 'Example Domain' illustrative-examples placeholder page)",
+        "uses add_to_knowledge to store the note"
       ]
     },
     {
-      "id": "t3_stub_14",
+      "id": "t3_fetch_summary",
       "tier": 3,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "synthesis",
+      "requires": "firecrawl",
+      "prompt": "Fetch https://example.com/ and write its main text to a file called example_summary.txt.",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "fetch_page",
+          "write_file"
         ]
       },
       "rubric": [
-        "returns 4"
+        "fetches the page (does not fabricate its contents)",
+        "writes a file whose contents reflect the page's actual text (Example Domain / illustrative-examples wording)",
+        "uses write_file to save the summary"
       ]
     },
     {

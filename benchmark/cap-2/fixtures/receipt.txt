@@ -1,0 +1,4 @@
+Restaurant receipt — Table 7
+
+Subtotal: 80.00
+Tax rate: 8%
