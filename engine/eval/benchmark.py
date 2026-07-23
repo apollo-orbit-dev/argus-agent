@@ -69,7 +69,24 @@ def aggregate(tasks: list) -> dict:
     return {"per_tier": per_tier, "overall": roll(tasks)}
 
 
-def build_series(results: list, battery_version: str) -> dict:
+def _backfill_solved(result: dict) -> dict:
+    """Ensure per_tier/overall carry a `solved` rate. Fresh runs already do (Task 1); older results
+    predate the metric, so recompute it from each task's stored per-run chain_correct/judge_score."""
+    if result.get("overall", {}).get("solved") is not None:
+        return result
+    k = result.get("k", 3)
+    tasks = []
+    for t in result.get("tasks", []):
+        v = task_verdict(t.get("runs", []), k) if t.get("runs") else {}
+        tasks.append({"tier": t["tier"], "chain_pass": t.get("chain_pass"),
+                      "judge_mean": t.get("judge_mean"), "solved": v.get("solved"),
+                      "skipped": t.get("skipped", False)})
+    agg = aggregate(tasks)
+    result["per_tier"], result["overall"] = agg["per_tier"], agg["overall"]
+    return result
+
+
+def build_series(results: list, battery_version: str, metric: str = "chain_pass") -> dict:
     """Group committed result dicts (of one battery_version) into per-tier series sorted by params:
     {tier: [(params, chain_pass, judge_mean), ...]}."""
     rows = [r for r in results if r.get("battery_version") == battery_version]
@@ -96,7 +113,7 @@ def build_series(results: list, battery_version: str) -> dict:
         for r in rows:
             pt = r.get("per_tier", {}).get(tier)
             if pt:
-                pts.append((r["params"], pt.get("chain_pass"), pt.get("judge_mean")))
+                pts.append((r["params"], pt.get(metric), pt.get("judge_mean")))
         series[tier] = pts
     return series
 
@@ -239,7 +256,8 @@ def _write_result(result: dict) -> Path:
 
 
 def _load_results() -> list:
-    return [json.loads(p.read_text()) for p in sorted(RESULTS.glob("*.json")) if p.name != "index.json"]
+    return [_backfill_solved(json.loads(p.read_text()))
+            for p in sorted(RESULTS.glob("*.json")) if p.name != "index.json"]
 
 
 def render_report(battery_version: str) -> tuple[str, bool]:
@@ -251,8 +269,8 @@ def render_report(battery_version: str) -> tuple[str, bool]:
     lines = [f"# Model-Capability Benchmark — `{battery_version}`", "",
              f"{len(results)} model(s), by param count. Chain = deterministic tool-chain pass-rate; "
              "Judge = Opus quality mean (0–3). A tier's line falling off below some size is the shelf.", "",
-             "| model | params (B) | mode | scaffold | max_tok | " + " | ".join(f"T{t} chain / judge" for t in tiers) + " | overall |",
-             "|---|---|---|---|---|" + "|".join(["---"] * (len(tiers) + 1)) + "|"]
+             "| model | params (B) | mode | scaffold | max_tok | solved | " + " | ".join(f"T{t} chain / judge" for t in tiers) + " | overall |",
+             "|---|---|---|---|---|---|" + "|".join(["---"] * (len(tiers) + 1)) + "|"]
     def _pct(x):
         return "—" if x is None else f"{x:.0%}"
 
@@ -267,8 +285,9 @@ def render_report(battery_version: str) -> tuple[str, bool]:
         ov = r.get("overall", {})
         cells.append(f"{_pct(ov.get('chain_pass'))} / {_q(ov.get('judge_mean'))}")
         mt = r.get("max_tokens")
+        solved = ov.get("solved")
         lines.append(f"| {r['model']} | {r['params']} | {r.get('mode', '?')} | {r.get('scaffold', 'on')} | "
-                     f"{mt if mt is not None else '—'} | " + " | ".join(cells) + " |")
+                     f"{mt if mt is not None else '—'} | {_pct(solved)} | " + " | ".join(cells) + " |")
     lines += ["",
               "`max_tok` = the completion-token cap for the run. `—` = not recorded (runs predating this "
               "field; the standard-config default is 2048). Runs at different caps are not strictly "

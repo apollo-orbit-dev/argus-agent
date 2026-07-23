@@ -1,5 +1,6 @@
 """Benchmark pure helpers: task_verdict, aggregate, build_series, resolve_config."""
-from engine.eval.benchmark import aggregate, build_series, resolve_config, task_verdict
+from engine.eval.benchmark import (_backfill_solved, aggregate, build_series, render_report,
+                                    resolve_config, task_verdict, _write_result)
 
 
 def test_task_verdict_chain_threshold_and_judge_mean():
@@ -109,3 +110,38 @@ def test_aggregate_rolls_up_solved():
              {"tier": 1, "chain_pass": True, "judge_mean": 1.0, "solved": False, "skipped": False}]
     agg = aggregate(tasks)
     assert agg["per_tier"]["1"]["solved"] == 0.5 and agg["overall"]["solved"] == 0.5
+
+
+def _fake_result(model, params, per_tier_solved):
+    # a minimal result with runs so solved is derivable; one task per tier
+    tasks = []
+    for tier, solved in per_tier_solved.items():
+        runs = [{"chain_correct": True, "judge_score": 3 if solved else 1}] * 3
+        tasks.append({"id": f"x{tier}", "tier": tier, "category": "compute",
+                      "skipped": False, "chain_pass": True, "judge_mean": 3.0 if solved else 1.0, "runs": runs})
+    return {"model": model, "params": params, "mode": "native", "scaffold": "on",
+            "max_tokens": 2048, "battery_version": "cap-1", "k": 3,
+            "date": "2026-01-01T00:00:00+00:00",
+            "per_tier": {}, "overall": {}, "tasks": tasks}
+
+
+def test_backfill_solved_derives_from_runs_when_missing():
+    r = _fake_result("m", 3, {1: True, 2: False})
+    out = _backfill_solved(r)
+    assert out["per_tier"]["1"]["solved"] == 1.0
+    assert out["per_tier"]["2"]["solved"] == 0.0
+    assert out["overall"]["solved"] == 0.5
+
+
+def test_render_report_has_solved_column():
+    # render on a battery version present via _load_results is integration-heavy; test the string builder
+    # by monkeypatching _load_results through a written file is overkill — assert the header names solved.
+    from engine.eval import benchmark as B
+    md, ok = B.render_report("cap-1")  # cap-1 results exist in the repo
+    assert ok and "solved" in md.splitlines()[4].lower()  # header row includes the column
+
+
+def test_build_series_metric_solved():
+    r = _backfill_solved(_fake_result("m", 3, {1: True}))
+    s = build_series([r], "cap-1", metric="solved")
+    assert s["1"][0][1] == 1.0   # (params, value, judge) — value is the solved rate for metric=solved
