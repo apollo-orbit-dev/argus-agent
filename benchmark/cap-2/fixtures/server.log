@@ -1,0 +1,6 @@
+2026-03-04 08:12:01 INFO  server started on port 8080
+2026-03-04 08:12:05 INFO  connected to database
+2026-03-04 08:14:22 WARN  slow query detected (1.8s)
+2026-03-04 08:15:47 ERROR failed to connect to payment gateway: timeout after 30s
+2026-03-04 08:16:00 INFO  retrying payment gateway connection
+2026-03-04 08:16:03 INFO  payment gateway connection restored

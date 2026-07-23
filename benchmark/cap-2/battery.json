@@ -205,199 +205,209 @@
       ]
     },
     {
-      "id": "t2_stub_01",
+      "id": "t2_read_not_guess",
       "tier": 2,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "tool-selection",
+      "source": "notes.txt",
+      "prompt": "According to notes.txt, what time is the Thursday standup?",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "read_file"
         ]
       },
       "rubric": [
-        "returns 4"
+        "reads the file rather than answering from nothing",
+        "reports 9:30 AM as the Thursday standup time"
       ]
     },
     {
-      "id": "t2_stub_02",
+      "id": "t2_convert_currency",
       "tier": 2,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "tool-selection",
+      "prompt": "How much is 200 USD in euros?",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "currency_convert"
         ]
       },
       "rubric": [
-        "returns 4"
+        "uses currency_convert (not unit_convert or calculator)",
+        "reports a converted amount from the tool's result"
       ]
     },
     {
-      "id": "t2_stub_03",
+      "id": "t2_define_not_wiki",
       "tier": 2,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "tool-selection",
+      "prompt": "What does the word 'meticulous' mean?",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "dictionary"
         ]
       },
       "rubric": [
-        "returns 4"
+        "uses dictionary (not wikipedia)",
+        "gives a definition matching the 'very careful and precise' sense"
       ]
     },
     {
-      "id": "t2_stub_04",
+      "id": "t2_kb_add",
       "tier": 2,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "retrieve",
+      "prompt": "Save this fact to my knowledge base: 'Our S3 bucket is named argus-prod-eu'.",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "add_to_knowledge"
         ]
       },
       "rubric": [
-        "returns 4"
+        "uses add_to_knowledge (not write_file)",
+        "confirms the fact was stored"
       ]
     },
     {
-      "id": "t2_stub_05",
+      "id": "t2_geocode_coords",
       "tier": 2,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "retrieve",
+      "prompt": "What are the latitude and longitude coordinates of Nairobi, Kenya?",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "geocode"
         ]
       },
       "rubric": [
-        "returns 4"
+        "uses geocode (not weather or wikipedia)",
+        "reports a latitude and a longitude value for Nairobi"
       ]
     },
     {
-      "id": "t2_stub_06",
+      "id": "t2_fetch_single_page",
       "tier": 2,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "retrieve",
+      "requires": "firecrawl",
+      "prompt": "Fetch just the single page at https://example.com/ and tell me its heading text \u2014 don't crawl the whole site for this.",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "fetch_page"
         ]
       },
       "rubric": [
-        "returns 4"
+        "uses fetch_page for one page (not crawl_site or map_site)",
+        "reports the page's heading as 'Example Domain' (or paraphrases the placeholder/example-domain content)"
       ]
     },
     {
-      "id": "t2_stub_07",
+      "id": "t2_countrows",
       "tier": 2,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "data-transform",
+      "source": "sales.csv",
+      "prompt": "How many rows of data are in sales.csv?",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "read_file"
         ]
       },
       "rubric": [
-        "returns 4"
+        "reads the file",
+        "reports 9 rows of data (not counting the header row)"
       ]
     },
     {
-      "id": "t2_stub_08",
+      "id": "t2_log_error_line",
       "tier": 2,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "data-transform",
+      "source": "server.log",
+      "prompt": "Check server.log \u2014 what does the ERROR line say?",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "read_file"
         ]
       },
       "rubric": [
-        "returns 4"
+        "reads the file rather than guessing",
+        "reports the error message 'failed to connect to payment gateway: timeout after 30s'"
       ]
     },
     {
-      "id": "t2_stub_09",
+      "id": "t2_config_port",
       "tier": 2,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "data-transform",
+      "source": "config.json",
+      "prompt": "What port does config.json say the server listens on?",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "read_file"
         ]
       },
       "rubric": [
-        "returns 4"
+        "reads the file (not ask_data/query_table \u2014 there is no table here, just a file)",
+        "reports port 8080"
       ]
     },
     {
-      "id": "t2_stub_10",
+      "id": "t2_calc_discount",
       "tier": 2,
       "category": "compute",
-      "prompt": "What is 2+2?",
+      "prompt": "A shirt costs $45. With a 20% discount, what's the final price?",
       "expect": {
         "tools_in_order": [
           "calculator"
         ]
       },
       "rubric": [
-        "returns 4"
+        "uses calculator (not currency_convert \u2014 the dollar sign is not a currency conversion)",
+        "computes $36"
       ]
     },
     {
-      "id": "t2_stub_11",
+      "id": "t2_calc_scale_recipe",
       "tier": 2,
       "category": "compute",
-      "prompt": "What is 2+2?",
+      "prompt": "A recipe uses 3 cups of flour. If I want to make 2.5 times the recipe, how much flour do I need?",
       "expect": {
         "tools_in_order": [
           "calculator"
         ]
       },
       "rubric": [
-        "returns 4"
+        "uses calculator (not unit_convert \u2014 this is scaling a quantity, not converting between units)",
+        "computes 7.5 cups"
       ]
     },
     {
-      "id": "t2_stub_12",
+      "id": "t2_no_guess_email_count",
       "tier": 2,
-      "category": "compute",
-      "prompt": "What is 2+2?",
-      "expect": {
-        "tools_in_order": [
-          "calculator"
-        ]
-      },
+      "category": "restraint",
+      "prompt": "How many unread emails do I currently have in my inbox?",
       "rubric": [
-        "returns 4"
+        "does NOT state a specific fabricated unread-email count",
+        "says it has no access to the user's email/inbox (no such tool), rather than inventing a number"
       ]
     },
     {
-      "id": "t2_stub_13",
+      "id": "t2_no_guess_traffic",
       "tier": 2,
-      "category": "compute",
-      "prompt": "What is 2+2?",
-      "expect": {
-        "tools_in_order": [
-          "calculator"
-        ]
-      },
+      "category": "restraint",
+      "prompt": "Exactly how many minutes will my drive to the airport take right now, in current traffic?",
       "rubric": [
-        "returns 4"
+        "does NOT state a specific fabricated drive time or ETA",
+        "says it cannot access live traffic/route data (no such tool), rather than inventing a number of minutes"
       ]
     },
     {
-      "id": "t2_stub_14",
+      "id": "t2_no_guess_setting",
       "tier": 2,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "restraint",
+      "source": "settings.txt",
+      "prompt": "What's the configured request timeout, in seconds? Don't just assume the typical default \u2014 check settings.txt.",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "read_file"
         ]
       },
       "rubric": [
-        "returns 4"
+        "uses read_file rather than assuming a common default like 30 seconds",
+        "reports the actual configured value of 47 seconds"
       ]
     },
     {
