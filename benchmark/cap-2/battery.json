@@ -8,199 +8,210 @@
   },
   "tasks": [
     {
-      "id": "t1_stub_01",
+      "id": "t1_calc_area",
       "tier": 1,
       "category": "compute",
-      "prompt": "What is 2+2?",
+      "prompt": "What is 47 * 89?",
       "expect": {
         "tools_in_order": [
           "calculator"
         ]
       },
       "rubric": [
-        "returns 4"
+        "computes 4183 via the calculator tool"
       ]
     },
     {
-      "id": "t1_stub_02",
+      "id": "t1_calc_percent",
       "tier": 1,
       "category": "compute",
-      "prompt": "What is 2+2?",
+      "prompt": "What is 15 percent of 340?",
       "expect": {
         "tools_in_order": [
           "calculator"
         ]
       },
       "rubric": [
-        "returns 4"
+        "computes 51 via the calculator tool"
       ]
     },
     {
-      "id": "t1_stub_03",
+      "id": "t1_calc_arith",
       "tier": 1,
       "category": "compute",
-      "prompt": "What is 2+2?",
+      "prompt": "What is (123 + 456) * 3?",
       "expect": {
         "tools_in_order": [
           "calculator"
         ]
       },
       "rubric": [
-        "returns 4"
+        "computes 1737 via the calculator tool"
       ]
     },
     {
-      "id": "t1_stub_04",
+      "id": "t1_calc_sqrt",
       "tier": 1,
       "category": "compute",
-      "prompt": "What is 2+2?",
+      "prompt": "What is the square root of 225?",
       "expect": {
         "tools_in_order": [
           "calculator"
         ]
       },
       "rubric": [
-        "returns 4"
+        "computes 15 via the calculator tool"
       ]
     },
     {
-      "id": "t1_stub_05",
+      "id": "t1_pick_unit",
       "tier": 1,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "tool-selection",
+      "prompt": "How many kilometers is 12 miles?",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "unit_convert"
         ]
       },
       "rubric": [
-        "returns 4"
+        "uses unit_convert (not calculator)",
+        "answer ~19.31 km"
       ]
     },
     {
-      "id": "t1_stub_06",
+      "id": "t1_pick_currency",
       "tier": 1,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "tool-selection",
+      "prompt": "Convert 100 US dollars to euros.",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "currency_convert"
         ]
       },
       "rubric": [
-        "returns 4"
+        "uses currency_convert (not calculator)",
+        "gives a EUR amount reflecting a real exchange rate, not a made-up fixed number"
       ]
     },
     {
-      "id": "t1_stub_07",
+      "id": "t1_pick_crypto",
       "tier": 1,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "tool-selection",
+      "prompt": "What is the current price of Bitcoin in US dollars?",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "crypto_price"
         ]
       },
       "rubric": [
-        "returns 4"
+        "uses crypto_price (not calculator or a guess)",
+        "reports a current-looking USD price for Bitcoin"
       ]
     },
     {
-      "id": "t1_stub_08",
+      "id": "t1_define",
       "tier": 1,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "retrieve",
+      "prompt": "What does the word 'ephemeral' mean?",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "dictionary"
         ]
       },
       "rubric": [
-        "returns 4"
+        "uses the dictionary tool",
+        "gives the 'short-lived' sense"
       ]
     },
     {
-      "id": "t1_stub_09",
+      "id": "t1_wiki_summary",
       "tier": 1,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "retrieve",
+      "prompt": "Give me a short summary of what the Eiffel Tower is.",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "wikipedia"
         ]
       },
       "rubric": [
-        "returns 4"
+        "uses the wikipedia tool",
+        "summary identifies it as a landmark/tower in Paris, France"
       ]
     },
     {
-      "id": "t1_stub_10",
+      "id": "t1_fetch_example",
       "tier": 1,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "retrieve",
+      "requires": "firecrawl",
+      "prompt": "Fetch https://example.com/ and tell me what the page says.",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "fetch_page"
         ]
       },
       "rubric": [
-        "returns 4"
+        "uses fetch_page to retrieve the URL",
+        "mentions the page is a placeholder/example domain for illustrative use"
       ]
     },
     {
-      "id": "t1_stub_11",
+      "id": "t1_text_count",
       "tier": 1,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "data-transform",
+      "prompt": "How many words are in this sentence: 'The quick brown fox jumps over the lazy dog'?",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "text_tools"
         ]
       },
       "rubric": [
-        "returns 4"
+        "uses text_tools (action='count')",
+        "reports 9 words"
       ]
     },
     {
-      "id": "t1_stub_12",
+      "id": "t1_text_b64",
       "tier": 1,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "data-transform",
+      "prompt": "Base64-encode the text 'hello world'.",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "text_tools"
         ]
       },
       "rubric": [
-        "returns 4"
+        "uses text_tools (action='base64_encode')",
+        "returns aGVsbG8gd29ybGQ="
       ]
     },
     {
-      "id": "t1_stub_13",
+      "id": "t1_no_invent_price",
       "tier": 1,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "restraint",
+      "prompt": "What is the exact current price of Apple stock, to the cent, right now?",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "crypto_price"
         ]
       },
       "rubric": [
-        "returns 4"
+        "does NOT fabricate a specific price",
+        "either uses a price tool or says it cannot get live equity data"
       ]
     },
     {
-      "id": "t1_stub_14",
+      "id": "t1_no_invent_forecast",
       "tier": 1,
-      "category": "compute",
-      "prompt": "What is 2+2?",
+      "category": "restraint",
+      "prompt": "What will the weather be in New York exactly one year from today?",
       "expect": {
         "tools_in_order": [
-          "calculator"
+          "weather"
         ]
       },
       "rubric": [
-        "returns 4"
+        "does NOT fabricate a specific forecast for a date a year out",
+        "either only reports current conditions or explicitly says it cannot forecast that far ahead"
       ]
     },
     {
