@@ -597,3 +597,239 @@ async def test_created_tool_can_compose_a_builtin(tmp_path):
         assert await t.run(P(location="Milton, FL")) == "30.63241,-87.03969"
     finally:
         httpx.AsyncClient.__init__ = real_init
+
+
+# ---- sandboxed DynamicTool (stage 2b: container execution path) ----
+
+import json as _json
+
+from engine.sandbox.runtime import ExecResult, FakeRuntime
+
+
+class _P(BaseModel):
+    a: int = 0
+
+
+async def test_sandboxed_tool_runs_via_the_runtime():
+    """A sandboxed tool ships {code, args} to runner.py in the container and parses the JSON back."""
+    fake = FakeRuntime(result=ExecResult(0, _json.dumps({"ok": True, "result": "42"}), ""))
+    t = DynamicTool("mytool", "d", _P, run_fn=None, timeout=30, sandboxed=True,
+                    code="def run(args): return '42'", runtime=fake, workspace="default")
+    out = await t.run(_P(a=1))
+    assert out == "42"
+    # it called exec on the right workspace, running runner.py, with the code+args on stdin
+    name, argv = fake.calls[0]
+    assert name == "default"
+    assert argv == ["python", "/opt/argus/runner.py"]
+    stdin = fake.exec_stdin[0]
+    payload = _json.loads(stdin)
+    assert payload["code"] == "def run(args): return '42'" and payload["args"] == {"a": 1}
+
+
+async def test_sandboxed_tool_surfaces_a_container_error():
+    fake = FakeRuntime(result=ExecResult(0, _json.dumps(
+        {"ok": False, "error": "ValueError: boom", "traceback": "..."}), ""))
+    t = DynamicTool("mytool", "d", _P, sandboxed=True, code="x", runtime=fake)
+    out = await t.run(_P())
+    assert "mytool error" in out and "ValueError: boom" in out
+
+
+async def test_sandboxed_tool_refuses_when_the_sandbox_is_unavailable():
+    """Fail closed: authored assuming the full stdlib, so it must NOT run host-side when off."""
+    fake = FakeRuntime(available_=False)
+    t = DynamicTool("mytool", "d", _P, sandboxed=True, code="x", runtime=fake)
+    out = await t.run(_P())
+    assert "sandbox" in out.lower() and "mytool" in out
+    # and it did NOT execute anything
+    assert fake.calls == []
+
+
+async def test_sandboxed_tool_refuses_when_runtime_is_none():
+    t = DynamicTool("mytool", "d", _P, sandboxed=True, code="x", runtime=None)
+    out = await t.run(_P())
+    assert "sandbox" in out.lower()
+
+
+async def test_sandboxed_tool_reports_a_container_timeout():
+    fake = FakeRuntime(result=ExecResult(124, "", "", timed_out=True))
+    t = DynamicTool("mytool", "d", _P, sandboxed=True, code="x", runtime=fake, timeout=30)
+    out = await t.run(_P())
+    assert "timed out" in out.lower()
+
+
+async def test_sandboxed_tool_errors_cleanly_on_unserialisable_args():
+    """json.dumps({"code", "args"}) must be inside the guarded region: a Params model whose
+    model_dump() produces a non-JSON-serialisable value must return a clean tool-error string,
+    not raise a TypeError into the loop."""
+    fake = FakeRuntime(result=ExecResult(0, _json.dumps({"ok": True, "result": "42"}), ""))
+    t = DynamicTool("mytool", "d", _P, sandboxed=True, code="x", runtime=fake)
+    bad_args = _P()
+    object.__setattr__(bad_args, "model_dump", lambda *a, **k: {"x": object()})
+    out = await t.run(bad_args)
+    assert out == "mytool error: TypeError: Object of type object is not JSON serializable"
+    # and it never got as far as calling exec
+    assert fake.calls == []
+
+
+async def test_sandboxed_tool_surfaces_stderr_when_stdout_is_empty():
+    """When the container dies and produces no stdout, the tool-error must include stderr
+    (the real reason) rather than silently falling back to a generic 'unknown error'."""
+    fake = FakeRuntime(result=ExecResult(1, "", "Traceback: container OOM-killed"))
+    t = DynamicTool("mytool", "d", _P, sandboxed=True, code="x", runtime=fake)
+    out = await t.run(_P())
+    assert "mytool error" in out
+    assert "container OOM-killed" in out
+
+
+# ---- create_tool: sandboxed authoring (Task 3) ----
+
+import tempfile
+
+from engine.experimental.tool_creation import CreateToolTool, load_persisted_tools
+from engine.sandbox.runtime import ExecResult, FakeRuntime
+from engine.tools.base import ToolRegistry
+
+
+def _ct(**kw):
+    return CreateToolTool(ToolRegistry(), **kw)
+
+
+def test_flag_defaults_true_when_sandbox_enabled_and_available():
+    ct = _ct(sandbox_enabled=True, sandbox_runtime=FakeRuntime(available_=True))
+    assert ct._resolve_sandboxed(None) is True
+
+
+def test_flag_defaults_false_when_sandbox_off():
+    ct = _ct(sandbox_enabled=False, sandbox_runtime=FakeRuntime(available_=True))
+    assert ct._resolve_sandboxed(None) is False
+
+
+def test_flag_defaults_false_when_sandbox_enabled_but_unavailable():
+    ct = _ct(sandbox_enabled=True, sandbox_runtime=FakeRuntime(available_=False))
+    assert ct._resolve_sandboxed(None) is False
+
+
+def test_explicit_flag_is_honoured():
+    ct = _ct(sandbox_enabled=True, sandbox_runtime=FakeRuntime(available_=True))
+    assert ct._resolve_sandboxed(False) is False
+    ct2 = _ct(sandbox_enabled=False, sandbox_runtime=None)
+    assert ct2._resolve_sandboxed(True) is True
+
+
+async def test_creating_a_sandboxed_tool_test_runs_in_the_container_and_persists_the_flag():
+    persist = tempfile.mkdtemp()
+    fake = FakeRuntime(result=ExecResult(0, '{"ok": true, "result": "ok"}', ""))
+    ct = _ct(persist_dir=persist, sandbox_enabled=True, sandbox_runtime=fake,
+             timeout=30)
+    out = await ct.run(CreateToolTool.Params(
+        name="fulltool", description="d", parameters={"a": {"type": "integer"}},
+        code="import os\ndef run(args):\n    return 'ok'", test_args={"a": 1}, sandboxed=True))
+    assert "created" in out.lower()
+    # the test-run went through the container (runner.py), not a host-side AST compile
+    assert fake.calls and fake.calls[0][1] == ["python", "/opt/argus/runner.py"]
+    # persisted with sandboxed: true
+    import json
+    import os
+    m = json.load(open(os.path.join(persist, "fulltool.json")))
+    assert m["sandboxed"] is True and "import os" in m["code"]
+
+
+async def test_sandboxed_authoring_skips_the_ast_scan():
+    """`import os` would be rejected host-side; under sandboxed=true it must be allowed (the point)."""
+    fake = FakeRuntime(result=ExecResult(0, '{"ok": true, "result": "ok"}', ""))
+    ct = _ct(sandbox_enabled=True, sandbox_runtime=fake, timeout=30)
+    out = await ct.run(CreateToolTool.Params(
+        name="ostool", description="d", parameters={},
+        code="import os\ndef run(args):\n    return os.getcwd()", test_args={}, sandboxed=True))
+    assert "error" not in out.lower() or "created" in out.lower()
+
+
+async def test_sandboxed_authoring_rejects_code_with_no_run_function():
+    """A sandboxed tool with required params + no test_args is never test-run in the container, so
+    authoring is the only gate. Code that never defines `run` must be rejected, not persisted."""
+    persist = tempfile.mkdtemp()
+    fake = FakeRuntime(result=ExecResult(0, '{"ok": true, "result": "ok"}', ""))
+    ct = _ct(persist_dir=persist, sandbox_enabled=True, sandbox_runtime=fake, timeout=30)
+    out = await ct.run(CreateToolTool.Params(
+        name="norun", description="d", parameters={"a": {"type": "integer"}},
+        code="import os\nx = 1", sandboxed=True))   # no test_args -> not test-run in container
+    assert "run(args)" in out and "must define" in out.lower()
+    import os
+    assert not os.path.exists(os.path.join(persist, "norun.json"))   # not persisted
+    assert not fake.calls   # never shipped to the container
+
+
+async def test_sandboxed_authoring_rejects_async_run():
+    """`async def run` returns an un-awaited coroutine in the container; reject it at authoring,
+    matching the host-side path's `async def` guard."""
+    persist = tempfile.mkdtemp()
+    fake = FakeRuntime(result=ExecResult(0, '{"ok": true, "result": "ok"}', ""))
+    ct = _ct(persist_dir=persist, sandbox_enabled=True, sandbox_runtime=fake, timeout=30)
+    out = await ct.run(CreateToolTool.Params(
+        name="asyncrun", description="d", parameters={},
+        code="async def run(args):\n    return 'x'", test_args={}, sandboxed=True))
+    assert "async" in out.lower() and "regular" in out.lower()
+    import os
+    assert not os.path.exists(os.path.join(persist, "asyncrun.json"))
+    assert not fake.calls
+
+
+async def test_sandboxed_true_but_sandbox_off_saves_but_skips_the_container_test_run():
+    persist = tempfile.mkdtemp()
+    ct = _ct(persist_dir=persist, sandbox_enabled=False, sandbox_runtime=None)
+    out = await ct.run(CreateToolTool.Params(
+        name="later", description="d", parameters={}, code="def run(args):\n    return 'x'",
+        test_args={}, sandboxed=True))
+    import json
+    import os
+    m = json.load(open(os.path.join(persist, "later.json")))
+    assert m["sandboxed"] is True
+    assert "sandbox" in out.lower()   # a note that it couldn't be verified until the sandbox is on
+
+
+def test_load_persisted_tools_reads_the_flag_and_builds_a_sandboxed_tool():
+    import json
+    import os
+    persist = tempfile.mkdtemp()
+    with open(os.path.join(persist, "s.json"), "w") as fh:
+        json.dump({"name": "s", "description": "d", "parameters": {},
+                   "code": "def run(args): return 'x'", "sandboxed": True}, fh)
+    fake = FakeRuntime()
+    tools = load_persisted_tools(persist, sandbox_runtime=fake, sandbox_workspace="default")
+    assert len(tools) == 1 and tools[0].sandboxed is True and tools[0].runtime is fake
+
+
+def test_load_persisted_tool_without_flag_is_host_side():
+    import json
+    import os
+    persist = tempfile.mkdtemp()
+    with open(os.path.join(persist, "h.json"), "w") as fh:
+        json.dump({"name": "h", "description": "d", "parameters": {},
+                   "code": "def run(args): return 'x'"}, fh)   # no sandboxed key
+    tools = load_persisted_tools(persist)
+    assert len(tools) == 1 and tools[0].sandboxed is False
+
+
+# ---- end-to-end: a real podman container ----
+import shutil
+
+needs_podman = pytest.mark.skipif(shutil.which("podman") is None, reason="podman not installed")
+
+
+@needs_podman
+@pytest.mark.podman
+async def test_end_to_end_sandboxed_tool_uses_full_stdlib(tmp_path):
+    """The payoff: a created tool that imports os runs in a real container. Needs the built image;
+    skips without podman. Skips (not fails) if argus-sandbox:local isn't built."""
+    from engine.sandbox.podman import PodmanRuntime
+    rt = PodmanRuntime(workspaces_root=str(tmp_path / "workspaces"))
+    if not rt.available() or rt.status().get("image_present") is False:
+        pytest.skip("argus-sandbox:local not built — run scripts/setup-sandbox.sh")
+    try:
+        t = DynamicTool("os_probe", "d", _P, sandboxed=True,
+                        code="import os\ndef run(args):\n    return os.uname().sysname",
+                        runtime=rt, workspace="default", timeout=60)
+        out = await t.run(_P())
+        assert "Linux" in out
+    finally:
+        rt.stop("default")

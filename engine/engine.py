@@ -146,7 +146,14 @@ TOOL_CREATION_DIRECTIVE = (
     "'CALL_TOOL error: ...'. Read what came back: if it contains 'error', that step FAILED — do not "
     "increment a success counter or report success. A tool that claims 'inserted N rows' while its "
     "own verification query shows none is lying to the user; make the count reflect only inserts "
-    "that actually returned success."
+    "that actually returned success. "
+    "SANDBOXED TOOLS: when the container sandbox is on, a tool you create runs INSIDE it by default "
+    "— you get the full Python standard library (os, subprocess, sqlite3, pathlib, open()) and a "
+    "real writable workspace, and network calls reach public APIs but not the local network. The one "
+    "limit: a sandboxed tool CANNOT call other Argus tools. If your tool must call another tool "
+    "(e.g. geocode({...}) inside a weather tool), pass sandboxed=false to create_tool and it runs "
+    "host-side under the restricted sandbox instead, where tool-calling works. Otherwise leave "
+    "sandboxed unset. "
 )
 
 DEFAULT_SOUL = (
@@ -475,7 +482,8 @@ class Engine:
         self._created_tools = load_persisted_tools(
             self._created_tools_dir, timeout=config.created_tool_timeout,
             extra_modules=self.deps.approved_modules(), secrets=self._tool_secrets(),
-            trust_store=self.trust)
+            trust_store=self.trust,
+            sandbox_runtime=self.sandbox, sandbox_workspace=config.sandbox_workspace)
         # persistent memory (facts + trust; keyword recall, semantic when configured)
         from engine.memory.store import MemoryStore
         from engine.memory.embeddings import EmbeddingClient
@@ -1417,6 +1425,13 @@ class Engine:
                     trust_store=self.trust, allow_trusted=c.enable_trusted_tools,
                     reserved_names=GATED_BUILTIN_NAMES,
                     approvals=(self.approvals if (c.enable_interactive_approvals and c.enable_dep_approval) else None),
+                    # Gate the runtime on the SAME per-run flag as sandbox_enabled (mirroring
+                    # exec_python at the top of this block): if the two disagreed, an explicit
+                    # sandboxed=true tool could execute in a live container while enable_sandbox
+                    # reads false for this run. Both derive from c.enable_sandbox, so they can't.
+                    sandbox_runtime=self.sandbox if c.enable_sandbox else None,
+                    sandbox_workspace=c.sandbox_workspace,
+                    sandbox_enabled=c.enable_sandbox,
                     run_id=run_id, origin=origin))
                 system_prompt = system_prompt + "\n\n" + TOOL_CREATION_DIRECTIVE
             if skill_creation_on:
