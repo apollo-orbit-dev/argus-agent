@@ -636,12 +636,12 @@ async def test_sandboxed_tool_surfaces_a_container_error():
 
 async def test_sandboxed_tool_refuses_when_the_sandbox_is_unavailable():
     """Fail closed: authored assuming the full stdlib, so it must NOT run host-side when off."""
-    t = DynamicTool("mytool", "d", _P, sandboxed=True, code="x",
-                    runtime=FakeRuntime(available_=False))
+    fake = FakeRuntime(available_=False)
+    t = DynamicTool("mytool", "d", _P, sandboxed=True, code="x", runtime=fake)
     out = await t.run(_P())
     assert "sandbox" in out.lower() and "mytool" in out
     # and it did NOT execute anything
-    assert FakeRuntime(available_=False).calls == []
+    assert fake.calls == []
 
 
 async def test_sandboxed_tool_refuses_when_runtime_is_none():
@@ -655,3 +655,27 @@ async def test_sandboxed_tool_reports_a_container_timeout():
     t = DynamicTool("mytool", "d", _P, sandboxed=True, code="x", runtime=fake, timeout=30)
     out = await t.run(_P())
     assert "timed out" in out.lower()
+
+
+async def test_sandboxed_tool_errors_cleanly_on_unserialisable_args():
+    """json.dumps({"code", "args"}) must be inside the guarded region: a Params model whose
+    model_dump() produces a non-JSON-serialisable value must return a clean tool-error string,
+    not raise a TypeError into the loop."""
+    fake = FakeRuntime(result=ExecResult(0, _json.dumps({"ok": True, "result": "42"}), ""))
+    t = DynamicTool("mytool", "d", _P, sandboxed=True, code="x", runtime=fake)
+    bad_args = _P()
+    object.__setattr__(bad_args, "model_dump", lambda *a, **k: {"x": object()})
+    out = await t.run(bad_args)
+    assert out == "mytool error: TypeError: Object of type object is not JSON serializable"
+    # and it never got as far as calling exec
+    assert fake.calls == []
+
+
+async def test_sandboxed_tool_surfaces_stderr_when_stdout_is_empty():
+    """When the container dies and produces no stdout, the tool-error must include stderr
+    (the real reason) rather than silently falling back to a generic 'unknown error'."""
+    fake = FakeRuntime(result=ExecResult(1, "", "Traceback: container OOM-killed"))
+    t = DynamicTool("mytool", "d", _P, sandboxed=True, code="x", runtime=fake)
+    out = await t.run(_P())
+    assert "mytool error" in out
+    assert "container OOM-killed" in out

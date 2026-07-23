@@ -427,9 +427,9 @@ class DynamicTool(Tool):
         if self.runtime is None or not self.runtime.available():
             return (f"{self.name}: this tool runs in the container sandbox, which is currently off "
                     "or unavailable. Enable it in the dashboard's Settings > Sandbox, then try again.")
-        payload = _json.dumps({"code": self.code, "args": args.model_dump()})
         loop = asyncio.get_running_loop()
         try:
+            payload = _json.dumps({"code": self.code, "args": args.model_dump()})
             r = await loop.run_in_executor(None, lambda: self.runtime.exec(
                 self.workspace, ["python", "/opt/argus/runner.py"], stdin=payload,
                 timeout=self._timeout))
@@ -439,8 +439,10 @@ class DynamicTool(Tool):
             return f"{self.name} error: {type(e).__name__}: {e}"
         if r.timed_out:
             return f"{self.name} error: timed out after {self._timeout}s"
+        if not (r.stdout or "").strip():
+            return f"{self.name} error: no output from sandbox; stderr: {(r.stderr or '')[:400]}"
         try:
-            out = _json.loads(r.stdout or "{}")
+            out = _json.loads(r.stdout)
         except Exception:
             return f"{self.name} error: bad runner output: {(r.stdout or r.stderr)[:400]}"
         if out.get("ok"):
