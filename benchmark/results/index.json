@@ -22,5 +22,13 @@
     "battery_version": "cap-1",
     "date": "2026-07-23T14:49:45+00:00",
     "file": "Qwen3.6-27B-FP8-cap-1-20260723T144945.json"
+  },
+  {
+    "model": "Agents-A1-FP8",
+    "params": 35,
+    "mode": "native",
+    "battery_version": "cap-1",
+    "date": "2026-07-23T16:04:18+00:00",
+    "file": "Agents-A1-FP8-cap-1-20260723T160418.json"
   }
 ]

@@ -62,7 +62,16 @@ def build_series(results: list, battery_version: str) -> dict:
     """Group committed result dicts (of one battery_version) into per-tier series sorted by params:
     {tier: [(params, chain_pass, judge_mean), ...]}."""
     rows = [r for r in results if r.get("battery_version") == battery_version]
-    rows.sort(key=lambda r: r.get("params", 0))
+    # One point per model size on the curve: when the same params was run more than once (e.g. a
+    # model re-run at a higher token budget), plot the run with the highest max_tokens so the line
+    # stays single-valued. The report TABLE still lists every run.
+    best = {}
+    for r in rows:
+        p = r.get("params", 0)
+        cur = best.get(p)
+        if cur is None or (r.get("max_tokens") or 0) > (cur.get("max_tokens") or 0):
+            best[p] = r
+    rows = sorted(best.values(), key=lambda r: r.get("params", 0))
     tiers = sorted({t for r in rows for t in r.get("per_tier", {})}, key=int)
     series = {}
     for tier in tiers:
