@@ -744,6 +744,36 @@ async def test_sandboxed_authoring_skips_the_ast_scan():
     assert "error" not in out.lower() or "created" in out.lower()
 
 
+async def test_sandboxed_authoring_rejects_code_with_no_run_function():
+    """A sandboxed tool with required params + no test_args is never test-run in the container, so
+    authoring is the only gate. Code that never defines `run` must be rejected, not persisted."""
+    persist = tempfile.mkdtemp()
+    fake = FakeRuntime(result=ExecResult(0, '{"ok": true, "result": "ok"}', ""))
+    ct = _ct(persist_dir=persist, sandbox_enabled=True, sandbox_runtime=fake, timeout=30)
+    out = await ct.run(CreateToolTool.Params(
+        name="norun", description="d", parameters={"a": {"type": "integer"}},
+        code="import os\nx = 1", sandboxed=True))   # no test_args -> not test-run in container
+    assert "run(args)" in out and "must define" in out.lower()
+    import os
+    assert not os.path.exists(os.path.join(persist, "norun.json"))   # not persisted
+    assert not fake.calls   # never shipped to the container
+
+
+async def test_sandboxed_authoring_rejects_async_run():
+    """`async def run` returns an un-awaited coroutine in the container; reject it at authoring,
+    matching the host-side path's `async def` guard."""
+    persist = tempfile.mkdtemp()
+    fake = FakeRuntime(result=ExecResult(0, '{"ok": true, "result": "ok"}', ""))
+    ct = _ct(persist_dir=persist, sandbox_enabled=True, sandbox_runtime=fake, timeout=30)
+    out = await ct.run(CreateToolTool.Params(
+        name="asyncrun", description="d", parameters={},
+        code="async def run(args):\n    return 'x'", test_args={}, sandboxed=True))
+    assert "async" in out.lower() and "regular" in out.lower()
+    import os
+    assert not os.path.exists(os.path.join(persist, "asyncrun.json"))
+    assert not fake.calls
+
+
 async def test_sandboxed_true_but_sandbox_off_saves_but_skips_the_container_test_run():
     persist = tempfile.mkdtemp()
     ct = _ct(persist_dir=persist, sandbox_enabled=False, sandbox_runtime=None)

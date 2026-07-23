@@ -691,13 +691,27 @@ class CreateToolTool(Tool):
 
         sandboxed = self._resolve_sandboxed(args.sandboxed)
         if sandboxed:
-            # Container path: NO AST scan (full stdlib is the point). Only check it parses and
-            # defines run(args); the code executes in the container, never host-side.
+            # Container path: NO AST scan (full stdlib is the point) and NO host-side exec (the
+            # code may `import os` and would fail the gate — and running it host-side would defeat
+            # the sandbox). We can still statically require a top-level `def run(args)`: without it
+            # the tool is broken, and a tool with required params + no test_args is never test-run
+            # in the container, so this is the only place that broken-ness gets caught before persist.
             try:
-                compile(args.code, "<sandboxed_tool>", "exec")
+                tree = ast.parse(args.code, "<sandboxed_tool>")
             except SyntaxError as e:
                 record["error"] = str(e)
                 return (f"create_tool: '{args.name}' has a syntax error: {e}\n"
+                        "Fix the code and call create_tool again with the same name.")
+            run_defs = [n for n in tree.body
+                        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "run"]
+            if not run_defs:
+                record["error"] = "code must define a function named `run(args)`"
+                return (f"create_tool: '{args.name}' must define a top-level function "
+                        "`def run(args): ...`.\nFix the code and call create_tool again with the same name.")
+            if isinstance(run_defs[-1], ast.AsyncFunctionDef):
+                record["error"] = "`run` must be a regular function, not async"
+                return (f"create_tool: '{args.name}' defines `async def run` — it must be a REGULAR "
+                        "function `def run(args): ...`. Call any APIs synchronously.\n"
                         "Fix the code and call create_tool again with the same name.")
             params_model = build_params_model(args.name, args.parameters)
             return await self._build_and_verify(args, None, params_model, record, sandboxed=True)
