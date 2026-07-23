@@ -145,15 +145,18 @@ isn't flattering — tool-chain pass rate by difficulty tier (the committed
 | model | params | tier 1 | tier 2 | tier 3 | tier 4 | overall |
 |-------|--------|--------|--------|--------|--------|---------|
 | Qwen2.5-3B-Instruct | 3B | 100% | 40% | 29% | 60% | 58% |
+| gemma-4-E4B-it | 4B | 100% | 60% | 86% | 80% | 83% |
 | Qwen3.6-27B-FP8 | 27B | 71% | 60% | 86% | 100% | 79% |
 | Agents-A1-FP8 | 35B | 86% | 80% | 86% | 100% | 88% |
 
-A 3B model ties a 35B on trivial single-tool tasks and falls off a cliff on multi-step ones. The
-scaffolding above moves that cliff; it does not remove it. The 27B is a reasoning model run with a
-larger completion budget (see the `max_tok` column in the [report](benchmark/report.md)), and it
-shows a different shape — strong on the hard tiers, weaker on the easy ones, where it sometimes
-answers from its own reasoning instead of calling the tool it should. Finding where *your* model's
-cliff sits — and which way it leans — is the point of the instrument.
+A 3B model ties a 35B on trivial single-tool tasks and falls off a cliff on multi-step ones; the
+scaffolding above moves that cliff but doesn't remove it. Size isn't the whole story, though — the 4B
+gemma (a newer reasoning model) clears the 27B and nears the 35B, so *generation and training beat raw
+parameter count* here. Profiles differ too: gemma is well-rounded, while the 27B is spiky — strong on
+the hard tiers, weak on the easy ones, where it answers from its own reasoning instead of calling the
+tool it should. Modes and token budgets vary by run (the [report](benchmark/report.md) carries the
+`mode` and `max_tok` columns, and the judge means). Finding where *your* model's cliff sits — and
+which way it leans — is the point of the instrument.
 
 ### "Does this skill actually help?" — the skill A/B
 
