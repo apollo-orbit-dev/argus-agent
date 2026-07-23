@@ -169,6 +169,7 @@ async def run_model(model_spec: str, params: int, mode: str | None, k: int, judg
     agg = aggregate(results)
     name = model_spec.partition("=")[0]
     return {"model": name, "params": params, "mode": mode or cfg.tool_calling_mode,
+            "max_tokens": cfg.model_max_tokens,   # completion cap this run used (reasoning models need headroom)
             "battery_version": battery["battery_version"], "k": k,
             "date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "per_tier": agg["per_tier"], "overall": agg["overall"], "tasks": results}
@@ -203,8 +204,8 @@ def render_report(battery_version: str) -> tuple[str, bool]:
     lines = [f"# Model-Capability Benchmark — `{battery_version}`", "",
              f"{len(results)} model(s), by param count. Chain = deterministic tool-chain pass-rate; "
              "Judge = Opus quality mean (0–3). A tier's line falling off below some size is the shelf.", "",
-             "| model | params (B) | mode | " + " | ".join(f"T{t} chain / judge" for t in tiers) + " | overall |",
-             "|-------|-----------|------|" + "|".join(["---"] * (len(tiers) + 1)) + "|"]
+             "| model | params (B) | mode | max_tok | " + " | ".join(f"T{t} chain / judge" for t in tiers) + " | overall |",
+             "|---|---|---|---|" + "|".join(["---"] * (len(tiers) + 1)) + "|"]
     def _pct(x):
         return "—" if x is None else f"{x:.0%}"
 
@@ -218,7 +219,14 @@ def render_report(battery_version: str) -> tuple[str, bool]:
             cells.append(f"{_pct(pt.get('chain_pass'))} / {_q(pt.get('judge_mean'))}")
         ov = r.get("overall", {})
         cells.append(f"{_pct(ov.get('chain_pass'))} / {_q(ov.get('judge_mean'))}")
-        lines.append(f"| {r['model']} | {r['params']} | {r.get('mode', '?')} | " + " | ".join(cells) + " |")
+        mt = r.get("max_tokens")
+        lines.append(f"| {r['model']} | {r['params']} | {r.get('mode', '?')} | {mt if mt is not None else '—'} | "
+                     + " | ".join(cells) + " |")
+    lines += ["",
+              "`max_tok` = the completion-token cap for the run. `—` = not recorded (runs predating this "
+              "field; the standard-config default is 2048). Runs at different caps are not strictly "
+              "comparable — a reasoning model can exhaust a low cap mid-thought, so a higher cap is a "
+              "fairer read of its capability but a looser comparison across sizes."]
     return "\n".join(lines) + "\n", True
 
 

@@ -2,6 +2,7 @@
   "model": "Qwen3.6-27B-FP8",
   "params": 27,
   "mode": "native",
+  "max_tokens": 16384,
   "battery_version": "cap-1",
   "k": 3,
   "date": "2026-07-23T14:49:45+00:00",
