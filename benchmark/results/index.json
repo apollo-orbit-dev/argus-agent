@@ -70,5 +70,13 @@
     "battery_version": "cap-1",
     "date": "2026-07-23T18:57:17+00:00",
     "file": "Qwen2.5-3B-Instruct-cap-1-20260723T185717.json"
+  },
+  {
+    "model": "Qwen2.5-3B-Instruct",
+    "params": 3,
+    "mode": "manual",
+    "battery_version": "cap-1",
+    "date": "2026-07-23T19:21:59+00:00",
+    "file": "Qwen2.5-3B-Instruct-cap-1-20260723T192159.json"
   }
 ]
