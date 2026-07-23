@@ -70,3 +70,42 @@ def test_resolve_config_overrides():
     assert c.tool_calling_mode == "manual"
     d = resolve_config("main", None)                        # no override → configured defaults
     assert d.tool_calling_mode in ("native", "manual", "native_finish")
+
+
+def test_solved_requires_chain_and_judge_ge_2():
+    # k=3, threshold = ceil(3*0.6)=2. All 3 runs chain AND judge>=2 -> solved.
+    runs = [{"chain_correct": True, "judge_score": 3}] * 3
+    assert task_verdict(runs, 3)["solved"] is True
+
+
+def test_solved_false_when_judged_below_2_despite_chain():
+    # chains every time but judge is 1 -> not solved (good tools, bad answer)
+    runs = [{"chain_correct": True, "judge_score": 1}] * 3
+    v = task_verdict(runs, 3)
+    assert v["chain_pass"] is True and v["solved"] is False
+
+
+def test_solved_false_when_judge_ok_but_chain_wrong():
+    runs = [{"chain_correct": False, "judge_score": 3}] * 3
+    assert task_verdict(runs, 3)["solved"] is False
+
+
+def test_solved_threshold_2_of_3():
+    runs = [{"chain_correct": True, "judge_score": 2},
+            {"chain_correct": True, "judge_score": 2},
+            {"chain_correct": False, "judge_score": 0}]
+    assert task_verdict(runs, 3)["solved"] is True   # 2 of 3 solved >= ceil(1.8)=2
+
+
+def test_solved_judge_only_task_uses_judge_alone():
+    # no chain (judge-only, chain_correct None): solved == judge>=2, chain vacuous
+    runs = [{"chain_correct": None, "judge_score": 3}] * 3
+    v = task_verdict(runs, 3)
+    assert v["chain_pass"] is None and v["solved"] is True
+
+
+def test_aggregate_rolls_up_solved():
+    tasks = [{"tier": 1, "chain_pass": True, "judge_mean": 3.0, "solved": True, "skipped": False},
+             {"tier": 1, "chain_pass": True, "judge_mean": 1.0, "solved": False, "skipped": False}]
+    agg = aggregate(tasks)
+    assert agg["per_tier"]["1"]["solved"] == 0.5 and agg["overall"]["solved"] == 0.5

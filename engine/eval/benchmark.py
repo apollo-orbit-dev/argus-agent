@@ -26,19 +26,28 @@ BENCH = ROOT / "benchmark"
 FIXTURES = BENCH / "fixtures"
 RESULTS = BENCH / "results"
 PASS_FRACTION = 0.6
+JUDGE_SOLVED_MIN = 2          # a run is "solved" iff it chained correctly AND judge_score >= this
 
 # ------------------------------- pure helpers (unit-tested) -------------------------------
 
 
 def task_verdict(runs: list, k: int) -> dict:
-    """Collapse a task's k runs into {chain_pass: bool|None, judge_mean: float|None}. chain_pass is
-    None when the task has no `expect` (judge-only); otherwise True iff chain_correct in >=ceil(k*frac)."""
+    """Collapse a task's k runs into {chain_pass, judge_mean, solved}. chain_pass is None when the
+    task has no `expect` (judge-only). solved = chained-correctly (vacuous if no chain) AND judge >=
+    JUDGE_SOLVED_MIN (vacuous if unjudged), per run, then collapsed like chain_pass (>=ceil(k*frac))."""
     thr = math.ceil(k * PASS_FRACTION)
     chained = [r for r in runs if r.get("chain_correct") is not None]
     chain_pass = (sum(1 for r in chained if r["chain_correct"]) >= thr) if chained else None
     js = [r["judge_score"] for r in runs if r.get("judge_score") is not None]
     judge_mean = (sum(js) / len(js)) if js else None
-    return {"chain_pass": chain_pass, "judge_mean": judge_mean}
+
+    def _run_solved(r):
+        c, j = r.get("chain_correct"), r.get("judge_score")
+        chain_ok = True if c is None else c
+        judge_ok = True if j is None else (j >= JUDGE_SOLVED_MIN)
+        return chain_ok and judge_ok
+    solved = (sum(1 for r in runs if _run_solved(r)) >= thr) if runs else None
+    return {"chain_pass": chain_pass, "judge_mean": judge_mean, "solved": solved}
 
 
 def aggregate(tasks: list) -> dict:
@@ -49,8 +58,10 @@ def aggregate(tasks: list) -> dict:
         active = [t for t in items if not t.get("skipped")]
         cp = [t["chain_pass"] for t in active if t.get("chain_pass") is not None]
         jm = [t["judge_mean"] for t in active if t.get("judge_mean") is not None]
+        sv = [t["solved"] for t in active if t.get("solved") is not None]
         return {"chain_pass": (sum(1 for x in cp if x) / len(cp)) if cp else None,
                 "judge_mean": (sum(jm) / len(jm)) if jm else None,
+                "solved": (sum(1 for x in sv if x) / len(sv)) if sv else None,
                 "n": len(active), "skipped": sum(1 for t in items if t.get("skipped"))}
     per_tier = {}
     for tier in sorted({t["tier"] for t in tasks}):
