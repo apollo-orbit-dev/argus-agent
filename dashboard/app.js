@@ -674,7 +674,7 @@
         var raw = m.content == null ? '' : String(m.content);
         if (role === 'tool'){
           return '<div class="chat-tool"><span class="chat-tool-label">tool</span>' +
-                   '<div class="chat-tool-body">' + esc(raw) + '</div></div>';
+                   '<div class="chat-tool-body clampable">' + esc(raw) + '</div></div>';
         }
         // The harness injects steering notes mid-turn (the observer's repeat nudge, the
         // create-without-verify nudge, the output-truncated reprompt). The model has no "system"
@@ -690,8 +690,31 @@
         var body = (role === 'user') ? esc(raw) : ('<div class="md">' + renderAssistantMd(raw) + '</div>');
         return '<div class="chat-row ' + side + '"><div class="chat-bubble ' + side + '">' + body + '</div></div>';
       }).join('') + '</div>';
+      wireToolClamps();
       viewerBody.scrollTop = viewerBody.scrollHeight;
     } catch(e){ toast('Failed to load transcript: ' + e.message, 'err'); }
+  }
+
+  // Tool output in the transcript is clamped to ~5 rows (.clampable). For each block that actually
+  // overflows, add a Show more/less toggle; for blocks that fit, drop the clamp so there's no toggle.
+  function wireToolClamps(){
+    var bodies = viewerBody.querySelectorAll('.chat-tool-body.clampable');
+    Array.prototype.forEach.call(bodies, function(body){
+      if (body.scrollHeight <= body.clientHeight + 2){   // fits within the clamp: no toggle needed
+        body.classList.remove('clampable');
+        return;
+      }
+      var btn = document.createElement('button');
+      btn.className = 'chat-tool-toggle';
+      btn.type = 'button';
+      btn.textContent = 'Show more';
+      btn.addEventListener('click', function(){
+        var expanded = body.classList.toggle('expanded');
+        body.classList.toggle('clampable', !expanded);
+        btn.textContent = expanded ? 'Show less' : 'Show more';
+      });
+      body.parentNode.insertBefore(btn, body.nextSibling);
+    });
   }
 
   function setTranscriptActive(on){

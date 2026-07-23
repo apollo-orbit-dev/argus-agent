@@ -443,7 +443,14 @@
     color:var(--amber); padding-left:2px; }
   .chat-tool-body{ margin-top:3px; padding:8px 10px; background:rgba(244,168,58,.05);
     border:1px solid rgba(244,168,58,.2); border-radius:8px; font-family:var(--font-mono); font-size:11px;
-    color:var(--muted); white-space:pre-wrap; word-break:break-word; overflow-x:auto; }
+    line-height:1.5; color:var(--muted); white-space:pre-wrap; word-break:break-word; overflow-x:auto; }
+  /* Long tool output is clamped to ~5 rows; app.js adds the Show more/less toggle only when it
+     actually overflows, and removes the clamp otherwise. */
+  .chat-tool-body.clampable{ max-height:calc(1.5em * 5 + 18px); overflow:hidden; }
+  .chat-tool-body.expanded{ max-height:none; }
+  .chat-tool-toggle{ display:block; margin-top:4px; padding:2px 0; background:none; border:none;
+    cursor:pointer; font-family:var(--font-mono); font-size:10px; letter-spacing:.4px; color:var(--amber); }
+  .chat-tool-toggle:hover{ text-decoration:underline; }
 
   /* rendered markdown inside an assistant bubble (marked + DOMPurify) */
   .md{ white-space:normal; }
