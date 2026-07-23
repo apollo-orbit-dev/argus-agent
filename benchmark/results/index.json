@@ -30,5 +30,21 @@
     "battery_version": "cap-1",
     "date": "2026-07-23T16:04:18+00:00",
     "file": "Agents-A1-FP8-cap-1-20260723T160418.json"
+  },
+  {
+    "model": "gemma-4-E4B-it",
+    "params": 4,
+    "mode": "native",
+    "battery_version": "cap-1",
+    "date": "2026-07-23T17:16:31+00:00",
+    "file": "gemma-4-E4B-it-cap-1-20260723T171631.json"
+  },
+  {
+    "model": "gemma-4-E4B-it",
+    "params": 4,
+    "mode": "manual",
+    "battery_version": "cap-1",
+    "date": "2026-07-23T17:38:38+00:00",
+    "file": "gemma-4-E4B-it-cap-1-20260723T173838.json"
   }
 ]
