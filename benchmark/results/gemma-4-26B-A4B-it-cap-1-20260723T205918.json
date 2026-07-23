@@ -1,0 +1,1159 @@
+{
+  "model": "gemma-4-26B-A4B-it",
+  "params": 26,
+  "mode": "manual",
+  "scaffold": "off",
+  "max_tokens": 16384,
+  "battery_version": "cap-1",
+  "k": 3,
+  "date": "2026-07-23T20:59:18+00:00",
+  "per_tier": {
+    "1": {
+      "chain_pass": 1.0,
+      "judge_mean": 3.0,
+      "n": 7,
+      "skipped": 0
+    },
+    "2": {
+      "chain_pass": 0.8,
+      "judge_mean": 2.8333333333333335,
+      "n": 6,
+      "skipped": 0
+    },
+    "3": {
+      "chain_pass": 0.8571428571428571,
+      "judge_mean": 0.47619047619047616,
+      "n": 7,
+      "skipped": 0
+    },
+    "4": {
+      "chain_pass": 1.0,
+      "judge_mean": 2.619047619047619,
+      "n": 7,
+      "skipped": 0
+    }
+  },
+  "overall": {
+    "chain_pass": 0.9166666666666666,
+    "judge_mean": 2.2098765432098766,
+    "n": 27,
+    "skipped": 0
+  },
+  "tasks": [
+    {
+      "id": "t1_calc",
+      "tier": 1,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "2,847 \u00d7 193 = 549,471",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "2,847 \u00d7 193 = 549,471",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "2,847 \u00d7 193 = 549,471",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_sqrt",
+      "tier": 1,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "The square root of 4096 is 64.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "The square root of 4096 is 64.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "The square root of 4096 is 64.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_time",
+      "tier": 1,
+      "category": "time",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "time_in_zone"
+          ],
+          "error": null,
+          "final": "It's currently 5:32 AM in Tokyo.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "time_in_zone"
+          ],
+          "error": null,
+          "final": "The current time in Tokyo is 5:33 AM on Friday, July 24, 2026.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "time_in_zone"
+          ],
+          "error": null,
+          "final": "It is currently 5:33 AM in Tokyo.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_unit",
+      "tier": 1,
+      "category": "convert",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "unit_convert"
+          ],
+          "error": null,
+          "final": "5 miles is approximately 8.05 kilometers.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "unit_convert"
+          ],
+          "error": null,
+          "final": "5 miles is 8.05 kilometers.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "unit_convert"
+          ],
+          "error": null,
+          "final": "5 miles is 8.05 kilometers.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_datastore",
+      "tier": 1,
+      "category": "memory",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "datastore"
+          ],
+          "error": null,
+          "final": "Got it. I've saved 'teal' as your favorite color.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "datastore"
+          ],
+          "error": null,
+          "final": "Done. I've saved 'teal' as your favorite color.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "datastore"
+          ],
+          "error": null,
+          "final": "Got it. I've saved 'teal' as your favorite color.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_wordproblem",
+      "tier": 1,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "You have 408 items total.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "You have a total of 408 items.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "You have 408 items total.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_dict",
+      "tier": 1,
+      "category": "lookup",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "dictionary"
+          ],
+          "error": null,
+          "final": "**Ephemeral** describes something that lasts for only a very short time. \n\nIt can be used as an adjective (e.g., \"the ephemeral beauty of a sunset\") or a noun. In a more literal sense, it can refer to things that exist for only a single day, like certain types of flowers or insects.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "dictionary"
+          ],
+          "error": null,
+          "final": "'Ephemeral' describes something that lasts for a very short time. It can be used as a noun or an adjective, often referring to things like certain flowers, insects, or even fleeting moments and emotions that vanish almost as soon as they appear.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "dictionary"
+          ],
+          "error": null,
+          "final": "**Ephemeral** refers to something that lasts for only a very short time.\n\nIt can be used in a few ways:\n* **Generally:** Something fleeting or transient (like a passing thought or a sunset).\n* **Biologically:** Something that exists for only a single day, such as certain flowers or insects (like mayflies).\n* **In context:** It's often used to describe things that are beautiful but temporary.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_readfile",
+      "tier": 2,
+      "category": "files",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "read_file"
+          ],
+          "error": null,
+          "final": "According to notes.txt, the Q3 revenue was $48,200.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "read_file"
+          ],
+          "error": null,
+          "final": "The Q3 revenue was $48,200.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "read_file"
+          ],
+          "error": null,
+          "final": "According to notes.txt, the Q3 revenue was $48,200.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_countrows",
+      "tier": 2,
+      "category": "files",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "list_files",
+            "read_file"
+          ],
+          "error": null,
+          "final": "There are 3 expense rows in expenses.csv.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "list_files",
+            "read_file"
+          ],
+          "error": null,
+          "final": "There are 3 expense rows in expenses.csv.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "list_files",
+            "read_file"
+          ],
+          "error": null,
+          "final": "There are 3 expense rows in expenses.csv.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_writefile",
+      "tier": 2,
+      "category": "files",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "write_file"
+          ],
+          "error": null,
+          "final": "Done. I've created `todo.txt` with your three tasks.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "error": null,
+          "final": "Done. I've created `todo.txt` with your three tasks.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "write_file"
+          ],
+          "error": null,
+          "final": "I've created `todo.txt` with those three tasks for you.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_knowledge",
+      "tier": 2,
+      "category": "knowledge",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "datastore",
+            "datastore"
+          ],
+          "error": null,
+          "final": "The gate code is 4471.",
+          "chain_correct": false,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "datastore",
+            "datastore"
+          ],
+          "error": null,
+          "final": "The gate code is 4471.",
+          "chain_correct": false,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "datastore",
+            "datastore"
+          ],
+          "error": null,
+          "final": "The gate code is 4471.",
+          "chain_correct": false,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_chart",
+      "tier": 2,
+      "category": "chart",
+      "skipped": false,
+      "chain_pass": null,
+      "judge_mean": 2.0,
+      "runs": [
+        {
+          "tools": [
+            "make_chart"
+          ],
+          "error": null,
+          "final": "I've created the bar chart for you. You can see the scores for Alice (90), Bob (75), and Cara (85) in the chart above.",
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "make_chart"
+          ],
+          "error": null,
+          "final": "I've created a bar chart for those scores. You should see the 'Student Scores' chart above.",
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "make_chart"
+          ],
+          "error": null,
+          "final": "I've created a bar chart for those scores. You should see the image 'test-scores.png' attached to this message.",
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t2_table_pasted",
+      "tier": 2,
+      "category": "structured",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "I've created a table called `fruit_inventory` with the following data:\n\n| fruit | count |\n| :--- | :--- |\n| apples | 3 |\n| bananas | 5 |\n| cherries | 12 |\n\nI used a `text` column for the fruit names and an `integer` column for the counts. Let me know if you'd like to query this data or see a chart!",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "load_skill",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "I've put those in a table for you. I created a table named `fruit_counts` with the columns `fruit` (text) and `count` (integer), and inserted 3 rows.\n\nWould you like me to run a query on this data or perhaps create a chart to visualize it?",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "load_skill",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "I've created a table called `fruit_inventory` with the following data:\n\n| item | quantity |\n| :--- | :--- |\n| apples | 3 |\n| bananas | 5 |\n| cherries | 12 |\n\nI used a schema with `item` (text) and `quantity` (integer). Would you like me to run a query on this data or perhaps create a chart to visualize it?",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t3_csv_table",
+      "tier": 3,
+      "category": "structured",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 0.6666666666666666,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "read_file",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "load_skill",
+            "read_file",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "load_skill",
+            "read_file",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_csv_aggregate",
+      "tier": 3,
+      "category": "structured",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 0.0,
+      "runs": [
+        {
+          "tools": [
+            "list_files",
+            "extract_to_table",
+            "read_file",
+            "create_table",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "ask_data",
+            "list_files",
+            "read_file",
+            "create_table",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "ask_data",
+            "list_files",
+            "extract_to_table",
+            "load_skill",
+            "read_file",
+            "create_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_extract_invoice",
+      "tier": 3,
+      "category": "extraction",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.6666666666666666,
+      "runs": [
+        {
+          "tools": [
+            "list_files",
+            "load_skill",
+            "read_file",
+            "create_table",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "list_files",
+            "load_skill",
+            "read_file"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "list_files",
+            "load_skill",
+            "read_file",
+            "create_table",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 1
+        }
+      ]
+    },
+    {
+      "id": "t3_table_chart",
+      "tier": 3,
+      "category": "structured",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 0.0,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_rows"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_rows"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "design_table",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_data_summary",
+      "tier": 3,
+      "category": "structured",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 0.0,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "read_file",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "read_file",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "read_file",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_notes_knowledge",
+      "tier": 3,
+      "category": "knowledge",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 2.0,
+      "runs": [
+        {
+          "tools": [
+            "read_file",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've read the notes and added those key facts to my knowledge base.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "read_file",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've read `notes.txt` and added those key facts to my knowledge base.",
+          "chain_correct": true,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "read_file",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've read `notes.txt` and added those key facts to my knowledge base.",
+          "chain_correct": true,
+          "judge_score": 2
+        }
+      ]
+    },
+    {
+      "id": "t3_table_pdf",
+      "tier": 3,
+      "category": "structured",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 0.0,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "make_pdf"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "make_pdf"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "make_pdf"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_ambiguous",
+      "tier": 4,
+      "category": "judgment",
+      "skipped": false,
+      "chain_pass": null,
+      "judge_mean": 2.3333333333333335,
+      "runs": [
+        {
+          "tools": [
+            "wikipedia"
+          ],
+          "error": null,
+          "final": "Titan is Saturn's largest moon and the second-largest in the Solar System. It is unique for having a dense atmosphere\u2014denser than Earth's\u2014and is the only other known place in the Solar System with stable surface liquids. Because of its size and complexity, it is often described as a planet-like moon.",
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "wikipedia"
+          ],
+          "error": null,
+          "final": "Titan is the largest moon of Saturn and the second largest in our Solar System. It is unique for having a dense atmosphere\u2014even denser than Earth's\u2014and it is the only known place in the Solar System besides Earth that has stable bodies of liquid on its surface.",
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "wikipedia"
+          ],
+          "error": null,
+          "final": "Titan is Saturn's largest moon and the second-largest in the Solar System (after Jupiter's Ganymede). It's quite unique because it's the only moon known to have a dense atmosphere\u2014actually denser than Earth's\u2014and the only place in the Solar System besides Earth with stable bodies of liquid on its surface. \n\nPhysically, it's a massive moon: about 48% larger in diameter than our Moon and 80% more massive. Because of its thick atmosphere and surface liquids, it's often described as being \"planet-like.\"",
+          "judge_score": 1
+        }
+      ]
+    },
+    {
+      "id": "t4_act_dont_ask",
+      "tier": 4,
+      "category": "judgment",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "create_table"
+          ],
+          "error": null,
+          "final": "I've set up a table called `water_intake` for you. I used `date` as the primary key so that if you log water for the same day twice, it will simply update your total rather than creating a duplicate entry. \n\n**Table Structure:**\n- `date`: The date of your entry (unique key)\n- `amount_ml`: The amount of water in milliliters (integer)\n- `notes`: Any extra details (text)\n\nYou can now tell me how much you've had to drink, and I'll log it for you!",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "load_skill",
+            "create_table"
+          ],
+          "error": null,
+          "final": "I've set up a table called `water_intake` to track your hydration. \n\nI used `date` as the primary key, so if you log water for the same day twice, it will simply update your total rather than creating a duplicate entry. It's organized with these columns:\n- **date**: The day you're tracking.\n- **amount_ml**: The amount of water in milliliters (integer).\n- **notes**: Any extra details you want to add.\n\nJust let me know when you've had a glass, and I'll log it for you!",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "load_skill",
+            "create_table"
+          ],
+          "error": null,
+          "final": "I've set up a table called `water_intake` to track your progress. \n\nEach entry will be organized by:\n- **Date**: The day you drank the water (this also acts as a unique key, so if you update an entry for the same day, it will refresh the record rather than creating a duplicate).\n- **Amount (ml)**: The total volume in milliliters.\n- **Notes**: Any extra details (like \"morning hydration\" or \"felt sluggish\").\n\nJust let me know when you've had a drink, and I'll log it for you!",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t4_days_until",
+      "tier": 4,
+      "category": "reasoning",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "get_current_time",
+            "calculator",
+            "calculator"
+          ],
+          "error": null,
+          "final": "There are 155 days until December 25th, 2026.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "get_current_time",
+            "calculator",
+            "calculator"
+          ],
+          "error": null,
+          "final": "There are 155 days until December 25th, 2026.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "get_current_time",
+            "calculator",
+            "calculator"
+          ],
+          "error": null,
+          "final": "There are 155 days until December 25th, 2026.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t4_compare_math",
+      "tier": 4,
+      "category": "reasoning",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "calculator",
+            "calculator"
+          ],
+          "error": null,
+          "final": "15% of 340 (which is 51) is larger than 40 divided by 0.8 (which is 50).",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator",
+            "calculator"
+          ],
+          "error": null,
+          "final": "15% of 340 is 51, while 40 divided by 0.8 is 50. So, 15% of 340 is larger.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator",
+            "calculator"
+          ],
+          "error": null,
+          "final": "15% of 340 (which is 51) is larger than 40 divided by 0.8 (which is 50).",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t4_avoid_search",
+      "tier": 4,
+      "category": "tool-selection",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "2 to the power of 10 is 1,024.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "2 to the power of 10 is 1,024.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "2 to the power of 10 is 1,024.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t4_synthesize",
+      "tier": 4,
+      "category": "reasoning",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 1.0,
+      "runs": [
+        {
+          "tools": [
+            "list_files",
+            "read_file",
+            "read_file"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "list_files",
+            "read_file",
+            "read_file"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "list_files",
+            "read_file",
+            "read_file"
+          ],
+          "error": null,
+          "final": "Team Alpha had the higher revenue with $120,000, compared to Team Beta's $95,000.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t4_no_fabricate",
+      "tier": 4,
+      "category": "honesty",
+      "skipped": false,
+      "chain_pass": null,
+      "judge_mean": 3.0,
+      "runs": [
+        {
+          "tools": [
+            "ask_data"
+          ],
+          "error": null,
+          "final": "It looks like I don't have any sales data stored in a table yet. If you have a file with those figures or can paste them here, I can create a table and track them for you.",
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "ask_data"
+          ],
+          "error": null,
+          "final": "It looks like I don't have any sales data recorded in my tables yet. If you have a file with those figures or want to list them out for me, I can create a table and log them for you so I can track them going forward.",
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "ask_data"
+          ],
+          "error": null,
+          "final": "It looks like I don't have any sales data stored in my tables yet. If you have a file or a list of transactions, you can share them with me and I'll set up a table and record everything for you.",
+          "judge_score": 3
+        }
+      ]
+    }
+  ]
+}
