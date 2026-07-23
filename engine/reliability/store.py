@@ -10,7 +10,9 @@ import sqlite3
 import threading
 import time
 
-_DETAIL_CAP = 200
+# The single cap for a stored error/detail note. Callers pass the full string; this is where it's
+# bounded, so the cap lives in exactly one place.
+_DETAIL_CAP = 1000
 
 
 def _day(ts: float) -> str:

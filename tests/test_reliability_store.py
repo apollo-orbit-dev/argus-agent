@@ -50,6 +50,19 @@ def test_retention_prunes_raw_but_keeps_rollup(tmp_path):
     assert daily == 2                                        # both days' rollups kept forever
 
 
+def test_detail_is_capped_at_1000_chars(tmp_path):
+    """The store is the single place a detail note is bounded. A note under the cap survives whole;
+    a longer one is clipped to 1000 (raised from 200 so full-ish tracebacks/API errors are readable)."""
+    s = _store(tmp_path)
+    now = 1_700_000_000.0
+    mid = "x" * 500
+    s.record("tool", "a", ok=0, ms=1, detail=mid, ts=now)
+    s.record("tool", "b", ok=0, ms=1, detail="y" * 1500, ts=now)
+    fails = {f["entity"]: f for f in s.recent_failures(limit=10)}
+    assert fails["a"]["detail"] == mid                 # 500 chars: kept whole (would have been cut at 200)
+    assert len(fails["b"]["detail"]) == 1000           # 1500 chars: clipped to the cap
+
+
 def test_recent_failures_filters_by_entity(tmp_path):
     s = _store(tmp_path)
     now = 1_700_000_000.0

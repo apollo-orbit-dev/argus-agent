@@ -46,7 +46,7 @@ class ReliabilityCollector:
             ms = int((ev.ts - call_ts) * 1000) if call_ts is not None else None
             result = str(d.get("result", d.get("error", "")))
             ok = bool(d.get("ok")) and not _looks_like_error(result)   # ran but returned an error string = failure
-            detail = "" if ok else result[:200]
+            detail = "" if ok else result   # store.record caps at _DETAIL_CAP
             self.store.record("tool", d.get("tool", ""), ok, ms, detail, ev.ts)
             return
         if k == "validation" and d.get("ok") is False:
@@ -61,7 +61,7 @@ class ReliabilityCollector:
             return
         if k == "routine_result":
             self.store.record("routine", d.get("name", ""), bool(d.get("ok")),
-                              d.get("ms"), str(d.get("delivery_error") or d.get("error") or "")[:200], ev.ts)
+                              d.get("ms"), str(d.get("delivery_error") or d.get("error") or ""), ev.ts)
             return
         # final/skill/info/model_* → ignored (also clears any dangling pairing for this run on final)
         if k == "final":
