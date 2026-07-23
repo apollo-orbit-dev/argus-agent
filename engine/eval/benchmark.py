@@ -360,6 +360,13 @@ def main(argv=None):
     (BENCH / "report.md").write_text(md)
     curve_ok = render_curve(bv, BENCH / "curve.png")
     print(f"report: {BENCH / 'report.md'}" + (f"\ncurve: {BENCH / 'curve.png'}" if curve_ok else ""))
+    try:
+        from benchmark import charts
+        charts.stackup(str(BENCH / "stackup.png"))
+        charts.model_tiers(str(BENCH / "model_tiers.png"))
+        print(f"stackup: {BENCH / 'stackup.png'}\nmodel_tiers: {BENCH / 'model_tiers.png'}")
+    except ImportError:
+        print("note: matplotlib not available — skipped stackup/model_tiers charts")
     return 0
 
 
