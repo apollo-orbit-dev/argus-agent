@@ -14,5 +14,13 @@
     "battery_version": "cap-1",
     "date": "2026-07-21T02:20:15+00:00",
     "file": "fast-cap-1-20260721T022015.json"
+  },
+  {
+    "model": "Qwen3.6-27B-FP8",
+    "params": 27,
+    "mode": "native",
+    "battery_version": "cap-1",
+    "date": "2026-07-23T14:49:45+00:00",
+    "file": "Qwen3.6-27B-FP8-cap-1-20260723T144945.json"
   }
 ]
