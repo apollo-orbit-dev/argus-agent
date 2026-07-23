@@ -474,12 +474,15 @@ class DynamicTool(Tool):
 
 def load_persisted_tools(persist_dir: str, timeout: float = 15.0,
                          extra_modules: Optional[set] = None,
-                         secrets: Optional[dict] = None, trust_store=None) -> list:
+                         secrets: Optional[dict] = None, trust_store=None,
+                         *, sandbox_runtime=None, sandbox_workspace: str = "default") -> list:
     """Recompile previously-created tools (JSON manifests) into DynamicTools at startup.
     Compile only — the tool body runs only when actually called. Skips any that fail.
     `extra_modules` are approved packages so tools that used them still compile. A manifest marked
     trusted is compiled UNSANDBOXED only if the trust store still trusts it at the exact code hash
-    (revoked or changed → falls back to the sandbox, which will likely reject and skip it)."""
+    (revoked or changed → falls back to the sandbox, which will likely reject and skip it).
+    A manifest marked `sandboxed` is NOT compiled host-side at all (its code may `import os`) —
+    it's shipped raw to the container's runner.py at run time."""
     from engine.experimental.trust_store import code_hash as _chash
     tools = []
     if not persist_dir or not os.path.isdir(persist_dir):
@@ -489,13 +492,20 @@ def load_persisted_tools(persist_dir: str, timeout: float = 15.0,
             continue
         try:
             m = json.load(open(os.path.join(persist_dir, fn), encoding="utf-8"))
+            params = build_params_model(m["name"], m.get("parameters", {}))
+            if m.get("sandboxed"):
+                # Container tool: DON'T compile host-side (its code may `import os`). Ship the raw
+                # code to runner.py at run time.
+                tools.append(DynamicTool(m["name"], m["description"], params, run_fn=None,
+                                         timeout=timeout, sandboxed=True, code=m["code"],
+                                         runtime=sandbox_runtime, workspace=sandbox_workspace))
+                continue
             trusted = bool(m.get("trusted") and trust_store is not None
                            and trust_store.is_trusted(m["name"], _chash(m["code"])))
             if trusted:
                 run_fn = _compile_trusted(m["code"], secrets)
             else:
                 run_fn = _compile_run(m["code"], m.get("allow_network", False), extra_modules, secrets)
-            params = build_params_model(m["name"], m.get("parameters", {}))
             tools.append(DynamicTool(m["name"], m["description"], params, run_fn, timeout))
         except Exception:
             log.exception("could not load persisted tool %s", fn)
@@ -530,6 +540,10 @@ class CreateToolTool(Tool):
         code: str = Field(..., description="Python: def run(args): ... return <string>")
         test_args: dict = Field(default_factory=dict,
                                 description='example args to test-run the tool once, e.g. {"city":"Nashville"}')
+        sandboxed: Optional[bool] = Field(
+            None, description="run this tool in the container sandbox (full stdlib, no calling other "
+                              "tools). Default: on when the sandbox is available. Set false if the "
+                              "tool must call another Argus tool.")
 
     def __init__(self, registry: ToolRegistry, allow_network: bool = False,
                  validate_only: bool = False, timeout: float = 15.0,
@@ -537,7 +551,9 @@ class CreateToolTool(Tool):
                  secrets: Optional[dict] = None, created_sink: Optional[list] = None,
                  trust_store=None, allow_trusted: bool = False,
                  reserved_names: Optional[set] = None,
-                 approvals=None, run_id: str = "", origin: str = "api"):
+                 approvals=None, run_id: str = "", origin: str = "api",
+                 sandbox_runtime=None, sandbox_workspace: str = "default",
+                 sandbox_enabled: bool = False):
         self.registry = registry
         # First-class built-ins whose NAMES are protected even when the tool isn't currently
         # registered (e.g. crawl_site/web_search when their dependency URL isn't configured). Without
@@ -561,6 +577,9 @@ class CreateToolTool(Tool):
         self.approvals = approvals
         self.run_id = run_id
         self.origin = origin
+        self.sandbox_runtime = sandbox_runtime      # SandboxRuntime | None
+        self.sandbox_workspace = sandbox_workspace
+        self.sandbox_enabled = sandbox_enabled
         if self.secrets:                 # tell the model the exact keys it may use
             keys = sorted(self.secrets)
             self.description = (
@@ -568,6 +587,14 @@ class CreateToolTool(Tool):
                 f"dict named SECRETS (do NOT import os). Available keys: {', '.join(keys)}. "
                 f"e.g. SECRETS['{keys[0]}'].")
         self.created: list[dict] = []   # audit log of what the model authored
+
+    def _resolve_sandboxed(self, requested) -> bool:
+        """The flag for a new tool. Explicit value wins; else default to the container when it is
+        actually usable (enabled AND available) — the stronger boundary is the safe default."""
+        if requested is not None:
+            return bool(requested)
+        return bool(self.sandbox_enabled and self.sandbox_runtime is not None
+                    and self.sandbox_runtime.available())
 
     def _register(self, tool, args) -> None:
         """Register in the current run, persist to disk, AND add to the engine's live created-tools
@@ -624,13 +651,15 @@ class CreateToolTool(Tool):
             return
         from engine.experimental.trust_store import code_hash as _chash
         trusted = bool(self.trust_store and self.trust_store.is_trusted(args.name, _chash(args.code)))
+        sandboxed = self._resolve_sandboxed(args.sandboxed)
         safe = re.sub(r"[^a-z0-9_]+", "_", args.name.lower()).strip("_")
         try:
             os.makedirs(self.persist_dir, exist_ok=True)
             with open(os.path.join(self.persist_dir, f"{safe}.json"), "w", encoding="utf-8") as fh:
                 json.dump({"name": args.name, "description": args.description,
                            "parameters": args.parameters, "code": args.code,
-                           "allow_network": self.allow_network, "trusted": trusted}, fh, indent=2)
+                           "allow_network": self.allow_network, "trusted": trusted,
+                           "sandboxed": sandboxed}, fh, indent=2)
         except Exception:
             log.exception("could not persist created tool %s", args.name)
 
@@ -659,6 +688,20 @@ class CreateToolTool(Tool):
         if args.name in ("create_tool",):
             record["error"] = "reserved name"
             return "create_tool error: that name is reserved."
+
+        sandboxed = self._resolve_sandboxed(args.sandboxed)
+        if sandboxed:
+            # Container path: NO AST scan (full stdlib is the point). Only check it parses and
+            # defines run(args); the code executes in the container, never host-side.
+            try:
+                compile(args.code, "<sandboxed_tool>", "exec")
+            except SyntaxError as e:
+                record["error"] = str(e)
+                return (f"create_tool: '{args.name}' has a syntax error: {e}\n"
+                        "Fix the code and call create_tool again with the same name.")
+            params_model = build_params_model(args.name, args.parameters)
+            return await self._build_and_verify(args, None, params_model, record, sandboxed=True)
+
         extra = self.dep_store.approved_modules() if self.dep_store else set()
         from engine.experimental.trust_store import code_hash as _chash
         is_trusted = self.trust_store is not None and self.trust_store.is_trusted(args.name, _chash(args.code))
@@ -720,7 +763,7 @@ class CreateToolTool(Tool):
                     return (f"create_tool: '{args.name}' could not be built — the dependency may "
                             f"not be installed, or the code failed to compile: {e2}\n"
                             "Fix the code and call create_tool again with the same name.")
-                return await self._build_and_verify(args, run_fn, params_model, record)
+                return await self._build_and_verify(args, run_fn, params_model, record, sandboxed=False)
             if self.dep_store is not None:
                 # Legacy (approvals off): file a request a human can approve, then the model retries.
                 req = self.dep_store.request(e.module, args.name, self.session_id, args.code)
@@ -746,18 +789,34 @@ class CreateToolTool(Tool):
         return await self._build_and_verify(args, run_fn, params_model, record)
 
     async def _build_and_verify(self, args: "CreateToolTool.Params", run_fn: Callable,
-                                params_model: type[BaseModel], record: dict) -> str:
+                                params_model: type[BaseModel], record: dict, *,
+                                sandboxed: bool = False) -> str:
         """Shared tail: compile succeeded (run_fn/params_model are ready) — validate-only report,
         or build the DynamicTool, test-run it, and register + report (or explain why not). Used by
         BOTH a clean compile and the post-dep-install retry compile (DRY: same success path either
-        way, so this only needs to exist once)."""
+        way, so this only needs to exist once). `sandboxed` additionally covers the new container
+        authoring path, which never has a host-side run_fn."""
         if self.validate_only:
             record["ok"] = True
             return (f"create_tool: '{args.name}' validated OK (not registered in this "
                     "validation-only run).")
 
-        tool = DynamicTool(args.name, args.description, params_model, run_fn, self.timeout,
-                           registry=self.registry)   # registry enables CALL_TOOL composition
+        if sandboxed:
+            tool = DynamicTool(args.name, args.description, params_model, run_fn=None,
+                               timeout=self.timeout, sandboxed=True, code=args.code,
+                               runtime=self.sandbox_runtime, workspace=self.sandbox_workspace)
+        else:
+            tool = DynamicTool(args.name, args.description, params_model, run_fn, self.timeout,
+                               registry=self.registry)   # registry enables CALL_TOOL composition
+
+        # Auto test-run BEFORE registering. A sandboxed tool authored while the sandbox is OFF
+        # cannot be container-tested; save it anyway (the flag is a property of the tool) and say so.
+        if sandboxed and (self.sandbox_runtime is None or not self.sandbox_runtime.available()):
+            self._register(tool, args)
+            record["ok"] = True
+            return (f"create_tool: '{args.name}' was created as a sandboxed tool, but the container "
+                    "sandbox is off, so it couldn't be test-run yet. It will run once you enable the "
+                    "sandbox in Settings.")
 
         # Auto test-run: execute the new tool once BEFORE registering, so a broken tool
         # is caught in this same turn (and NOT registered — the model can retry the same

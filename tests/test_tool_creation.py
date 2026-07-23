@@ -679,3 +679,102 @@ async def test_sandboxed_tool_surfaces_stderr_when_stdout_is_empty():
     out = await t.run(_P())
     assert "mytool error" in out
     assert "container OOM-killed" in out
+
+
+# ---- create_tool: sandboxed authoring (Task 3) ----
+
+import tempfile
+
+from engine.experimental.tool_creation import CreateToolTool, load_persisted_tools
+from engine.sandbox.runtime import ExecResult, FakeRuntime
+from engine.tools.base import ToolRegistry
+
+
+def _ct(**kw):
+    return CreateToolTool(ToolRegistry(), **kw)
+
+
+def test_flag_defaults_true_when_sandbox_enabled_and_available():
+    ct = _ct(sandbox_enabled=True, sandbox_runtime=FakeRuntime(available_=True))
+    assert ct._resolve_sandboxed(None) is True
+
+
+def test_flag_defaults_false_when_sandbox_off():
+    ct = _ct(sandbox_enabled=False, sandbox_runtime=FakeRuntime(available_=True))
+    assert ct._resolve_sandboxed(None) is False
+
+
+def test_flag_defaults_false_when_sandbox_enabled_but_unavailable():
+    ct = _ct(sandbox_enabled=True, sandbox_runtime=FakeRuntime(available_=False))
+    assert ct._resolve_sandboxed(None) is False
+
+
+def test_explicit_flag_is_honoured():
+    ct = _ct(sandbox_enabled=True, sandbox_runtime=FakeRuntime(available_=True))
+    assert ct._resolve_sandboxed(False) is False
+    ct2 = _ct(sandbox_enabled=False, sandbox_runtime=None)
+    assert ct2._resolve_sandboxed(True) is True
+
+
+async def test_creating_a_sandboxed_tool_test_runs_in_the_container_and_persists_the_flag():
+    persist = tempfile.mkdtemp()
+    fake = FakeRuntime(result=ExecResult(0, '{"ok": true, "result": "ok"}', ""))
+    ct = _ct(persist_dir=persist, sandbox_enabled=True, sandbox_runtime=fake,
+             timeout=30)
+    out = await ct.run(CreateToolTool.Params(
+        name="fulltool", description="d", parameters={"a": {"type": "integer"}},
+        code="import os\ndef run(args):\n    return 'ok'", test_args={"a": 1}, sandboxed=True))
+    assert "created" in out.lower()
+    # the test-run went through the container (runner.py), not a host-side AST compile
+    assert fake.calls and fake.calls[0][1] == ["python", "/opt/argus/runner.py"]
+    # persisted with sandboxed: true
+    import json
+    import os
+    m = json.load(open(os.path.join(persist, "fulltool.json")))
+    assert m["sandboxed"] is True and "import os" in m["code"]
+
+
+async def test_sandboxed_authoring_skips_the_ast_scan():
+    """`import os` would be rejected host-side; under sandboxed=true it must be allowed (the point)."""
+    fake = FakeRuntime(result=ExecResult(0, '{"ok": true, "result": "ok"}', ""))
+    ct = _ct(sandbox_enabled=True, sandbox_runtime=fake, timeout=30)
+    out = await ct.run(CreateToolTool.Params(
+        name="ostool", description="d", parameters={},
+        code="import os\ndef run(args):\n    return os.getcwd()", test_args={}, sandboxed=True))
+    assert "error" not in out.lower() or "created" in out.lower()
+
+
+async def test_sandboxed_true_but_sandbox_off_saves_but_skips_the_container_test_run():
+    persist = tempfile.mkdtemp()
+    ct = _ct(persist_dir=persist, sandbox_enabled=False, sandbox_runtime=None)
+    out = await ct.run(CreateToolTool.Params(
+        name="later", description="d", parameters={}, code="def run(args):\n    return 'x'",
+        test_args={}, sandboxed=True))
+    import json
+    import os
+    m = json.load(open(os.path.join(persist, "later.json")))
+    assert m["sandboxed"] is True
+    assert "sandbox" in out.lower()   # a note that it couldn't be verified until the sandbox is on
+
+
+def test_load_persisted_tools_reads_the_flag_and_builds_a_sandboxed_tool():
+    import json
+    import os
+    persist = tempfile.mkdtemp()
+    with open(os.path.join(persist, "s.json"), "w") as fh:
+        json.dump({"name": "s", "description": "d", "parameters": {},
+                   "code": "def run(args): return 'x'", "sandboxed": True}, fh)
+    fake = FakeRuntime()
+    tools = load_persisted_tools(persist, sandbox_runtime=fake, sandbox_workspace="default")
+    assert len(tools) == 1 and tools[0].sandboxed is True and tools[0].runtime is fake
+
+
+def test_load_persisted_tool_without_flag_is_host_side():
+    import json
+    import os
+    persist = tempfile.mkdtemp()
+    with open(os.path.join(persist, "h.json"), "w") as fh:
+        json.dump({"name": "h", "description": "d", "parameters": {},
+                   "code": "def run(args): return 'x'"}, fh)   # no sandboxed key
+    tools = load_persisted_tools(persist)
+    assert len(tools) == 1 and tools[0].sandboxed is False
