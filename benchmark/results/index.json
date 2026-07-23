@@ -46,5 +46,21 @@
     "battery_version": "cap-1",
     "date": "2026-07-23T17:38:38+00:00",
     "file": "gemma-4-E4B-it-cap-1-20260723T173838.json"
+  },
+  {
+    "model": "gemma-4-E4B-it",
+    "params": 4,
+    "mode": "native",
+    "battery_version": "cap-1",
+    "date": "2026-07-23T18:12:03+00:00",
+    "file": "gemma-4-E4B-it-cap-1-20260723T181203.json"
+  },
+  {
+    "model": "gemma-4-E4B-it",
+    "params": 4,
+    "mode": "manual",
+    "battery_version": "cap-1",
+    "date": "2026-07-23T18:30:20+00:00",
+    "file": "gemma-4-E4B-it-cap-1-20260723T183020.json"
   }
 ]
