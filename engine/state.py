@@ -40,6 +40,13 @@ class SessionStore:
         self._db: sqlite3.Connection | None = None
         if path:
             self._db = sqlite3.connect(path, check_same_thread=False)
+            # WAL so a writer (append_message runs on the async loop every step) doesn't block readers
+            # and a fsync can't stall the event loop mid-turn and hitch SSE; synchronous=NORMAL is the
+            # standard safe-and-fast pairing with WAL (durable except on OS crash/power loss of the last
+            # txn — fine for a session transcript). The -wal/-shm sidecars are state, so deploy.sh's
+            # allow-list rsync leaves them on the server untouched, same as events.db's.
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA synchronous=NORMAL")
             self._db.row_factory = sqlite3.Row
             self._db.executescript(
                 "CREATE TABLE IF NOT EXISTS sessions ("

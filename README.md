@@ -107,7 +107,7 @@ re-derive a plan it already had.
 | **Deterministic skill steps** | Re-deriving a known plan every time. A skill can pin its procedure as a structured `steps` block that runs through the routines engine — in a live A/B this cut a task to **~5× fewer model calls** than the free-form path, with the model only filling in the gaps. |
 | **Explicit-first skill selection** | Making the model choose its own skill. Trigger phrases match deterministically before any model-driven fallback is consulted. |
 | **Tight tool contracts** | Fabricated or injected arguments. Identifiers are validated, values are bound parameters, and the model never emits raw SQL — `ask_data` compiles natural language against a grounded schema and self-repairs on error. |
-| **Post-action verifier** | Over-claiming. After a turn that created, deleted, or scheduled something, a cheap check tests the claim against what actually happened. |
+| **Post-action verifier** | Over-claiming. After a turn that deletes or cancels things in a batch (tools, skills, scheduled tasks), a cheap check tests the claim against what actually happened. Deliberately narrow — it does not try to verify every action. |
 | **`clarify`** | Confidently guessing. The model can ask one question instead of inventing the missing detail. |
 | **Reliability instrument** | Flying blind. A passive collector scores per-tool success rate, latency, and loop health, so you can see *which* tool your model fumbles instead of just that it feels unreliable. |
 | **Standing rules + memory** | Repeating yourself. Durable directives and facts persist across sessions and every interface, so instructions don't have to be re-stated in each prompt. |

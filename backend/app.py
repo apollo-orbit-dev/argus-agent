@@ -67,7 +67,13 @@ def create_app(engine: Engine) -> FastAPI:
     app = FastAPI(title="Argus", version=get_version())
 
     @app.post("/run")
-    async def run(req: RunRequest):
+    async def run(req: RunRequest, request: Request):
+        # /run drives an agent with the full tool registry, the files workspace, and (if enabled) the
+        # sandbox — it is the most consequential endpoint, so it honors the admin token whenever one is
+        # set (open when unset, same local-dashboard posture as every other gate). The dashboard's fetch
+        # shim already injects X-Admin-Token, so this is transparent to the UI; the Telegram bot calls
+        # engine.run_task directly and never touches this route.
+        _require_admin(request)
         answer = await engine.run_task(req.session_id, req.text, requested_skill=req.skill,
                                        images=req.images, origin="dashboard")
         return {"answer": answer, "session_id": req.session_id}
