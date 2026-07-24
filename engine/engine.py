@@ -98,15 +98,8 @@ TOOL_CREATION_DIRECTIVE = (
     "returns that field), inspect_tool THAT tool and copy its exact key path — don't rediscover it. "
     "The tools you (or past sessions) CREATED can be inspected (inspect_tool), revised (create_tool "
     "with the same name), and DELETED (delete_tool) — these are your own tools, not built-ins. If a "
-    "tool appears in inspect_tool or is not one of the core built-ins (calculator, web_search, "
-    "weather, geocode, wikipedia, dictionary, currency_convert, crypto_price, unit_convert, get_current_time, "
-    "time_in_zone, random_tool, text_tools, fetch_page, map_site, crawl_site, extract_data, "
-    "datastore, create_table, insert_row, query_table, "
-    "list_tables, drop_table, add_column, rename_column, drop_column, rename_table, copy_table, update_rows, "
-    "read_soul, update_soul, build_web_page, inspect_artifact, make_pdf, convert_to_pdf, write_file, "
-    "read_file, list_files, delete_file, download_file, read_document, add_to_knowledge, search_knowledge, "
-    "list_knowledge, forget_knowledge, watch, list_watches, unwatch, make_chart, ascii_chart, notify, "
-    "run_routine, list_routines), it is a CREATED tool you can delete on request. "
+    "tool appears in inspect_tool or is not one of the core built-ins ({builtin_tools}), it is a "
+    "CREATED tool you can delete on request. "
     "When asked to remove SEVERAL tools (e.g. 'all the youtube tools', 'any X tools'), call delete_tool "
     "for EVERY matching tool one by one — do not stop after the first — then tell the user exactly which "
     "tools you deleted. Never claim you removed them all after deleting just one. "
@@ -156,6 +149,26 @@ TOOL_CREATION_DIRECTIVE = (
     "host-side under the restricted sandbox instead, where tool-calling works. Otherwise leave "
     "sandboxed unset. "
 )
+
+
+def builtin_tool_names(registry: ToolRegistry) -> list[str]:
+    """Names of the built-in tools registered in `registry`, sorted for stable output.
+
+    A tool is a built-in iff it is NOT a `DynamicTool` — that is the same distinction the
+    engine uses elsewhere (tool_creation.py) to tell its own created/persisted tools apart
+    from everything else. Generating this list from the live registry (instead of a
+    hand-maintained prose list) means it can never drift out of sync with what's actually
+    registered for a run.
+    """
+    from engine.experimental.tool_creation import DynamicTool
+    return sorted(t.name for t in registry.list() if not isinstance(t, DynamicTool))
+
+
+def compose_tool_creation_directive(registry: ToolRegistry) -> str:
+    """Fill TOOL_CREATION_DIRECTIVE's built-in tool list from the live `registry`."""
+    names = ", ".join(builtin_tool_names(registry))
+    return TOOL_CREATION_DIRECTIVE.replace("{builtin_tools}", names)
+
 
 DEFAULT_SOUL = (
     "# Personality\n"
@@ -1434,7 +1447,11 @@ class Engine:
                     sandbox_workspace=c.sandbox_workspace,
                     sandbox_enabled=c.enable_sandbox,
                     run_id=run_id, origin=origin))
-                system_prompt = system_prompt + "\n\n" + TOOL_CREATION_DIRECTIVE
+                # NOTE: the built-in tool list is composed AFTER skill-creation tools (below)
+                # are registered too, so it stays accurate even though skill_creation_on tools
+                # are also built-ins that belong in it. Composition itself happens further down
+                # (still before this directive's text is appended) so directive ORDER in the
+                # final prompt (tool directive, then skill directive) is unchanged.
             if skill_creation_on:
                 from engine.experimental.skill_creation import (
                     CreateSkillTool, DeleteSkillTool, InspectSkillTool)
@@ -1443,6 +1460,12 @@ class Engine:
                 run_registry.register(InspectSkillTool(self.skill_registry))
                 run_registry.register(DeleteSkillTool(
                     self.skill_registry, self._created_skills_dir))
+            if tool_creation_on:
+                # Composed here (not right after registration above) so the built-in name
+                # list reflects EVERY tool registered for this run, including the
+                # skill-creation meta tools registered just above.
+                system_prompt = system_prompt + "\n\n" + compose_tool_creation_directive(run_registry)
+            if skill_creation_on:
                 system_prompt = system_prompt + "\n\n" + SKILL_CREATION_DIRECTIVE
 
         # Cross-turn repetition nudge: the model can't reliably notice from history that it's

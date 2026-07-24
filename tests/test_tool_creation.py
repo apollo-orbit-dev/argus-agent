@@ -4,6 +4,7 @@ import pytest
 
 from pydantic import BaseModel
 
+from engine.engine import builtin_tool_names, compose_tool_creation_directive
 from engine.experimental.tool_creation import (
     CreateToolTool, DynamicTool, ToolValidationError, _compile_run, _perturbations,
     build_params_model, scan_ast,
@@ -833,3 +834,63 @@ async def test_end_to_end_sandboxed_tool_uses_full_stdlib(tmp_path):
         assert "Linux" in out
     finally:
         rt.stop("default")
+
+
+# ---- built-in tool list is GENERATED from the live registry (#4) ----
+
+class _Echo(Tool):
+    name = "echo"
+    description = "echo"
+
+    class Params(BaseModel):
+        x: str = ""
+
+    async def run(self, args):
+        return "echo"
+
+
+class _Weather(Tool):
+    name = "weather"
+    description = "weather"
+
+    class Params(BaseModel):
+        x: str = ""
+
+    async def run(self, args):
+        return "weather"
+
+
+def _registry_with_a_dynamic_tool() -> ToolRegistry:
+    reg = ToolRegistry()
+    reg.register(_Echo())
+    reg.register(_Weather())
+    reg.register(DynamicTool("my_created_tool", "d", _P))   # NOT a built-in
+    return reg
+
+
+def test_builtin_tool_names_excludes_dynamic_tools():
+    reg = _registry_with_a_dynamic_tool()
+    names = builtin_tool_names(reg)
+    assert names == sorted(["echo", "weather"])
+    assert "my_created_tool" not in names
+
+
+def test_compose_tool_creation_directive_matches_registry_builtins():
+    """The COMPOSED directive's built-in list must equal the registry's built-in tool names —
+    generated, not hand-copied prose. Uses the SAME builder the engine composes with, so this
+    can't silently drift out of sync with what run_task actually sends the model."""
+    reg = _registry_with_a_dynamic_tool()
+    directive = compose_tool_creation_directive(reg)
+    expected = ", ".join(builtin_tool_names(reg))
+    assert expected in directive
+    # sanity: both built-ins present, in sorted order, and no stray placeholder left behind
+    assert "echo, weather" in directive
+    assert "{builtin_tools}" not in directive
+
+
+def test_compose_tool_creation_directive_omits_dynamic_tool_from_builtin_list():
+    reg = _registry_with_a_dynamic_tool()
+    directive = compose_tool_creation_directive(reg)
+    # the created tool's name must not appear inside the built-ins parenthetical
+    builtins_clause = directive.split("core built-ins (")[1].split(")")[0]
+    assert "my_created_tool" not in builtins_clause
