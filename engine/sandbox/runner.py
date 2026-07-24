@@ -14,10 +14,41 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import sys
+import tempfile
 import traceback
 
 _MAX_OUTPUT = 8000
+
+
+@contextlib.contextmanager
+def _redirect_real_fds():
+    """Redirect the real fd 1/2 (not just sys.stdout/sys.stderr) to a discarded tempfile.
+
+    A subprocess CHILD spawned by tool code inherits the real fd 1/2, not Python's sys.stdout
+    object, so `contextlib.redirect_stdout` alone does not stop it writing past the redirect and
+    interleaving with the final JSON line main() prints. This dups the real fds aside, points fd
+    1/2 at a tempfile for the duration of exec+call, and restores them in a finally so a raising
+    tool still leaves fd 1/2 sane. A tempfile is used instead of os.pipe() because a pipe with no
+    reader deadlocks the writer once it fills the ~64 KB kernel buffer; the tempfile is simply
+    closed unread, discarding whatever landed in it (matching the existing StringIO buffers, which
+    are also captured and discarded).
+    """
+    saved1 = os.dup(1)
+    saved2 = os.dup(2)
+    with tempfile.TemporaryFile() as tmp:
+        os.dup2(tmp.fileno(), 1)
+        os.dup2(tmp.fileno(), 2)
+        try:
+            yield
+        finally:
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os.dup2(saved1, 1)
+            os.dup2(saved2, 2)
+            os.close(saved1)
+            os.close(saved2)
 
 
 def run_payload(payload: dict) -> dict:
@@ -25,12 +56,14 @@ def run_payload(payload: dict) -> dict:
 
     The tool's own stdout/stderr (e.g. a stray `print(...)` in model-authored code, which is very
     common) is redirected away from the real stdout/stderr for the duration of exec+call, so it can
-    never land ahead of the final JSON line that main() prints. SystemExit/KeyboardInterrupt (raised
-    by e.g. a tool calling sys.exit()) are BaseException, not Exception, and are also caught here so
-    they turn into a normal {ok: false, ...} result instead of killing the process. A non-dict
-    payload (e.g. JSON `null`/`42`/`[]`/`"x"` decoded off stdin) is also handled here rather than
-    left to blow up on the `.get()` below, so this function's "never raises" guarantee holds for
-    any input, not just malformed dicts.
+    never land ahead of the final JSON line that main() prints. On top of that, the REAL fd 1/2 are
+    also redirected (see `_redirect_real_fds`) so a subprocess child spawned by the tool - which
+    inherits the real fds, not sys.stdout - can't corrupt the JSON line either. SystemExit/
+    KeyboardInterrupt (raised by e.g. a tool calling sys.exit()) are BaseException, not Exception,
+    and are also caught here so they turn into a normal {ok: false, ...} result instead of killing
+    the process. A non-dict payload (e.g. JSON `null`/`42`/`[]`/`"x"` decoded off stdin) is also
+    handled here rather than left to blow up on the `.get()` below, so this function's "never
+    raises" guarantee holds for any input, not just malformed dicts.
     """
     if not isinstance(payload, dict):
         return {"ok": False, "error": f"bad input: expected a JSON object, got "
@@ -40,7 +73,7 @@ def run_payload(payload: dict) -> dict:
     ns: dict = {}
     out, err = io.StringIO(), io.StringIO()
     try:
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        with _redirect_real_fds(), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             exec(compile(code, "<created_tool>", "exec"), ns)  # noqa: S102 - runs in the sandbox
     except BaseException as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()}
@@ -49,7 +82,7 @@ def run_payload(payload: dict) -> dict:
         return {"ok": False, "error": "code must define a function named run(args)",
                 "traceback": ""}
     try:
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        with _redirect_real_fds(), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             result = fn(args)
     except BaseException as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()}
