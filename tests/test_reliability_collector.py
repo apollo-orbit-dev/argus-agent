@@ -215,3 +215,28 @@ def test_loop_health_reports_stuck_tool(tmp_path):
                      step=i, ts=now + i))
     lh = store.loop_health(days=30, now=now + 10)
     assert lh["stuck_tool"]["total"] == 1
+
+
+def test_empty_detail_pops_a_mid_streak():
+    # Pins the pop branch specifically: without it, a *skipped* empty-detail failure would leave the
+    # count untouched and the trailing "e" would wrongly reach 3 and fire.
+    st = _FakeStore(); c = ReliabilityCollector(st)
+    c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "e"}, step=0, ts=0.0))
+    c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "e"}, step=1, ts=1.0))
+    c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": ""}, step=2, ts=2.0))
+    c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "e"}, step=3, ts=3.0))
+    stuck = [r for r in st.rows if r["kind"] == "stuck_tool"]
+    assert stuck == []
+
+
+def test_recent_failures_excludes_stuck_tool(tmp_path):
+    from engine.reliability.store import ReliabilityStore
+    store = ReliabilityStore(str(tmp_path / "rel.db"), retention_days=30)
+    c = ReliabilityCollector(store)
+    now = 1_700_000_000.0
+    for i in range(3):
+        c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "HTTP 500 timeout"},
+                     step=i, ts=now + i))
+    fails = store.recent_failures(entity="web_search")
+    assert all(f["kind"] != "stuck_tool" for f in fails)
+    assert sum(1 for f in fails if f["kind"] == "tool") == 3
