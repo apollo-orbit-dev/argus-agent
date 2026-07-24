@@ -64,8 +64,27 @@ Info "Installing Argus and its dependencies (this can take a minute) ..."
 Ok "Argus installed"
 
 # --- .env ---
-if (-not (Test-Path ".env")) { Copy-Item ".env.example" ".env"; Ok "created .env from .env.example" }
-else { Info ".env already exists - leaving it as-is" }
+if (-not (Test-Path ".env")) {
+    Copy-Item ".env.example" ".env"; Ok "created .env from .env.example"
+    # Dashboard port - Enter keeps the default. Lets you run several Argus instances on one
+    # machine, each on its own port.
+    $DefaultPort = 8700
+    $Port = $DefaultPort
+    $reply = Read-Host "  Dashboard port [$DefaultPort]"
+    if ($reply) {
+        $n = 0
+        if ([int]::TryParse($reply, [ref]$n) -and $n -ge 1 -and $n -le 65535) { $Port = $n }
+        else { Warn "'$reply' is not a valid port (1-65535) - using $DefaultPort" }
+    }
+    # Set PORT in the fresh .env (replace .env.example's PORT= line, or append if absent).
+    $lines = @(Get-Content ".env" | Where-Object { $_ -notmatch '^PORT=' })
+    ($lines + "PORT=$Port") | Set-Content ".env"
+    Ok "dashboard port set to $Port"
+} else { Info ".env already exists - leaving it as-is" }
+
+# Port for the closing message (read back from .env; default 8700).
+$PortMsg = (Select-String -Path ".env" -Pattern '^PORT=(.+)$' | Select-Object -Last 1).Matches.Groups[1].Value
+if (-not $PortMsg) { $PortMsg = 8700 }
 
 Write-Host ""
 Write-Host "=================================================="
@@ -77,7 +96,7 @@ Write-Host "    1) add your model API key to $ProjectDir\.env"
 Write-Host "       (the easiest default is OpenRouter: https://openrouter.ai)"
 Write-Host "    2) activate the venv:  .\.venv\Scripts\Activate.ps1"
 Write-Host "    3) run:  argus start"
-Write-Host "    4) open http://localhost:8700"
+Write-Host "    4) open http://localhost:$PortMsg"
 Write-Host ""
 Write-Host "  Optional features that need native prereqs (skip unless you want them):"
 Write-Host "    PDF export:  .venv\Scripts\python -m pip install -e '.[pdf]'   (needs GTK)"

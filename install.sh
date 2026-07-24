@@ -86,9 +86,37 @@ ok "Argus installed"
 if [ ! -f ".env" ]; then
     cp .env.example .env
     ok "created .env from .env.example"
+    # Dashboard port — Enter keeps the default. Prompting here makes running several Argus
+    # instances on one machine easy: each install picks its own port. Read from /dev/tty so it
+    # works even when the script is piped in (curl ... | bash); falls back to the default with
+    # no terminal (non-interactive install).
+    DEFAULT_PORT=8700
+    PORT="$DEFAULT_PORT"
+    if [ -r /dev/tty ]; then
+        printf '  Dashboard port [%s]: ' "$DEFAULT_PORT" > /dev/tty
+        read -r REPLY_PORT < /dev/tty || REPLY_PORT=""
+        if [ -n "$REPLY_PORT" ]; then
+            if printf '%s' "$REPLY_PORT" | grep -qE '^[0-9]+$' && [ "$REPLY_PORT" -ge 1 ] && [ "$REPLY_PORT" -le 65535 ]; then
+                PORT="$REPLY_PORT"
+            else
+                warn "'$REPLY_PORT' is not a valid port (1-65535) — using $DEFAULT_PORT"
+            fi
+        fi
+    fi
+    # Set PORT in the fresh .env (replace .env.example's PORT= line, or append if absent).
+    if grep -qE '^PORT=' .env; then
+        tmp="$(mktemp)"; grep -vE '^PORT=' .env > "$tmp"; printf 'PORT=%s\n' "$PORT" >> "$tmp"; mv "$tmp" .env
+    else
+        printf 'PORT=%s\n' "$PORT" >> .env
+    fi
+    ok "dashboard port set to $PORT"
 else
     info ".env already exists — leaving it as-is"
 fi
+
+# Port for the closing message (read back from .env; default 8700).
+PORT_MSG="$(grep -E '^PORT=' .env 2>/dev/null | tail -n1 | cut -d= -f2)"
+[ -z "$PORT_MSG" ] && PORT_MSG=8700
 
 echo ""
 echo "=================================================="
@@ -100,7 +128,7 @@ echo "    1) add your model API key to $PROJECT_DIR/.env"
 echo "       (the easiest default is OpenRouter: https://openrouter.ai)"
 echo "    2) run: argus start"
 echo "       (from $PROJECT_DIR, with the venv active: source .venv/bin/activate)"
-echo "    3) open http://localhost:8700"
+echo "    3) open http://localhost:$PORT_MSG"
 echo ""
 echo "  Optional features that need native prereqs (skip unless you want them):"
 echo "    PDF export:  .venv/bin/python -m pip install -e '.[pdf]'   (needs GTK/Pango/cairo)"
