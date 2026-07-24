@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented here.
 
+## 0.12.1
+
+Hardening from an external code review.
+
+### Security
+- **`POST /run` now honors the admin token when one is set.** It was the one open endpoint on a
+  token-protected instance, and it's the most consequential one — it drives the agent with the full
+  tool registry, the files workspace, and (if enabled) the sandbox. Open still means open (unset
+  token = local dashboard as before); the dashboard already sends the header, and the Telegram bot
+  calls the engine directly, so both are unaffected.
+
+### Fixed
+- **Session store opens in WAL mode** (`journal_mode=WAL`, `synchronous=NORMAL`). Per-step message
+  writes happen on the async event loop; WAL keeps a write from blocking readers or stalling the loop
+  and hitching the live trace stream mid-turn.
+- Corrected the README's post-action-verifier description to match the code (it fires on batch
+  deletes/cancels, not on every create/schedule) and removed a long-stale "M1 skeleton" module
+  docstring.
+
 ## 0.12.0
 
 Auto-start on boot: `argus service`.
