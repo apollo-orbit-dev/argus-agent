@@ -521,6 +521,26 @@ def create_app(engine: Engine) -> FastAPI:
         # above, only more so: this one has a 600s timeout, not 15s.
         return await run_in_threadpool(_run_sandbox_setup, script, env)
 
+    # ---- systemd user-service (Argus auto-start on boot) — see engine/service.py. User-level unit
+    # only: everything runs as the backend's own user (systemctl --user), never sudo. ----
+    @app.get("/service/status")
+    async def service_status(request: Request):
+        _require_admin(request)
+        from engine import service
+        return await run_in_threadpool(service.status)
+
+    @app.post("/service/install")
+    async def service_install(request: Request):
+        _require_admin(request)
+        from engine import service
+        return await run_in_threadpool(service.install)
+
+    @app.post("/service/uninstall")
+    async def service_uninstall(request: Request):
+        _require_admin(request)
+        from engine import service
+        return await run_in_threadpool(service.uninstall)
+
     # ---- approval-gated dependency installs ----
     @app.get("/deps")
     async def deps():
