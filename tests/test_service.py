@@ -159,3 +159,33 @@ def test_status_unsupported_returns_reason(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "service_supported", lambda: (False, "nope"))
     r = service.status(clone_dir=_clone(tmp_path))
     assert r["ok"] is False and r["supported"] is False and r["reason"] == "nope"
+
+
+from engine import cli
+
+
+def test_cli_service_status_calls_service(monkeypatch, capsys):
+    monkeypatch.setattr(service, "status", lambda name=None: {
+        "ok": True, "supported": True, "name": "argus.service", "installed": True,
+        "enabled": True, "active": True, "linger": False, "unit_path": "/x/argus.service"})
+    rc = cli.main(["service", "status"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "argus.service" in out and "enabled" in out
+
+
+def test_cli_service_install_dry_run(monkeypatch, capsys):
+    seen = {}
+    def fake_install(name=None, dry_run=False):
+        seen["dry_run"] = dry_run
+        return {"ok": True, "dry_run": True, "name": "argus.service", "unit_text": "[Service]\n...",
+                "unit_path": "/x/argus.service", "note": "dry run — nothing written"}
+    monkeypatch.setattr(service, "install", fake_install)
+    rc = cli.main(["service", "install", "--dry-run"])
+    assert rc == 0 and seen["dry_run"] is True
+    assert "[Service]" in capsys.readouterr().out
+
+
+def test_cli_service_unsupported_returns_1(monkeypatch):
+    monkeypatch.setattr(service, "status", lambda name=None: {"ok": False, "supported": False, "reason": "nope"})
+    assert cli.main(["service", "status"]) == 1

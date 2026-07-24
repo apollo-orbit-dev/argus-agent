@@ -150,6 +150,29 @@ def cmd_version(_):
     return 0
 
 
+def cmd_service(args):
+    from engine import service
+    action = getattr(args, "action", None) or "status"
+    if action == "install":
+        r = service.install(name=args.name, dry_run=args.dry_run)
+    elif action == "uninstall":
+        r = service.uninstall(name=args.name)
+    else:
+        r = service.status(name=args.name)
+    if not r.get("ok", True) and "reason" in r:
+        print(f"service: {r['reason']}")
+        return 1
+    if r.get("dry_run"):
+        print(f"# {r['unit_path']}\n{r['unit_text']}")
+        return 0
+    if action == "status":
+        flags = [k for k in ("installed", "enabled", "active", "linger") if r.get(k)]
+        print(f"{r['name']}: " + (", ".join(flags) if flags else "not installed") + f"  ({r['unit_path']})")
+        return 0
+    print(r.get("note", r.get("name", "done")))
+    return 0 if r.get("ok", True) else 1
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="argus", description="Argus — small-model agent control")
     sub = p.add_subparsers(dest="cmd")
@@ -165,9 +188,14 @@ def main(argv=None):
         ("help", "show this help"),
     ]:
         sub.add_parser(name, help=help_)
+    svc = sub.add_parser("service", help="install/remove a systemd user service (Linux)")
+    svc.add_argument("action", nargs="?", choices=["install", "uninstall", "status"], default="status")
+    svc.add_argument("--name", default=None, help="override the unit name (default: auto-derived)")
+    svc.add_argument("--dry-run", action="store_true", help="print the unit file without installing")
     args = p.parse_args(argv)
     handlers = {"start": cmd_start, "stop": cmd_stop, "exit": cmd_stop, "restart": cmd_restart,
-                "status": cmd_status, "logs": cmd_logs, "run": cmd_run, "version": cmd_version}
+                "status": cmd_status, "logs": cmd_logs, "run": cmd_run, "version": cmd_version,
+                "service": cmd_service}
     if not args.cmd or args.cmd == "help":
         p.print_help()
         return 0
