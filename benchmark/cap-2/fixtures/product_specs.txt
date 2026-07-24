@@ -1,0 +1,6 @@
+Product: Argus Sensor X1
+
+Key specs:
+- Battery life: 18 hours
+- Weight: 240 grams
+- Waterproof rating: IP68

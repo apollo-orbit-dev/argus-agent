@@ -1,0 +1,6 @@
+Standup notes — March 12
+
+Action items:
+- Deploy the staging build by Friday
+- Email the vendor about the invoice discrepancy
+- Schedule the Q2 planning meeting

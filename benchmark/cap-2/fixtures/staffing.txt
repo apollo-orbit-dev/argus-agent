@@ -1,0 +1,4 @@
+Team headcount and monthly cost
+
+Engineers: 4 people at 9000 each
+Designers: 2 people at 7000 each

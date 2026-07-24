@@ -1,0 +1,6 @@
+Team roster
+
+- Priya: Backend Engineer
+- Marco: SRE
+- Nina: Frontend Engineer
+- Omar: Data Engineer

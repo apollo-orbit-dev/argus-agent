@@ -26,31 +26,42 @@ BENCH = ROOT / "benchmark"
 FIXTURES = BENCH / "fixtures"
 RESULTS = BENCH / "results"
 PASS_FRACTION = 0.6
+JUDGE_SOLVED_MIN = 2          # a run is "solved" iff it chained correctly AND judge_score >= this
 
 # ------------------------------- pure helpers (unit-tested) -------------------------------
 
 
 def task_verdict(runs: list, k: int) -> dict:
-    """Collapse a task's k runs into {chain_pass: bool|None, judge_mean: float|None}. chain_pass is
-    None when the task has no `expect` (judge-only); otherwise True iff chain_correct in >=ceil(k*frac)."""
+    """Collapse a task's k runs into {chain_pass, judge_mean, solved}. chain_pass is None when the
+    task has no `expect` (judge-only). solved = chained-correctly (vacuous if no chain) AND judge >=
+    JUDGE_SOLVED_MIN (vacuous if unjudged), per run, then collapsed like chain_pass (>=ceil(k*frac))."""
     thr = math.ceil(k * PASS_FRACTION)
     chained = [r for r in runs if r.get("chain_correct") is not None]
     chain_pass = (sum(1 for r in chained if r["chain_correct"]) >= thr) if chained else None
     js = [r["judge_score"] for r in runs if r.get("judge_score") is not None]
     judge_mean = (sum(js) / len(js)) if js else None
-    return {"chain_pass": chain_pass, "judge_mean": judge_mean}
+
+    def _run_solved(r):
+        c, j = r.get("chain_correct"), r.get("judge_score")
+        chain_ok = True if c is None else c
+        judge_ok = True if j is None else (j >= JUDGE_SOLVED_MIN)
+        return chain_ok and judge_ok
+    solved = (sum(1 for r in runs if _run_solved(r)) >= thr) if runs else None
+    return {"chain_pass": chain_pass, "judge_mean": judge_mean, "solved": solved}
 
 
 def aggregate(tasks: list) -> dict:
     """tasks: [{tier, chain_pass: bool|None, judge_mean: float|None, skipped: bool}]. Returns per-tier
-    and overall {chain_pass: rate over tasks-with-a-chain-verdict, judge_mean: mean over judged tasks,
-    n, skipped}."""
+    and overall {chain_pass: rate over tasks-with-a-chain-verdict, judge_mean: mean over judged
+    tasks, solved: rate of chain-AND-judge>=2 over tasks with a solved verdict, n, skipped}."""
     def roll(items):
         active = [t for t in items if not t.get("skipped")]
         cp = [t["chain_pass"] for t in active if t.get("chain_pass") is not None]
         jm = [t["judge_mean"] for t in active if t.get("judge_mean") is not None]
+        sv = [t["solved"] for t in active if t.get("solved") is not None]
         return {"chain_pass": (sum(1 for x in cp if x) / len(cp)) if cp else None,
                 "judge_mean": (sum(jm) / len(jm)) if jm else None,
+                "solved": (sum(1 for x in sv if x) / len(sv)) if sv else None,
                 "n": len(active), "skipped": sum(1 for t in items if t.get("skipped"))}
     per_tier = {}
     for tier in sorted({t["tier"] for t in tasks}):
@@ -58,9 +69,26 @@ def aggregate(tasks: list) -> dict:
     return {"per_tier": per_tier, "overall": roll(tasks)}
 
 
-def build_series(results: list, battery_version: str) -> dict:
+def _backfill_solved(result: dict) -> dict:
+    """Ensure per_tier/overall carry a `solved` rate. Fresh runs already do (Task 1); older results
+    predate the metric, so recompute it from each task's stored per-run chain_correct/judge_score."""
+    if result.get("overall", {}).get("solved") is not None:
+        return result
+    k = result.get("k", 3)
+    tasks = []
+    for t in result.get("tasks", []):
+        v = task_verdict(t.get("runs", []), k) if t.get("runs") else {}
+        tasks.append({"tier": t["tier"], "chain_pass": t.get("chain_pass"),
+                      "judge_mean": t.get("judge_mean"), "solved": v.get("solved"),
+                      "skipped": t.get("skipped", False)})
+    agg = aggregate(tasks)
+    result["per_tier"], result["overall"] = agg["per_tier"], agg["overall"]
+    return result
+
+
+def build_series(results: list, battery_version: str, metric: str = "chain_pass") -> dict:
     """Group committed result dicts (of one battery_version) into per-tier series sorted by params:
-    {tier: [(params, chain_pass, judge_mean), ...]}."""
+    {tier: [(params, <metric>, judge_mean), ...]} where <metric> is the selected series (default chain_pass)."""
     rows = [r for r in results if r.get("battery_version") == battery_version]
     # One point per model size on the curve: when the same params was run more than once (a re-run
     # at a higher token budget, or the same model in native vs manual mode), plot the best-demonstrated
@@ -85,7 +113,7 @@ def build_series(results: list, battery_version: str) -> dict:
         for r in rows:
             pt = r.get("per_tier", {}).get(tier)
             if pt:
-                pts.append((r["params"], pt.get("chain_pass"), pt.get("judge_mean")))
+                pts.append((r["params"], pt.get(metric), pt.get("judge_mean")))
         series[tier] = pts
     return series
 
@@ -146,7 +174,7 @@ def _dep_available(requires: str, cfg) -> bool:
 # ------------------------------- run orchestration -------------------------------
 
 
-async def _run_task(cfg, judge_fn, task: dict, k: int, timeout: float) -> dict:
+async def _run_task(cfg, judge_fn, task: dict, k: int, timeout: float, fixtures_dir: Path = FIXTURES) -> dict:
     from engine.engine import Engine
     from engine.eval.capture import run_and_capture
     from engine.eval.scoring import score_case
@@ -164,7 +192,7 @@ async def _run_task(cfg, judge_fn, task: dict, k: int, timeout: float) -> dict:
             for src in ([task["source"]] if isinstance(task.get("source"), str) else task.get("source") or []):
                 dst = Path(engine._workspace_dir)
                 dst.mkdir(parents=True, exist_ok=True)
-                shutil.copy(FIXTURES / src, dst / src)
+                shutil.copy(fixtures_dir / src, dst / src)
             cap = await run_and_capture(engine, f"bench-{task['id']}-{i}", task["prompt"], timeout)
             r = {"tools": cap["tools"], "error": cap["error"], "final": cap["final"]}
             if "expect" in task:
@@ -198,9 +226,13 @@ async def run_model(model_spec: str, params: int, mode: str | None, k: int, judg
     battery = json.loads(battery_path.read_text())
     cfg = resolve_config(model_spec, mode, baseline)
     judge_fn = make_judge(judge_spec)
+    # Fixtures live in a `fixtures/` dir beside the battery file, so a battery in its own subdir
+    # (e.g. benchmark/cap-2/battery.json) uses benchmark/cap-2/fixtures/. cap-1 (benchmark/battery.json)
+    # resolves to benchmark/fixtures/ — unchanged.
+    fixtures_dir = battery_path.parent / "fixtures"
     results = []
     for task in battery["tasks"]:
-        results.append(await _run_task(cfg, judge_fn, task, k, timeout))
+        results.append(await _run_task(cfg, judge_fn, task, k, timeout, fixtures_dir))
     agg = aggregate(results)
     name = model_spec.partition("=")[0]
     return {"model": name, "params": params, "mode": mode or cfg.tool_calling_mode,
@@ -228,7 +260,8 @@ def _write_result(result: dict) -> Path:
 
 
 def _load_results() -> list:
-    return [json.loads(p.read_text()) for p in sorted(RESULTS.glob("*.json")) if p.name != "index.json"]
+    return [_backfill_solved(json.loads(p.read_text()))
+            for p in sorted(RESULTS.glob("*.json")) if p.name != "index.json"]
 
 
 def render_report(battery_version: str) -> tuple[str, bool]:
@@ -240,8 +273,8 @@ def render_report(battery_version: str) -> tuple[str, bool]:
     lines = [f"# Model-Capability Benchmark — `{battery_version}`", "",
              f"{len(results)} model(s), by param count. Chain = deterministic tool-chain pass-rate; "
              "Judge = Opus quality mean (0–3). A tier's line falling off below some size is the shelf.", "",
-             "| model | params (B) | mode | scaffold | max_tok | " + " | ".join(f"T{t} chain / judge" for t in tiers) + " | overall |",
-             "|---|---|---|---|---|" + "|".join(["---"] * (len(tiers) + 1)) + "|"]
+             "| model | params (B) | mode | scaffold | max_tok | solved | " + " | ".join(f"T{t} chain / judge" for t in tiers) + " | overall |",
+             "|---|---|---|---|---|---|" + "|".join(["---"] * (len(tiers) + 1)) + "|"]
     def _pct(x):
         return "—" if x is None else f"{x:.0%}"
 
@@ -256,8 +289,9 @@ def render_report(battery_version: str) -> tuple[str, bool]:
         ov = r.get("overall", {})
         cells.append(f"{_pct(ov.get('chain_pass'))} / {_q(ov.get('judge_mean'))}")
         mt = r.get("max_tokens")
+        solved = ov.get("solved")
         lines.append(f"| {r['model']} | {r['params']} | {r.get('mode', '?')} | {r.get('scaffold', 'on')} | "
-                     f"{mt if mt is not None else '—'} | " + " | ".join(cells) + " |")
+                     f"{mt if mt is not None else '—'} | {_pct(solved)} | " + " | ".join(cells) + " |")
     lines += ["",
               "`max_tok` = the completion-token cap for the run. `—` = not recorded (runs predating this "
               "field; the standard-config default is 2048). Runs at different caps are not strictly "
@@ -330,6 +364,13 @@ def main(argv=None):
     (BENCH / "report.md").write_text(md)
     curve_ok = render_curve(bv, BENCH / "curve.png")
     print(f"report: {BENCH / 'report.md'}" + (f"\ncurve: {BENCH / 'curve.png'}" if curve_ok else ""))
+    try:
+        from benchmark import charts
+        charts.stackup(str(BENCH / "stackup.png"))
+        charts.model_tiers(str(BENCH / "model_tiers.png"))
+        print(f"stackup: {BENCH / 'stackup.png'}\nmodel_tiers: {BENCH / 'model_tiers.png'}")
+    except ImportError:
+        print("note: matplotlib not available — skipped stackup/model_tiers charts")
     return 0
 
 

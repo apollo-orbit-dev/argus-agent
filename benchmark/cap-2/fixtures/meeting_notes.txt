@@ -1,0 +1,6 @@
+Project Kickoff — Meeting Notes
+
+Decisions:
+- Launch date set for September 15
+- Budget capped at 40000
+- Priya will lead the frontend workstream
