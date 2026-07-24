@@ -20,6 +20,79 @@ def test_parse_frontmatter_requires_delimiters():
         parse_frontmatter("no frontmatter here")
 
 
+def test_parse_frontmatter_requires_closing_delimiter():
+    import pytest
+    with pytest.raises(ValueError):
+        parse_frontmatter("---\nname: x\ndescription: y\n")
+
+
+def test_parse_frontmatter_multiline_yaml_list():
+    # The old hand-rolled splitter silently dropped multi-line YAML lists (it only
+    # understood `tools: [a, b]` / `tools: a, b` on a single line). yaml.safe_load
+    # must pick these up correctly.
+    meta, body = parse_frontmatter(
+        "---\n"
+        "name: multiline\n"
+        "description: has multiline lists\n"
+        "tools:\n"
+        "  - web_search\n"
+        "  - fetch_page\n"
+        "triggers:\n"
+        "  - look up\n"
+        "  - find out\n"
+        "---\n"
+        "Step 1.\n")
+    assert meta["tools"] == ["web_search", "fetch_page"]
+    assert meta["triggers"] == ["look up", "find out"]
+    assert body == "Step 1."
+
+
+def test_parse_frontmatter_quoted_value_with_colon():
+    meta, body = parse_frontmatter(
+        '---\nname: colon-test\ndescription: "shape it correctly for its channel: how concise vs detailed"\ntools: [calculator]\n---\nDo it.\n')
+    assert meta["description"] == "shape it correctly for its channel: how concise vs detailed"
+    assert meta["tools"] == ["calculator"]
+    assert body == "Do it."
+
+
+def test_parse_frontmatter_unquoted_value_with_colon_still_works():
+    # Back-compat: existing library skills (e.g. report_builder.md) have an unquoted
+    # description containing "word: word" mid-sentence, which is invalid as a bare
+    # YAML plain scalar. parse_frontmatter must still handle it without requiring the
+    # author to add quotes.
+    meta, body = parse_frontmatter(
+        "---\nname: unquoted-colon\n"
+        "description: shape it for the channel: how concise vs detailed, how many paragraphs\n"
+        "tools: [calculator]\n---\nDo it.\n")
+    assert meta["description"] == "shape it for the channel: how concise vs detailed, how many paragraphs"
+    assert meta["tools"] == ["calculator"]
+
+
+def test_parse_frontmatter_malformed_yaml_raises():
+    import pytest
+    with pytest.raises(ValueError):
+        parse_frontmatter("---\nname: [unclosed list\n---\nbody\n")
+
+
+def test_parse_frontmatter_single_scalar_tools():
+    meta, _ = parse_frontmatter(
+        "---\nname: single\ndescription: d\ntools: calculator\n---\nbody\n")
+    assert meta["tools"] == ["calculator"]
+
+
+def test_all_library_skills_load_including_report_builder():
+    # report_builder.md's description contains an unquoted "channel: how concise..."
+    # which is invalid as a bare YAML plain scalar — this is the sharpest back-compat
+    # case for switching to yaml.safe_load.
+    reg = SkillRegistry()
+    reg.load_dir(LIB)
+    md_files = [p for p in Path(LIB).iterdir() if p.suffix == ".md"]
+    assert len(reg.list()) == len(md_files)
+    rb = reg.get("report_builder")
+    assert rb is not None
+    assert "channel: how concise" in rb.description
+
+
 def test_loads_research_skill():
     reg = SkillRegistry()
     reg.load_dir(LIB)
