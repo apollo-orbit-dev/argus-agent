@@ -22,7 +22,7 @@ def _looks_like_error(text: str) -> bool:
     t = (text or "").strip().lower()
     if not t:
         return False
-    if t.startswith("error"):                       # "Error: ...", "Error fetching ..."
+    if t.startswith("error:"):                      # "Error: ..."
         return True
     return any(m in t for m in _ERROR_MARKERS)
 
@@ -32,6 +32,21 @@ class ReliabilityCollector:
         self.store = store
         self.max_pending = max_pending
         self._pending: dict[tuple, float] = {}          # (run_id, step) -> tool_call ts
+        self._streak: dict[str, tuple[str, int]] = {}   # tool -> (last_error_detail, consecutive count)
+
+    def _track_streak(self, tool: str, ok, detail: str, ts: float) -> None:
+        # Metric-only: tracks consecutive identical-error runs per tool and records a single
+        # "stuck_tool" outcome the moment the streak first reaches 3. Never nudges/stops the loop.
+        if ok is False and detail:
+            if len(self._streak) >= self.max_pending:
+                self._streak.clear()                      # hard cap; drop stale streak state
+            prev_detail, prev_count = self._streak.get(tool, (None, 0))
+            count = prev_count + 1 if prev_detail == detail else 1
+            self._streak[tool] = (detail, count)
+            if count == 3:
+                self.store.record("stuck_tool", tool, False, None, detail, ts)
+        elif ok is True or (ok is False and not detail):
+            self._streak.pop(tool, None)
 
     def record(self, ev: StepEvent) -> None:
         d = ev.data or {}
@@ -47,7 +62,9 @@ class ReliabilityCollector:
             result = str(d.get("result", d.get("error", "")))
             ok = bool(d.get("ok")) and not _looks_like_error(result)   # ran but returned an error string = failure
             detail = "" if ok else result   # store.record caps at _DETAIL_CAP
-            self.store.record("tool", d.get("tool", ""), ok, ms, detail, ev.ts)
+            tool = d.get("tool", "")
+            self.store.record("tool", tool, ok, ms, detail, ev.ts)
+            self._track_streak(tool, ok, detail, ev.ts)
             return
         if k == "validation" and d.get("ok") is False:
             self.store.record("validation_fail", d.get("tool", ""), False, None,

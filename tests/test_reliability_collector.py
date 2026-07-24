@@ -113,3 +113,130 @@ def test_looks_like_error_heuristic():
     assert not _looks_like_error("No results found")
     assert not _looks_like_error("CANNOT")
     assert not _looks_like_error("")
+
+
+# ---- (a) tightened error heuristic: only a leading "error:" counts, not any "error" prefix ----
+
+
+def test_error_budget_text_is_not_error_shaped():
+    assert not _looks_like_error("Error budget: 5%")
+
+
+def test_error_handling_guide_text_is_not_error_shaped():
+    assert not _looks_like_error("Error handling guide: X")
+
+
+def test_leading_error_colon_is_error_shaped():
+    assert _looks_like_error("Error: connection refused")
+
+
+def test_error_marker_substring_is_still_error_shaped():
+    assert _looks_like_error("Error fetching model info: 307")
+
+
+# ---- (b) consecutive-identical-error signal (metric-only; does not affect the loop) ----
+
+
+def test_three_identical_failures_record_one_stuck_tool_row():
+    st = _FakeStore(); c = ReliabilityCollector(st)
+    for i in range(3):
+        c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "HTTP 500 timeout"},
+                     step=i, ts=float(i)))
+    stuck = [r for r in st.rows if r["kind"] == "stuck_tool"]
+    assert len(stuck) == 1
+    assert stuck[0] == {"kind": "stuck_tool", "entity": "web_search", "ok": False, "ms": None,
+                        "detail": "HTTP 500 timeout", "ts": 2.0}
+
+
+def test_fourth_identical_failure_does_not_record_again():
+    st = _FakeStore(); c = ReliabilityCollector(st)
+    for i in range(4):
+        c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "HTTP 500 timeout"},
+                     step=i, ts=float(i)))
+    stuck = [r for r in st.rows if r["kind"] == "stuck_tool"]
+    assert len(stuck) == 1
+
+
+def test_success_resets_the_streak():
+    st = _FakeStore(); c = ReliabilityCollector(st)
+    for i in range(2):
+        c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "HTTP 500 timeout"},
+                     step=i, ts=float(i)))
+    c.record(_ev("tool_result", {"tool": "web_search", "ok": True, "result": "3 results"}, step=2, ts=2.0))
+    for i in range(2):
+        c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "HTTP 500 timeout"},
+                     step=3 + i, ts=float(3 + i)))
+    stuck = [r for r in st.rows if r["kind"] == "stuck_tool"]
+    assert stuck == []                                          # only 2 consecutive after the reset
+
+
+def test_different_error_string_resets_count_to_one():
+    st = _FakeStore(); c = ReliabilityCollector(st)
+    c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "HTTP 500 timeout"}, step=0, ts=0.0))
+    c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "HTTP 500 timeout"}, step=1, ts=1.0))
+    c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "DNS lookup failed"}, step=2, ts=2.0))
+    c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "DNS lookup failed"}, step=3, ts=3.0))
+    stuck = [r for r in st.rows if r["kind"] == "stuck_tool"]
+    assert stuck == []                                          # never 3 consecutive identical
+
+
+def test_interleaved_different_tool_does_not_break_streak():
+    st = _FakeStore(); c = ReliabilityCollector(st)
+    c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "HTTP 500 timeout"}, step=0, ts=0.0))
+    c.record(_ev("tool_result", {"tool": "weather", "ok": False, "result": "geocode failed"}, step=1, ts=1.0))
+    c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "HTTP 500 timeout"}, step=2, ts=2.0))
+    c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "HTTP 500 timeout"}, step=3, ts=3.0))
+    stuck = [r for r in st.rows if r["kind"] == "stuck_tool"]
+    assert len(stuck) == 1 and stuck[0]["entity"] == "web_search"
+
+
+def test_failure_with_empty_detail_resets_streak_and_never_records():
+    st = _FakeStore(); c = ReliabilityCollector(st)
+    for i in range(5):
+        c.record(_ev("tool_result", {"tool": "noop", "ok": False, "result": ""}, step=i, ts=float(i)))
+    stuck = [r for r in st.rows if r["kind"] == "stuck_tool"]
+    assert stuck == []
+
+
+def test_streak_state_bounded_like_pending():
+    st = _FakeStore(); c = ReliabilityCollector(st, max_pending=2)
+    for i in range(5):
+        c.record(_ev("tool_result", {"tool": f"t{i}", "ok": False, "result": f"err {i}"}, step=i, ts=float(i)))
+    assert len(c._streak) <= 2                                  # never leaks
+
+
+def test_loop_health_reports_stuck_tool(tmp_path):
+    from engine.reliability.store import ReliabilityStore
+    store = ReliabilityStore(str(tmp_path / "rel.db"), retention_days=30)
+    c = ReliabilityCollector(store)
+    now = 1_700_000_000.0
+    for i in range(3):
+        c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "HTTP 500 timeout"},
+                     step=i, ts=now + i))
+    lh = store.loop_health(days=30, now=now + 10)
+    assert lh["stuck_tool"]["total"] == 1
+
+
+def test_empty_detail_pops_a_mid_streak():
+    # Pins the pop branch specifically: without it, a *skipped* empty-detail failure would leave the
+    # count untouched and the trailing "e" would wrongly reach 3 and fire.
+    st = _FakeStore(); c = ReliabilityCollector(st)
+    c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "e"}, step=0, ts=0.0))
+    c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "e"}, step=1, ts=1.0))
+    c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": ""}, step=2, ts=2.0))
+    c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "e"}, step=3, ts=3.0))
+    stuck = [r for r in st.rows if r["kind"] == "stuck_tool"]
+    assert stuck == []
+
+
+def test_recent_failures_excludes_stuck_tool(tmp_path):
+    from engine.reliability.store import ReliabilityStore
+    store = ReliabilityStore(str(tmp_path / "rel.db"), retention_days=30)
+    c = ReliabilityCollector(store)
+    now = 1_700_000_000.0
+    for i in range(3):
+        c.record(_ev("tool_result", {"tool": "web_search", "ok": False, "result": "HTTP 500 timeout"},
+                     step=i, ts=now + i))
+    fails = store.recent_failures(entity="web_search")
+    assert all(f["kind"] != "stuck_tool" for f in fails)
+    assert sum(1 for f in fails if f["kind"] == "tool") == 3

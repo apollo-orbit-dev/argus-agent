@@ -146,7 +146,7 @@ class ReliabilityStore:
     def loop_health(self, days: int = 30, now: float = None) -> dict:
         since = self._cutoff_day(days, now)
         out = {}
-        for kind in ("parse_fail", "reprompt", "validation_fail"):
+        for kind in ("parse_fail", "reprompt", "validation_fail", "stuck_tool"):
             series = self._rw.execute(
                 "SELECT day, SUM(calls) n FROM daily WHERE kind=? AND day>=? GROUP BY day ORDER BY day",
                 (kind, since)).fetchall()
@@ -155,12 +155,14 @@ class ReliabilityStore:
         return out
 
     def recent_failures(self, entity: str = None, limit: int = 20) -> list:
+        # stuck_tool is a derived signal (its home is loop_health()), not a per-call failure — exclude
+        # it here or a stuck tool would duplicate its own 3rd failure in this drill-down.
         if entity:
             rows = self._rw.execute(
-                "SELECT ts, kind, entity, detail FROM outcomes WHERE ok=0 AND entity=? "
+                "SELECT ts, kind, entity, detail FROM outcomes WHERE ok=0 AND entity=? AND kind != 'stuck_tool' "
                 "ORDER BY ts DESC LIMIT ?", (entity, limit)).fetchall()
         else:
             rows = self._rw.execute(
-                "SELECT ts, kind, entity, detail FROM outcomes WHERE ok=0 "
+                "SELECT ts, kind, entity, detail FROM outcomes WHERE ok=0 AND kind != 'stuck_tool' "
                 "ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
