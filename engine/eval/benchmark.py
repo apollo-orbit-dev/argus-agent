@@ -23,8 +23,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 BENCH = ROOT / "benchmark"
-FIXTURES = BENCH / "fixtures"
-RESULTS = BENCH / "results"
+FIXTURES = BENCH / "cap-1" / "fixtures"     # the default battery's fixtures (cap-1); others resolve beside their own battery.json
+RESULTS = BENCH / "results"                 # shared across batteries — filenames are keyed by battery_version
 PASS_FRACTION = 0.6
 JUDGE_SOLVED_MIN = 2          # a run is "solved" iff it chained correctly AND judge_score >= this
 
@@ -227,8 +227,8 @@ async def run_model(model_spec: str, params: int, mode: str | None, k: int, judg
     cfg = resolve_config(model_spec, mode, baseline)
     judge_fn = make_judge(judge_spec)
     # Fixtures live in a `fixtures/` dir beside the battery file, so a battery in its own subdir
-    # (e.g. benchmark/cap-2/battery.json) uses benchmark/cap-2/fixtures/. cap-1 (benchmark/battery.json)
-    # resolves to benchmark/fixtures/ — unchanged.
+    # (e.g. benchmark/cap-2/battery.json) uses benchmark/cap-2/fixtures/. cap-1
+    # (benchmark/cap-1/battery.json) resolves to benchmark/cap-1/fixtures/.
     fixtures_dir = battery_path.parent / "fixtures"
     results = []
     for task in battery["tasks"]:
@@ -337,7 +337,7 @@ def main(argv=None):
     r.add_argument("--mode", default=None, choices=["native", "manual", "native_finish"])
     r.add_argument("--k", type=int, default=3)
     r.add_argument("--judge", default="claude:opus")
-    r.add_argument("--battery", default=str(BENCH / "battery.json"))
+    r.add_argument("--battery", default=str(BENCH / "cap-1" / "battery.json"))
     r.add_argument("--timeout", type=float, default=180.0)
     r.add_argument("--baseline", action="store_true",
                    help="disable the toggleable scaffolding (observer/verifier/clarify/rules/…) to "
@@ -360,15 +360,19 @@ def main(argv=None):
                 print("no results yet"); return 1
             bv = sorted(res, key=lambda r: r["date"])[-1]["battery_version"]
 
+    bench_dir = BENCH / bv                       # per-battery folder: benchmark/<battery_version>/
+    bench_dir.mkdir(parents=True, exist_ok=True)
     md, ok = render_report(bv)
-    (BENCH / "report.md").write_text(md)
-    curve_ok = render_curve(bv, BENCH / "curve.png")
-    print(f"report: {BENCH / 'report.md'}" + (f"\ncurve: {BENCH / 'curve.png'}" if curve_ok else ""))
+    (bench_dir / "report.md").write_text(md)
+    curve_ok = render_curve(bv, bench_dir / "curve.png")
+    print(f"report: {bench_dir / 'report.md'}" + (f"\ncurve: {bench_dir / 'curve.png'}" if curve_ok else ""))
     try:
         from benchmark import charts
-        charts.stackup(str(BENCH / "stackup.png"))
-        charts.model_tiers(str(BENCH / "model_tiers.png"))
-        print(f"stackup: {BENCH / 'stackup.png'}\nmodel_tiers: {BENCH / 'model_tiers.png'}")
+        # both metrics per battery: chain_pass (canonical, matches the curve) + solved (the headline)
+        for metric, suffix in (("chain_pass", ""), ("solved", "_solved")):
+            charts.stackup(str(bench_dir / f"stackup{suffix}.png"), metric=metric, bv=bv)
+            charts.model_tiers(str(bench_dir / f"model_tiers{suffix}.png"), metric=metric, bv=bv)
+        print(f"charts: {bench_dir}/stackup[_solved].png, model_tiers[_solved].png")
     except ImportError:
         print("note: matplotlib not available — skipped stackup/model_tiers charts")
     return 0

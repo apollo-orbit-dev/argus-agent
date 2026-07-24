@@ -29,9 +29,9 @@ def _sc(r):
     return r.get("scaffold", "on")
 
 
-def _best_runs():
+def _best_runs(bv: str = BV):
     """representative run per (model, params, mode, scaffold): highest max_tokens, then latest date"""
-    res = [r for r in _load_results() if r.get("battery_version") == BV]
+    res = [r for r in _load_results() if r.get("battery_version") == bv]
     best = {}
     for r in res:
         key = (r["model"], r["params"], r.get("mode"), _sc(r))
@@ -41,9 +41,9 @@ def _best_runs():
     return best
 
 
-def stackup(out, metric: str = "chain_pass") -> bool:
+def stackup(out, metric: str = "chain_pass", bv: str = BV) -> bool:
     """Grouped-bar stack-up PNG: `metric` by model x (mode x scaffold). Style matches curve.png."""
-    best = _best_runs()
+    best = _best_runs(bv)
     order = sorted({(p, m) for (m, p, _, _) in best})  # (params, model) sorted by params
 
     def val(model, mode, scaf):
@@ -77,7 +77,7 @@ def stackup(out, metric: str = "chain_pass") -> bool:
     ax.set_xticklabels([f"{model}\n{params}B" for params, model in order], fontsize=10)
     ax.set_ylim(0, 105)
     ax.set_ylabel(f"{metric} (%)")
-    ax.set_title(f"Argus cap-1 — model stack-up  ·  {metric} by mode & scaffolding", fontsize=12, pad=12)
+    ax.set_title(f"Argus {bv} — model stack-up  ·  {metric} by mode & scaffolding", fontsize=12, pad=12)
     ax.yaxis.grid(True, color="#e7e6e1", linewidth=1, zorder=0)
     ax.set_axisbelow(True)
     for s in ("top", "right", "left"):
@@ -92,7 +92,7 @@ def stackup(out, metric: str = "chain_pass") -> bool:
     ]
     ax.legend(handles=legend, loc="upper left", frameon=False, fontsize=9, ncol=2,
               handlelength=1.4, columnspacing=1.6)
-    fig.text(0.5, 0.005, "cap-1 (27 tasks, 4 tiers), k=3, Opus judge · a missing bar means the config wasn't run, not zero",
+    fig.text(0.5, 0.005, f"{bv}, 4 tiers, k=3, Opus judge · a missing bar means the config wasn't run, not zero",
               ha="center", fontsize=8, color="#8a887f")
     fig.tight_layout(rect=(0, 0.03, 1, 1))
     fig.savefig(out, dpi=150)
@@ -101,10 +101,10 @@ def stackup(out, metric: str = "chain_pass") -> bool:
     return True
 
 
-def model_tiers(out, metric: str = "chain_pass") -> bool:
+def model_tiers(out, metric: str = "chain_pass", bv: str = BV) -> bool:
     """Per-model grouped-bar charts: one panel per model, x = tier, grouped bars = the four runs
     (baseline/scaffold x native/manual)."""
-    best = _best_runs()
+    best = _best_runs(bv)
     order = sorted({(p, m) for (m, p, _, _) in best})  # (params, model) by size
 
     def tier_val(model, mode, scaf, tier):
@@ -117,7 +117,9 @@ def model_tiers(out, metric: str = "chain_pass") -> bool:
     n = len(order)
     cols = min(3, n) or 1
     rows = math.ceil(n / cols) if n else 1
-    fig, axes = plt.subplots(rows, cols, figsize=(4.7 * cols, 3.3 * rows), sharey=True, squeeze=False)
+    foot_in = 0.95                       # fixed bottom band (inches) for the legend + footer note, so
+    figh = 3.3 * rows + foot_in          # the furniture never collides with a short (few-panel) grid
+    fig, axes = plt.subplots(rows, cols, figsize=(4.7 * cols, figh), sharey=True, squeeze=False)
     flat = [ax for row in axes for ax in row]
 
     group_w = 0.8
@@ -154,7 +156,10 @@ def model_tiers(out, metric: str = "chain_pass") -> bool:
     for r_ in range(rows):
         axes[r_][0].set_ylabel(f"{metric} (%)")
 
-    fig.suptitle(f"Argus cap-1 — per-tier {metric} by run, one panel per model", fontsize=13, y=0.99)
+    foot = foot_in / figh
+    fig.tight_layout(rect=(0, foot, 1, 1 - 0.5 / figh))
+    fig.suptitle(f"Argus {bv} — per-tier {metric} by run, one panel per model", fontsize=13,
+                 y=1 - 0.22 / figh)
     legend = [
         Patch(facecolor=NATIVE, label="native mode"),
         Patch(facecolor=MANUAL, label="manual mode"),
@@ -162,11 +167,10 @@ def model_tiers(out, metric: str = "chain_pass") -> bool:
         Patch(facecolor="none", edgecolor="#888", hatch="////", label="hatched = baseline"),
     ]
     fig.legend(handles=legend, loc="lower center", ncol=4, frameon=False, fontsize=9.5,
-               bbox_to_anchor=(0.5, -0.01))
-    fig.text(0.5, 0.035, "bars within each tier: baseline-native, baseline-manual, scaffold-native, scaffold-manual · "
-              "a missing bar = that config wasn't run", ha="center", fontsize=8, color="#8a887f")
-    fig.tight_layout(rect=(0, 0.06, 1, 0.96))
-    fig.savefig(out, dpi=150, bbox_inches="tight")
+               bbox_to_anchor=(0.5, foot * 0.48))
+    fig.text(0.5, foot * 0.14, "bars within each tier: baseline-native, baseline-manual, scaffold-native, "
+             "scaffold-manual · a missing bar = that config wasn't run", ha="center", fontsize=8, color="#8a887f")
+    fig.savefig(out, dpi=150)
     plt.close(fig)
     print("wrote", out, "·", n, "panels ·", drawn, "bars")
     return True

@@ -142,5 +142,69 @@
     "battery_version": "cap-1",
     "date": "2026-07-23T21:40:54+00:00",
     "file": "gemma-4-26B-A4B-it-cap-1-20260723T214054.json"
+  },
+  {
+    "model": "gemma-4-26B-A4B-it",
+    "params": 26,
+    "mode": "native",
+    "battery_version": "cap-2",
+    "date": "2026-07-24T15:02:41+00:00",
+    "file": "gemma-4-26B-A4B-it-cap-2-20260724T150241.json"
+  },
+  {
+    "model": "Qwen2.5-3B-Instruct",
+    "params": 3,
+    "mode": "native",
+    "battery_version": "cap-2",
+    "date": "2026-07-24T15:16:51+00:00",
+    "file": "Qwen2.5-3B-Instruct-cap-2-20260724T151651.json"
+  },
+  {
+    "model": "gemma-4-26B-A4B-it",
+    "params": 26,
+    "mode": "manual",
+    "battery_version": "cap-2",
+    "date": "2026-07-24T16:14:45+00:00",
+    "file": "gemma-4-26B-A4B-it-cap-2-20260724T161445.json"
+  },
+  {
+    "model": "Qwen2.5-3B-Instruct",
+    "params": 3,
+    "mode": "manual",
+    "battery_version": "cap-2",
+    "date": "2026-07-24T16:23:03+00:00",
+    "file": "Qwen2.5-3B-Instruct-cap-2-20260724T162303.json"
+  },
+  {
+    "model": "gemma-4-26B-A4B-it",
+    "params": 26,
+    "mode": "native",
+    "battery_version": "cap-2",
+    "date": "2026-07-24T17:15:33+00:00",
+    "file": "gemma-4-26B-A4B-it-cap-2-20260724T171533.json"
+  },
+  {
+    "model": "Qwen2.5-3B-Instruct",
+    "params": 3,
+    "mode": "native",
+    "battery_version": "cap-2",
+    "date": "2026-07-24T17:41:07+00:00",
+    "file": "Qwen2.5-3B-Instruct-cap-2-20260724T174107.json"
+  },
+  {
+    "model": "gemma-4-26B-A4B-it",
+    "params": 26,
+    "mode": "manual",
+    "battery_version": "cap-2",
+    "date": "2026-07-24T18:11:15+00:00",
+    "file": "gemma-4-26B-A4B-it-cap-2-20260724T181115.json"
+  },
+  {
+    "model": "Qwen2.5-3B-Instruct",
+    "params": 3,
+    "mode": "manual",
+    "battery_version": "cap-2",
+    "date": "2026-07-24T18:33:57+00:00",
+    "file": "Qwen2.5-3B-Instruct-cap-2-20260724T183357.json"
   }
 ]
