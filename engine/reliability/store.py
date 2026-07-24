@@ -146,7 +146,7 @@ class ReliabilityStore:
     def loop_health(self, days: int = 30, now: float = None) -> dict:
         since = self._cutoff_day(days, now)
         out = {}
-        for kind in ("parse_fail", "reprompt", "validation_fail"):
+        for kind in ("parse_fail", "reprompt", "validation_fail", "stuck_tool"):
             series = self._rw.execute(
                 "SELECT day, SUM(calls) n FROM daily WHERE kind=? AND day>=? GROUP BY day ORDER BY day",
                 (kind, since)).fetchall()
