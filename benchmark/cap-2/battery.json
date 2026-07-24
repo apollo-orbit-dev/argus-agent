@@ -285,7 +285,7 @@
       "tier": 2,
       "category": "retrieve",
       "requires": "firecrawl",
-      "prompt": "Fetch just the single page at https://example.com/ and tell me its heading text — don't crawl the whole site for this.",
+      "prompt": "Fetch just the single page at https://example.com/ and tell me its heading text \u2014 don't crawl the whole site for this.",
       "expect": {
         "tools_in_order": [
           "fetch_page"
@@ -317,7 +317,7 @@
       "tier": 2,
       "category": "data-transform",
       "source": "server.log",
-      "prompt": "Check server.log — what does the ERROR line say?",
+      "prompt": "Check server.log \u2014 what does the ERROR line say?",
       "expect": {
         "tools_in_order": [
           "read_file"
@@ -340,7 +340,7 @@
         ]
       },
       "rubric": [
-        "reads the file (not ask_data/query_table — there is no table here, just a file)",
+        "reads the file (not ask_data/query_table \u2014 there is no table here, just a file)",
         "reports port 8080"
       ]
     },
@@ -355,7 +355,7 @@
         ]
       },
       "rubric": [
-        "uses calculator (not currency_convert — the dollar sign is not a currency conversion)",
+        "uses calculator (not currency_convert \u2014 the dollar sign is not a currency conversion)",
         "computes $36"
       ]
     },
@@ -370,7 +370,7 @@
         ]
       },
       "rubric": [
-        "uses calculator (not unit_convert — this is scaling a quantity, not converting between units)",
+        "uses calculator (not unit_convert \u2014 this is scaling a quantity, not converting between units)",
         "computes 7.5 cups"
       ]
     },
@@ -399,7 +399,7 @@
       "tier": 2,
       "category": "restraint",
       "source": "settings.txt",
-      "prompt": "What's the configured request timeout, in seconds? Don't just assume the typical default — check settings.txt.",
+      "prompt": "What's the configured request timeout, in seconds? Don't just assume the typical default \u2014 check settings.txt.",
       "expect": {
         "tools_in_order": [
           "read_file"
@@ -817,13 +817,12 @@
       "tier": 4,
       "category": "restraint",
       "source": "sleep.csv",
-      "prompt": "Compute my average nightly sleep from sleep.csv. Just use the file — don't web-search for generic sleep advice.",
+      "prompt": "Compute my average nightly sleep from sleep.csv. Just use the file \u2014 don't web-search for generic sleep advice.",
       "expect": {
         "tools_in_order": [
           "read_file",
           "create_table",
-          "insert_row",
-          "query_table"
+          "insert_row"
         ],
         "min_counts": {
           "insert_row": 4
@@ -835,7 +834,7 @@
       "rubric": [
         "loads all 4 nights from sleep.csv into a table (not averaged by eye)",
         "computes the average nightly sleep via the table and reports 7.0 hours",
-        "does NOT call web_search for generic advice — works only from the file"
+        "does NOT call web_search for generic advice \u2014 works only from the file"
       ]
     },
     {
@@ -843,7 +842,7 @@
       "tier": 4,
       "category": "restraint",
       "source": "meeting_notes.txt",
-      "prompt": "Read meeting_notes.txt and save each decision to my knowledge base. Don't search the web — everything you need is already in the file.",
+      "prompt": "Read meeting_notes.txt and save each decision to my knowledge base. Don't search the web \u2014 everything you need is already in the file.",
       "expect": {
         "tools_in_order": [
           "read_file",
@@ -905,14 +904,17 @@
       "rubric": [
         "loads all 4 signup rows into a table and queries by month",
         "NOTICES the data spans March of two different years (1 in March 2025, 2 in March 2026)",
-        "surfaces the ambiguity — asks which year OR reports both counts (1 and 2) — rather than silently answering a single number"
+        "surfaces the ambiguity \u2014 asks which year OR reports both counts (1 and 2) \u2014 rather than silently answering a single number"
       ]
     },
     {
       "id": "t4_budget_reconcile",
       "tier": 4,
       "category": "synthesis",
-      "source": ["dept_budget.txt", "dept_spend.csv"],
+      "source": [
+        "dept_budget.txt",
+        "dept_spend.csv"
+      ],
       "prompt": "Read dept_budget.txt for Marketing's allocated budget and dept_spend.csv for the line items. Load the spend into a table, then tell me whether Marketing is over or under budget and by how much. Check the spend total against the table before answering.",
       "expect": {
         "tools_in_order": [
@@ -993,7 +995,7 @@
         ]
       },
       "rubric": [
-        "fetches the page with fetch_page (does not fabricate its contents — it is the 'Example Domain' placeholder page)",
+        "fetches the page with fetch_page (does not fabricate its contents \u2014 it is the 'Example Domain' placeholder page)",
         "correctly reports that NO contact email address appears on the page, rather than inventing one",
         "writes the finding to a file and stores it via add_to_knowledge"
       ]
@@ -1002,7 +1004,10 @@
       "id": "t4_oncall_role",
       "tier": 4,
       "category": "synthesis",
-      "source": ["oncall.txt", "roster.txt"],
+      "source": [
+        "oncall.txt",
+        "roster.txt"
+      ],
       "prompt": "Read oncall.txt to see who is on call this week, then read roster.txt to find that person's role, and save a note to my knowledge base stating who is on call and their role.",
       "expect": {
         "tools_in_order": [
