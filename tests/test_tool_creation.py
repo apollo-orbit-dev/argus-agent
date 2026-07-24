@@ -4,10 +4,13 @@ import pytest
 
 from pydantic import BaseModel
 
+from config import Config
+from engine.engine import Engine, builtin_tool_names, compose_tool_creation_directive
 from engine.experimental.tool_creation import (
     CreateToolTool, DynamicTool, ToolValidationError, _compile_run, _perturbations,
     build_params_model, scan_ast,
 )
+from engine.protocol import ModelResponse
 from engine.tools.base import Tool, ToolRegistry
 
 
@@ -833,3 +836,105 @@ async def test_end_to_end_sandboxed_tool_uses_full_stdlib(tmp_path):
         assert "Linux" in out
     finally:
         rt.stop("default")
+
+
+# ---- built-in tool list is GENERATED from the live registry (#4) ----
+
+class _Echo(Tool):
+    name = "echo"
+    description = "echo"
+
+    class Params(BaseModel):
+        x: str = ""
+
+    async def run(self, args):
+        return "echo"
+
+
+class _Weather(Tool):
+    name = "weather"
+    description = "weather"
+
+    class Params(BaseModel):
+        x: str = ""
+
+    async def run(self, args):
+        return "weather"
+
+
+def _registry_with_a_dynamic_tool() -> ToolRegistry:
+    reg = ToolRegistry()
+    reg.register(_Echo())
+    reg.register(_Weather())
+    reg.register(DynamicTool("my_created_tool", "d", _P))   # NOT a built-in
+    return reg
+
+
+def test_builtin_tool_names_excludes_dynamic_tools():
+    reg = _registry_with_a_dynamic_tool()
+    names = builtin_tool_names(reg)
+    assert names == sorted(["echo", "weather"])
+    assert "my_created_tool" not in names
+
+
+def test_compose_tool_creation_directive_matches_registry_builtins():
+    """The COMPOSED directive's built-in list must equal the registry's built-in tool names —
+    generated, not hand-copied prose. Uses the SAME builder the engine composes with, so this
+    can't silently drift out of sync with what run_task actually sends the model."""
+    reg = _registry_with_a_dynamic_tool()
+    directive = compose_tool_creation_directive(reg)
+    expected = ", ".join(builtin_tool_names(reg))
+    assert expected in directive
+    # sanity: both built-ins present, in sorted order, and no stray placeholder left behind
+    assert "echo, weather" in directive
+    assert "{builtin_tools}" not in directive
+
+
+def test_compose_tool_creation_directive_omits_dynamic_tool_from_builtin_list():
+    reg = _registry_with_a_dynamic_tool()
+    directive = compose_tool_creation_directive(reg)
+    # the created tool's name must not appear inside the built-ins parenthetical
+    builtins_clause = directive.split("core built-ins (")[1].split(")")[0]
+    assert "my_created_tool" not in builtins_clause
+
+
+class _CaptureModel:
+    """Records the system prompt run_task actually sent, so the test exercises the REAL
+    composition call site (engine.py's run_task), not a hand-built registry."""
+    last_system = None
+
+    async def chat(self, messages, tools=None, max_tokens=None, temperature=None,
+                    think=None, reasoning=None):
+        _CaptureModel.last_system = next(
+            (m["content"] for m in messages if m.get("role") == "system"), "")
+        return ModelResponse(content="ok", finish_reason="stop")
+
+
+async def test_real_engine_composes_directive_with_genuine_builtins(tmp_path):
+    """Wiring test: a real Engine, with its REAL base registry (built_base_registry + the
+    tool-creation meta tools run_task registers), must produce a directive whose built-in
+    list contains the genuine registered names — including ones the OLD hardcoded prose
+    list omitted (about_argus/ask_user/exec_python and the create_tool/inspect_tool/
+    delete_tool meta tools). If the call site regressed back to the hardcoded string, or
+    composed against the wrong registry, this test — unlike the synthetic-registry tests
+    above — would fail."""
+    cfg = Config(model_base_url="http://x/v1", model_name="main", telegram_bot_token="",
+                 enable_tool_creation=True)
+    e = Engine(cfg, data_dir=str(tmp_path))
+    e._model_client = lambda: _CaptureModel()
+
+    await e.run_task("s", "hello")
+    prompt = _CaptureModel.last_system
+
+    assert "BUILD NEW TOOLS" in prompt   # the tool-creation directive is present at all
+    builtins_clause = prompt.split("core built-ins (")[1].split(")")[0]
+    names = {n.strip() for n in builtins_clause.split(",")}
+
+    # genuinely registered built-ins, including ones the old hardcoded list OMITTED
+    for expected in ("calculator", "create_tool", "inspect_tool", "delete_tool"):
+        assert expected in names
+    assert names & {"about_argus", "ask_user", "exec_python"}, (
+        "expected at least one previously-omitted built-in to be present")
+
+    # a name that only a CREATED (DynamicTool) tool would ever have must not appear
+    assert "my_created_tool" not in names
