@@ -27,6 +27,11 @@ def validate(path: str) -> list[str]:
             p.append(f"{tid}: category {t.get('category')!r} not in {sorted(FAMILIES)}")
         if not t.get("prompt"):
             p.append(f"{tid}: empty prompt")
+        # Every task needs at least one real success criterion. A task with neither `expect` nor
+        # `rubric` is vacuously "solved" every run (both checks pass on nothing), silently inflating
+        # the solved rate — guard against it here even for T1/T2 (T3/T4 are further constrained below).
+        if not t.get("expect") and not t.get("rubric"):
+            p.append(f"{tid}: needs at least an `expect` chain or a `rubric`")
         # T3/T4 MUST have a real chain AND a rubric
         if t.get("tier") in (3, 4):
             exp = (t.get("expect") or {}).get("tools_in_order")

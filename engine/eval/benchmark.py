@@ -52,8 +52,8 @@ def task_verdict(runs: list, k: int) -> dict:
 
 def aggregate(tasks: list) -> dict:
     """tasks: [{tier, chain_pass: bool|None, judge_mean: float|None, skipped: bool}]. Returns per-tier
-    and overall {chain_pass: rate over tasks-with-a-chain-verdict, judge_mean: mean over judged tasks,
-    n, skipped}."""
+    and overall {chain_pass: rate over tasks-with-a-chain-verdict, judge_mean: mean over judged
+    tasks, solved: rate of chain-AND-judge>=2 over tasks with a solved verdict, n, skipped}."""
     def roll(items):
         active = [t for t in items if not t.get("skipped")]
         cp = [t["chain_pass"] for t in active if t.get("chain_pass") is not None]
@@ -88,7 +88,7 @@ def _backfill_solved(result: dict) -> dict:
 
 def build_series(results: list, battery_version: str, metric: str = "chain_pass") -> dict:
     """Group committed result dicts (of one battery_version) into per-tier series sorted by params:
-    {tier: [(params, chain_pass, judge_mean), ...]}."""
+    {tier: [(params, <metric>, judge_mean), ...]} where <metric> is the selected series (default chain_pass)."""
     rows = [r for r in results if r.get("battery_version") == battery_version]
     # One point per model size on the curve: when the same params was run more than once (a re-run
     # at a higher token budget, or the same model in native vs manual mode), plot the best-demonstrated
