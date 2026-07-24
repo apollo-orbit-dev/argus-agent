@@ -1,6 +1,6 @@
 # Model-Capability Benchmark — `cap-2`
 
-8 model(s), by param count. Chain = deterministic tool-chain pass-rate; Judge = Opus quality mean (0–3). A tier's line falling off below some size is the shelf.
+12 model(s), by param count. Chain = deterministic tool-chain pass-rate; Judge = Opus quality mean (0–3). A tier's line falling off below some size is the shelf.
 
 | model | params (B) | mode | scaffold | max_tok | solved | T1 chain / judge | T2 chain / judge | T3 chain / judge | T4 chain / judge | overall |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -8,6 +8,10 @@
 | Qwen2.5-3B-Instruct | 3 | manual | on | 2048 | 43% | 100% / 2.5 | 83% / 2.0 | 14% / 1.0 | 14% / 0.7 | 50% / 1.5 |
 | Qwen2.5-3B-Instruct | 3 | native | off | 2048 | 41% | 100% / 2.6 | 67% / 2.2 | 0% / 0.4 | 14% / 0.4 | 42% / 1.4 |
 | Qwen2.5-3B-Instruct | 3 | manual | off | 2048 | 38% | 100% / 2.3 | 75% / 2.0 | 21% / 0.4 | 0% / 0.0 | 46% / 1.2 |
+| gemma-4-E4B-it | 4 | native | on | 16384 | 75% | 100% / 3.0 | 75% / 2.5 | 79% / 2.6 | 57% / 2.2 | 77% / 2.6 |
+| gemma-4-E4B-it | 4 | manual | on | 16384 | 73% | 100% / 3.0 | 83% / 2.6 | 79% / 2.6 | 57% / 2.3 | 79% / 2.6 |
+| gemma-4-E4B-it | 4 | native | off | 16384 | 55% | 92% / 2.8 | 75% / 2.7 | 36% / 1.3 | 21% / 0.9 | 54% / 1.9 |
+| gemma-4-E4B-it | 4 | manual | off | 16384 | 59% | 100% / 3.0 | 83% / 2.7 | 43% / 1.3 | 7% / 0.6 | 56% / 1.9 |
 | gemma-4-26B-A4B-it | 26 | native | on | 16384 | 88% | 100% / 2.9 | 100% / 2.9 | 93% / 2.7 | 71% / 2.4 | 90% / 2.8 |
 | gemma-4-26B-A4B-it | 26 | manual | on | 16384 | 86% | 100% / 3.0 | 92% / 2.8 | 93% / 2.9 | 71% / 2.5 | 88% / 2.8 |
 | gemma-4-26B-A4B-it | 26 | native | off | 16384 | 64% | 100% / 3.0 | 100% / 2.9 | 50% / 1.4 | 21% / 0.8 | 65% / 2.0 |
