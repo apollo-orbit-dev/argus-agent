@@ -3,7 +3,3 @@ date,order_id,customer,status
 2026-02-02,1002,Beta,pending
 2026-02-03,1003,Cirrus,shipped
 2026-02-04,1004,Delta,delivered
-2026-02-05,1005,Echo,shipped
-2026-02-06,1006,Foxtrot,cancelled
-2026-02-07,1007,Golf,pending
-2026-02-08,1008,Hotel,shipped

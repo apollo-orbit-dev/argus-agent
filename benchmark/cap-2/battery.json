@@ -423,13 +423,13 @@
           "insert_row"
         ],
         "min_counts": {
-          "insert_row": 8
+          "insert_row": 4
         }
       },
       "rubric": [
         "reads orders.csv and loads its rows into a table (not counted by eye)",
         "queries the table for status = 'shipped'",
-        "reports the correct count of 4 shipped orders"
+        "reports the correct count of 2 shipped orders"
       ]
     },
     {
@@ -445,13 +445,13 @@
           "insert_row"
         ],
         "min_counts": {
-          "insert_row": 5
+          "insert_row": 4
         }
       },
       "rubric": [
-        "one table row per line item (5 items)",
+        "one table row per line item (4 items)",
         "computes the total by summing the line_total column via the table, not by eye",
-        "reports the correct total of 840.00"
+        "reports the correct total of 720.00"
       ]
     },
     {
@@ -467,13 +467,13 @@
           "insert_row"
         ],
         "min_counts": {
-          "insert_row": 7
+          "insert_row": 4
         }
       },
       "rubric": [
         "loads the expense rows into a table (not summed by eye)",
         "filters to category = 'Travel' and sums the amount",
-        "reports the correct Travel total of 400.00"
+        "reports the correct Travel total of 200.00"
       ]
     },
     {
@@ -489,21 +489,21 @@
           "insert_row"
         ],
         "min_counts": {
-          "insert_row": 7
+          "insert_row": 4
         }
       },
       "rubric": [
         "loads the inventory rows into a table (not judged by eye)",
         "queries for rows where on_hand < reorder_level",
-        "reports the correct count of 4 items below reorder level"
+        "reports the correct count of 2 items below reorder level"
       ]
     },
     {
       "id": "t3_sales_topproduct",
       "tier": 3,
       "category": "data-transform",
-      "source": "sales.csv",
-      "prompt": "Load sales.csv into a table and tell me which product has the highest total revenue, and what that total is.",
+      "source": "product_sales.csv",
+      "prompt": "Load product_sales.csv into a table and tell me which product has the highest total revenue, and what that total is.",
       "expect": {
         "tools_in_order": [
           "read_file",
@@ -511,13 +511,13 @@
           "insert_row"
         ],
         "min_counts": {
-          "insert_row": 9
+          "insert_row": 4
         }
       },
       "rubric": [
         "loads the sales rows into a table (not eyeballed)",
         "aggregates revenue per product via the table",
-        "reports Widget A as the top product with a total revenue of 780.00"
+        "reports Widget A as the top product with a total revenue of 400.00"
       ]
     },
     {
@@ -651,13 +651,13 @@
           "insert_row"
         ],
         "min_counts": {
-          "insert_row": 8
+          "insert_row": 4
         }
       },
       "rubric": [
         "loads the survey responses into a table (not tallied by eye)",
         "counts votes per choice via the table",
-        "reports 'Blue' as the winning choice with 4 votes"
+        "reports 'Blue' as the winning choice with 2 votes"
       ]
     },
     {
@@ -710,13 +710,13 @@
           "query_table"
         ],
         "min_counts": {
-          "insert_row": 6
+          "insert_row": 4
         }
       },
       "rubric": [
-        "reads daily_sales.csv and loads all 6 rows into a table (not summed by eye)",
+        "reads daily_sales.csv and loads all 4 rows into a table (not summed by eye)",
         "computes the total by querying the table, then verifies it with a query_table before stating it",
-        "reports the correct total of 610.00"
+        "reports the correct total of 475.00"
       ]
     },
     {
@@ -733,14 +733,14 @@
           "query_table"
         ],
         "min_counts": {
-          "insert_row": 6
+          "insert_row": 4
         }
       },
       "rubric": [
         "loads all timesheet rows into a table (not tallied by eye)",
         "filters to employee = 'Dana' AND billable = 'yes' (excludes her non-billable Wed 5 hours) and sums hours via a query",
         "verifies the figure with query_table before stating it",
-        "reports the correct total of 23 billable hours"
+        "reports the correct total of 15 billable hours"
       ]
     },
     {
@@ -757,12 +757,12 @@
           "query_table"
         ],
         "min_counts": {
-          "insert_row": 7
+          "insert_row": 4
         }
       },
       "rubric": [
-        "loads all 7 ticket rows into a table (not counted by eye)",
-        "filters to priority = 'high' AND status = 'open' via a query (excludes the closed high ticket T6)",
+        "loads all 4 ticket rows into a table (not counted by eye)",
+        "filters to priority = 'high' AND status = 'open' via a query (excludes the closed high ticket T4)",
         "confirms the count with query_table before stating it",
         "reports the correct count of 2"
       ]
@@ -826,14 +826,14 @@
           "query_table"
         ],
         "min_counts": {
-          "insert_row": 7
+          "insert_row": 4
         },
         "max_counts": {
           "web_search": 0
         }
       },
       "rubric": [
-        "loads all 7 nights from sleep.csv into a table (not averaged by eye)",
+        "loads all 4 nights from sleep.csv into a table (not averaged by eye)",
         "computes the average nightly sleep via the table and reports 7.0 hours",
         "does NOT call web_search for generic advice — works only from the file"
       ]
@@ -899,20 +899,20 @@
           "query_table"
         ],
         "min_counts": {
-          "insert_row": 7
+          "insert_row": 4
         }
       },
       "rubric": [
-        "loads all 7 signup rows into a table and queries by month",
-        "NOTICES the data spans March of two different years (2 in March 2025, 3 in March 2026)",
-        "surfaces the ambiguity — asks which year OR reports both counts (2 and 3) — rather than silently answering a single number"
+        "loads all 4 signup rows into a table and queries by month",
+        "NOTICES the data spans March of two different years (1 in March 2025, 2 in March 2026)",
+        "surfaces the ambiguity — asks which year OR reports both counts (1 and 2) — rather than silently answering a single number"
       ]
     },
     {
       "id": "t4_budget_reconcile",
       "tier": 4,
       "category": "synthesis",
-      "source": "dept_budget.txt",
+      "source": ["dept_budget.txt", "dept_spend.csv"],
       "prompt": "Read dept_budget.txt for Marketing's allocated budget and dept_spend.csv for the line items. Load the spend into a table, then tell me whether Marketing is over or under budget and by how much. Check the spend total against the table before answering.",
       "expect": {
         "tools_in_order": [
@@ -1002,7 +1002,7 @@
       "id": "t4_oncall_role",
       "tier": 4,
       "category": "synthesis",
-      "source": "oncall.txt",
+      "source": ["oncall.txt", "roster.txt"],
       "prompt": "Read oncall.txt to see who is on call this week, then read roster.txt to find that person's role, and save a note to my knowledge base stating who is on call and their role.",
       "expect": {
         "tools_in_order": [

@@ -34,10 +34,12 @@ def validate(path: str) -> list[str]:
                 p.append(f"{tid}: T{t.get('tier')} needs expect.tools_in_order")
             if not t.get("rubric"):
                 p.append(f"{tid}: T{t.get('tier')} needs a rubric")
-        # fixtures referenced by `source` must exist
+        # fixtures referenced by `source` must exist (source may be a str or a list of files)
         src = t.get("source")
-        if src and not os.path.exists(os.path.join(fixdir, src)):
-            p.append(f"{tid}: fixture {src!r} missing from fixtures/")
+        srcs = [src] if isinstance(src, str) else (src or [])
+        for s in srcs:
+            if not os.path.exists(os.path.join(fixdir, s)):
+                p.append(f"{tid}: fixture {s!r} missing from fixtures/")
         req = t.get("requires", "")
         requires_counts[req] = requires_counts.get(req, 0) + 1
     for tier in TIERS:
