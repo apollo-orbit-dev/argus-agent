@@ -569,6 +569,19 @@
         </div>
 
         <div class="card" style="margin-bottom:16px;">
+          <div class="card-head"><span class="card-title">Service (auto-start on boot)</span></div>
+          <div class="field-note">Install a <strong>user-level</strong> systemd service so this Argus
+            starts on boot — no sudo. Linux/systemd only.</div>
+          <div class="sandbox-status" id="serviceStatus">checking…</div>
+          <div class="small-btn-row">
+            <button class="btn btn-sm" id="serviceRecheckBtn">Re-check</button>
+            <button class="btn btn-sm btn-primary" id="serviceInstallBtn">Install</button>
+            <button class="btn btn-sm" id="serviceUninstallBtn">Uninstall</button>
+          </div>
+          <pre class="sandbox-output" id="serviceOutput" style="display:none;"></pre>
+        </div>
+
+        <div class="card" style="margin-bottom:16px;">
           <div class="card-head"><span class="card-title">Run trace persistence</span></div>
           <div class="field row-inline" style="justify-content:space-between;">
             <label class="switch"><input type="checkbox" id="swTracePersist"><span class="track"><span class="thumb"></span></span>Persist run trace (survives restart)</label>
