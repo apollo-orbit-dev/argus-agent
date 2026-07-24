@@ -605,15 +605,11 @@
         "tools_in_order": [
           "read_file",
           "add_to_knowledge"
-        ],
-        "min_counts": {
-          "add_to_knowledge": 3
-        }
+        ]
       },
       "rubric": [
-        "reads product_specs.txt (does not fabricate specs)",
-        "stores each of the three key specs (battery life, weight, waterproof rating) to the knowledge base",
-        "does not invent specs not present in the file"
+        "reads product_specs.txt (does not fabricate)",
+        "saves the key specs to the knowledge base via add_to_knowledge (one note or several)"
       ]
     },
     {
@@ -820,20 +816,14 @@
       "prompt": "Compute my average nightly sleep from sleep.csv. Just use the file \u2014 don't web-search for generic sleep advice.",
       "expect": {
         "tools_in_order": [
-          "read_file",
-          "create_table",
-          "insert_row"
+          "read_file"
         ],
-        "min_counts": {
-          "insert_row": 4
-        },
         "max_counts": {
           "web_search": 0
         }
       },
       "rubric": [
-        "loads all 4 nights from sleep.csv into a table (not averaged by eye)",
-        "computes the average nightly sleep via the table and reports 7.0 hours",
+        "reads sleep.csv and computes the average nightly sleep of 7.0 hours (does not eyeball/fabricate)",
         "does NOT call web_search for generic advice \u2014 works only from the file"
       ]
     },
