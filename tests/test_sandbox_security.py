@@ -90,7 +90,7 @@ def test_url_is_safe_rejects_hostname_resolving_to_private_address(monkeypatch):
     so a hostname that DNS-resolves to a LAN address must be refused even though the literal name
     looks public. Reverting url_is_safe to a literal-only check leaves this red."""
     monkeypatch.setattr("socket.getaddrinfo",
-                        lambda *a, **k: [(2, 1, 6, "", ("192.168.0.93", 443))])
+                        lambda *a, **k: [(2, 1, 6, "", ("192.168.1.100", 443))])
     assert url_is_safe("https://totally-innocent.example.com/") is False
 
 

@@ -73,7 +73,7 @@ def test_url_fetch_ok_rejects_hostname_resolving_to_private_address(monkeypatch)
 
     from engine.tools.watch import url_fetch_ok
     monkeypatch.setattr(socket, "getaddrinfo",
-                        lambda *a, **k: [(2, 1, 6, "", ("192.168.0.93", 443))])
+                        lambda *a, **k: [(2, 1, 6, "", ("192.168.1.100", 443))])
     assert url_fetch_ok("https://totally-innocent.example.com/") is False
 
 

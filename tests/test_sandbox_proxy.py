@@ -74,7 +74,7 @@ def _connect_via(port, target):
 
 def test_connect_to_a_private_address_is_refused(proxy):
     """The whole point: a container behind this proxy must not reach the LAN."""
-    resp = _connect_via(proxy, "192.168.0.93:8000")
+    resp = _connect_via(proxy, "192.168.1.100:8000")
     assert "403" in resp
 
 

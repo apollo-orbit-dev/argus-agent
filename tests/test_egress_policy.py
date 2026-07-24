@@ -15,7 +15,7 @@ from engine.sandbox.egress_policy import (BLOCKED_HOSTNAMES, host_allowed, ip_is
                                           url_allowed)
 
 
-@pytest.mark.parametrize("addr", ["127.0.0.1", "10.0.0.5", "192.168.0.93", "172.16.0.1",
+@pytest.mark.parametrize("addr", ["127.0.0.1", "10.0.0.5", "192.168.1.100", "172.16.0.1",
                                   "169.254.169.254", "0.0.0.0", "224.0.0.1", "::1", "fe80::1"])
 def test_non_public_addresses_are_rejected(addr):
     assert ip_is_public(addr) is False
@@ -38,7 +38,7 @@ def test_blocked_hostnames(host):
 
 
 def test_private_ip_literal_rejected_without_resolving():
-    ok, reason = host_allowed("192.168.0.93", 8000, resolve=False)
+    ok, reason = host_allowed("192.168.1.100", 8000, resolve=False)
     assert ok is False and "private" in reason.lower() or not ok
 
 
@@ -51,7 +51,7 @@ def test_a_hostname_resolving_to_a_private_address_is_rejected(monkeypatch):
     """THE fix. A name that points at the LAN must be refused even though the name itself
     looks innocent — this is what the old literal-only guard let through."""
     monkeypatch.setattr(socket, "getaddrinfo",
-                        lambda *a, **k: [(2, 1, 6, "", ("192.168.0.93", 8000))])
+                        lambda *a, **k: [(2, 1, 6, "", ("192.168.1.100", 8000))])
     ok, reason = host_allowed("totally-innocent.example.com", 8000)
     assert ok is False and reason
 
