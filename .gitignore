@@ -101,3 +101,7 @@ docs/ab/*
 
 # Local working notes for Claude (not part of the shippable product)
 CLAUDE.md
+
+# Maintainer's private agent config: automation skill, its on/off state, local settings.
+# Never shipped — it references the maintainer's own workflow, not the product.
+.claude/
