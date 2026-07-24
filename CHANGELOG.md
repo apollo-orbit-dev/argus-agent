@@ -2,6 +2,30 @@
 
 All notable changes to this project are documented here.
 
+## 0.12.0
+
+Auto-start on boot: `argus service`.
+
+### Added
+- **`argus service` — install a systemd service so a self-hosted Argus starts on boot.**
+  `argus service install` writes a **user-level** systemd unit (`systemctl --user`, no `sudo`),
+  `argus service uninstall` removes it, and `argus service status` reports installed / enabled /
+  active / linger. The unit runs the existing foreground entry (`argus run`) from the clone's own
+  venv, so nothing new has to be maintained. The unit name auto-derives (`argus.service`, or
+  `argus-<port>.service` for a second instance on the same machine), so `--name` is only ever an
+  optional override.
+- **Install/remove the service from the dashboard too.** A "Service" card in Settings shows the
+  current status with Install / Uninstall buttons, backed by admin-gated `GET /service/status` and
+  `POST /service/{install,uninstall}` endpoints. Because the unit is user-level, the backend does
+  everything as its own user — a web request never needs `sudo`.
+
+### Notes
+- Installing never double-starts: when the instance is already running it enables-for-boot only and
+  takes over on the next restart/reboot. Uninstalling only removes boot-autostart — it never stops
+  the running server. If `loginctl enable-linger` needs elevated privilege and fails, the exact
+  manual command is surfaced rather than silently reporting success.
+- Linux/systemd only; on other platforms the CLI and dashboard refuse cleanly.
+
 ## 0.11.0
 
 Sandboxed created tools.
