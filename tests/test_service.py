@@ -53,3 +53,109 @@ def test_service_supported_true_when_user_bus_reachable(monkeypatch):
     monkeypatch.setattr(service, "_run", lambda argv, timeout=20.0: (0, "LANG=C", ""))
     ok, reason = service.service_supported()
     assert ok is True and reason == ""
+
+
+@pytest.fixture
+def unit_dir(tmp_path, monkeypatch):
+    d = tmp_path / "systemd-user"
+    monkeypatch.setattr(service, "_unit_dir", lambda: d)
+    monkeypatch.setattr(service, "_user", lambda: "tester")
+    # supported by default in these tests
+    monkeypatch.setattr(service, "service_supported", lambda: (True, ""))
+    return d
+
+
+def _clone(tmp_path, port=8700):
+    c = tmp_path / "clone"
+    c.mkdir(exist_ok=True)
+    (c / ".env").write_text(f"PORT={port}\n")
+    return c
+
+
+def test_unit_name_default(unit_dir, tmp_path):
+    assert service.unit_name(_clone(tmp_path), 8700) == "argus.service"
+
+
+def test_unit_name_override_gets_suffix(unit_dir, tmp_path):
+    assert service.unit_name(_clone(tmp_path), 8700, "myargus") == "myargus.service"
+    assert service.unit_name(_clone(tmp_path), 8700, "keep.service") == "keep.service"
+
+
+def test_unit_name_second_clone_suffixes_by_port(unit_dir, tmp_path):
+    # A different clone already owns argus.service → this clone must not collide.
+    other = tmp_path / "other-clone"
+    other.mkdir()
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    (unit_dir / "argus.service").write_text(service.render_unit(other, other / ".venv/bin/argus", "d"))
+    assert service.unit_name(_clone(tmp_path, 8701), 8701) == "argus-8701.service"
+
+
+def test_install_writes_unit_and_enables_but_does_not_start_when_up(unit_dir, tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(service, "_run", lambda argv, timeout=20.0: (calls.append(argv) or (0, "", "")))
+    monkeypatch.setattr(service, "_port_open", lambda port, timeout=0.5: True)   # already running
+    r = service.install(clone_dir=_clone(tmp_path))
+    assert r["ok"] and r["enabled"] and r["linger_ok"]
+    assert r["started"] is False
+    assert (unit_dir / "argus.service").exists()
+    joined = [" ".join(a) for a in calls]
+    assert any("daemon-reload" in j for j in joined)
+    assert any(j.startswith("systemctl --user enable argus.service") for j in joined)
+    assert any("loginctl enable-linger tester" in j for j in joined)
+    assert not any("start" in j for j in joined)          # never start when the port is up
+    assert "next restart" in r["note"]
+
+
+def test_install_surfaces_linger_failure(unit_dir, tmp_path, monkeypatch):
+    def fake(argv, timeout=20.0):
+        return (1, "", "Failed to enable linger") if "enable-linger" in argv else (0, "", "")
+    monkeypatch.setattr(service, "_run", fake)
+    monkeypatch.setattr(service, "_port_open", lambda port, timeout=0.5: True)
+    r = service.install(clone_dir=_clone(tmp_path))
+    assert r["ok"] and r["linger_ok"] is False
+    assert "loginctl enable-linger tester" in r["note"]
+
+
+def test_install_dry_run_writes_nothing(unit_dir, tmp_path, monkeypatch):
+    monkeypatch.setattr(service, "_run", lambda argv, timeout=20.0: pytest.fail("dry run must not shell out"))
+    r = service.install(clone_dir=_clone(tmp_path), dry_run=True)
+    assert r["ok"] and r["dry_run"] and "[Service]" in r["unit_text"]
+    assert not (unit_dir / "argus.service").exists()
+
+
+def test_uninstall_disables_and_removes_but_never_stops(unit_dir, tmp_path, monkeypatch):
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    (unit_dir / "argus.service").write_text("x")
+    calls = []
+    monkeypatch.setattr(service, "_run", lambda argv, timeout=20.0: (calls.append(argv) or (0, "", "")))
+    r = service.uninstall(clone_dir=_clone(tmp_path))
+    assert r["ok"] and r["removed"] is True
+    assert not (unit_dir / "argus.service").exists()
+    joined = [" ".join(a) for a in calls]
+    assert any("disable argus.service" in j for j in joined)
+    assert not any(" stop " in f" {j} " for j in joined)   # must not kill the live process
+
+
+def test_uninstall_noop_when_absent(unit_dir, tmp_path, monkeypatch):
+    monkeypatch.setattr(service, "_run", lambda argv, timeout=20.0: (0, "", ""))
+    r = service.uninstall(clone_dir=_clone(tmp_path))
+    assert r["ok"] and r["removed"] is False
+
+
+def test_status_parses_systemctl_output(unit_dir, tmp_path, monkeypatch):
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    (unit_dir / "argus.service").write_text("x")
+    def fake(argv, timeout=20.0):
+        if "is-enabled" in argv: return (0, "enabled", "")
+        if "is-active" in argv:  return (0, "active", "")
+        if argv[0] == "loginctl": return (0, "Linger=yes", "")
+        return (0, "", "")
+    monkeypatch.setattr(service, "_run", fake)
+    r = service.status(clone_dir=_clone(tmp_path))
+    assert r["ok"] and r["installed"] and r["enabled"] and r["active"] and r["linger"]
+
+
+def test_status_unsupported_returns_reason(tmp_path, monkeypatch):
+    monkeypatch.setattr(service, "service_supported", lambda: (False, "nope"))
+    r = service.status(clone_dir=_clone(tmp_path))
+    assert r["ok"] is False and r["supported"] is False and r["reason"] == "nope"
