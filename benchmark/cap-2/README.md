@@ -86,9 +86,11 @@ python -m engine.eval.benchmark run \
 - `--baseline` — run with Argus's scaffolding (skills, memory, structured tools) switched off, to
   measure the lift Argus provides over a plain agent loop on the same model.
 
-Results accumulate under `benchmark/cap-2/results/` (once runs begin), one committed JSON per run,
-so runs from different sessions and models compose into a single dataset. Regenerate the report
-with `python -m engine.eval.benchmark report --battery benchmark/cap-2/battery.json`.
+Results accumulate under the shared `benchmark/results/` (one committed JSON per run, filenames keyed
+by `battery_version`), so runs from different sessions, models, and batteries compose into a single
+dataset. Regenerate cap-2's report and charts with
+`python -m engine.eval.benchmark report --battery-version cap-2` — it writes `report.md`, `curve.png`,
+and the `stackup`/`model_tiers` charts (both `chain_pass` and `solved`) into this folder.
 
 ## Status
 

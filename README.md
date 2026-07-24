@@ -123,10 +123,13 @@ tables, memory, or sessions.
 
 ### "How far does my model get?" — the capability benchmark
 
-A frozen, difficulty-graded battery (27 tasks across 4 tiers) run once per model under the standard
-config, scored on a deterministic tool-chain predicate plus a 0–3 quality judge. Results accumulate
-as committed JSON labeled by parameter count, so runs from different models on different days compose
-into a single curve.
+Difficulty-graded batteries run once per model under the standard config, scored on a deterministic
+tool-chain predicate plus a 0–3 quality judge. Two are committed, each in its own folder: **cap-1**
+([`benchmark/cap-1/`](benchmark/cap-1/)) — the founding 27-task battery shown below — and **cap-2**
+([`benchmark/cap-2/`](benchmark/cap-2/)) — 56 tasks across 6 capability families, with a stricter
+`solved` metric (`chain-correct ∧ judge ≥ 2`) and a ladder honest on both the chain and judge axes.
+Results accumulate as committed JSON labeled by parameter count (shared across batteries, keyed by
+version), so runs from different models on different days compose into a single curve.
 
 ```bash
 python -m engine.eval.benchmark run --model main --params 35 --mode native
@@ -140,7 +143,7 @@ model you've configured instead, or `--judge ''` to score the tool chain only.
 
 The founding run is committed in [`benchmark/`](benchmark/), and it's worth reading for the part that
 isn't flattering — tool-chain pass rate by difficulty tier (the committed
-[report](benchmark/report.md) also carries the judge means):
+[report](benchmark/cap-1/report.md) also carries the judge means):
 
 | model | params | tier 1 | tier 2 | tier 3 | tier 4 | overall |
 |-------|--------|--------|--------|--------|--------|---------|
@@ -154,7 +157,7 @@ scaffolding above moves that cliff but doesn't remove it. Size isn't the whole s
 gemma (a newer reasoning model) clears the 27B and nears the 35B, so *generation and training beat raw
 parameter count* here. Profiles differ too: gemma is well-rounded, while the 27B is spiky — strong on
 the hard tiers, weak on the easy ones, where it answers from its own reasoning instead of calling the
-tool it should. Modes and token budgets vary by run (the [report](benchmark/report.md) carries the
+tool it should. Modes and token budgets vary by run (the [report](benchmark/cap-1/report.md) carries the
 `mode` and `max_tok` columns, and the judge means). Finding where *your* model's cliff sits — and
 which way it leans — is the point of the instrument.
 
@@ -249,6 +252,7 @@ server as a background process (pidfile + port based; cross-platform):
 | `argus status`  | show whether it's running                                |
 | `argus logs`    | tail the server log (Ctrl-C to quit)                     |
 | `argus run`     | run in the foreground (Ctrl-C to quit)                   |
+| `argus service` | install/remove a user-level systemd service so it starts on boot (`install` / `uninstall` / `status`; Linux/systemd, no sudo) |
 | `argus version` | print the installed version                              |
 
 ## Updating
