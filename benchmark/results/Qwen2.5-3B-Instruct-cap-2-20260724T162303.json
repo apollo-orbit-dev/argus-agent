@@ -1,0 +1,2630 @@
+{
+  "model": "Qwen2.5-3B-Instruct",
+  "params": 3,
+  "mode": "manual",
+  "scaffold": "on",
+  "max_tokens": 2048,
+  "battery_version": "cap-2",
+  "k": 3,
+  "date": "2026-07-24T16:23:03+00:00",
+  "per_tier": {
+    "1": {
+      "chain_pass": 1.0,
+      "judge_mean": 2.5,
+      "solved": 0.8571428571428571,
+      "n": 14,
+      "skipped": 0
+    },
+    "2": {
+      "chain_pass": 0.8333333333333334,
+      "judge_mean": 1.9523809523809523,
+      "solved": 0.6428571428571429,
+      "n": 14,
+      "skipped": 0
+    },
+    "3": {
+      "chain_pass": 0.14285714285714285,
+      "judge_mean": 0.9761904761904762,
+      "solved": 0.14285714285714285,
+      "n": 14,
+      "skipped": 0
+    },
+    "4": {
+      "chain_pass": 0.14285714285714285,
+      "judge_mean": 0.7142857142857143,
+      "solved": 0.07142857142857142,
+      "n": 14,
+      "skipped": 0
+    }
+  },
+  "overall": {
+    "chain_pass": 0.5,
+    "judge_mean": 1.5357142857142858,
+    "solved": 0.42857142857142855,
+    "n": 56,
+    "skipped": 0
+  },
+  "tasks": [
+    {
+      "id": "t1_calc_area",
+      "tier": 1,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "4183",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "4183",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "The result is 4183.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_calc_percent",
+      "tier": 1,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "15 percent of 340 is 51.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "15 percent of 340 is 51.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "15 percent of 340 is 51.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_calc_arith",
+      "tier": 1,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "The result is 1737.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "1737",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "1737",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_calc_sqrt",
+      "tier": 1,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "The square root of 225 is 15.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "The square root of 225 is 15.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "The square root of 225 is 15.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_pick_unit",
+      "tier": 1,
+      "category": "tool-selection",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "unit_convert"
+          ],
+          "error": null,
+          "final": "12 miles is approximately 19.31 kilometers.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "unit_convert"
+          ],
+          "error": null,
+          "final": "12 miles is approximately 19.31 kilometers.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "unit_convert"
+          ],
+          "error": null,
+          "final": "12 miles is approximately 19.31 kilometers.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_pick_currency",
+      "tier": 1,
+      "category": "tool-selection",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "currency_convert"
+          ],
+          "error": null,
+          "final": "100 US dollars is approximately 87.90 euros.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "currency_convert"
+          ],
+          "error": null,
+          "final": "100 USD is approximately 87.90 EUR.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "currency_convert"
+          ],
+          "error": null,
+          "final": "100 US dollars is approximately 87.90 euros.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_pick_crypto",
+      "tier": 1,
+      "category": "tool-selection",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "crypto_price"
+          ],
+          "error": null,
+          "final": "The current price of Bitcoin in US dollars is $64,082.00.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "crypto_price"
+          ],
+          "error": null,
+          "final": "The current price of Bitcoin in US dollars is $64,082.00.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "crypto_price"
+          ],
+          "error": null,
+          "final": "The current price of Bitcoin in US dollars is $64,082.00.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_define",
+      "tier": 1,
+      "category": "retrieve",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "dictionary"
+          ],
+          "error": null,
+          "final": "The word 'ephemeral' means lasting for a short period of time, both as a noun and an adjective.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "dictionary"
+          ],
+          "error": null,
+          "final": "The word 'ephemeral' refers to something that lasts for a short period of time. It can be used as a noun meaning such a thing, or as an adjective describing something that lasts for a short time or that exists only for a brief moment, like certain plants or illnesses.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "dictionary"
+          ],
+          "error": null,
+          "final": "The word 'ephemeral' refers to something that lasts for a short period of time. It can be used as a noun or an adjective.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_wiki_summary",
+      "tier": 1,
+      "category": "retrieve",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "wikipedia"
+          ],
+          "error": null,
+          "final": "The Eiffel Tower is a lattice tower in Paris, France, designed by Gustave Eiffel. It was built from 1887 to 1889 and is located on the Champ de Mars.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "wikipedia"
+          ],
+          "error": null,
+          "final": "The Eiffel Tower is a lattice tower in Paris, France, designed by Gustave Eiffel. It stands on the Champ de Mars and was completed in 1889.",
+          "chain_correct": true,
+          "judge_score": null
+        },
+        {
+          "tools": [
+            "wikipedia"
+          ],
+          "error": null,
+          "final": "The Eiffel Tower is a lattice tower in Paris, France, designed by Gustave Eiffel. It stands on the Champ de Mars and was completed in 1889.",
+          "chain_correct": true,
+          "judge_score": null
+        }
+      ]
+    },
+    {
+      "id": "t1_fetch_example",
+      "tier": 1,
+      "category": "retrieve",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 2.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "fetch_page",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "fetch_page"
+          ],
+          "error": null,
+          "final": "The fetched page says: # Fetched: Example Domain\n(source: https://example.com/)\n\n# Example Domain\n\nThis domain is for use in documentation examples without needing permission. Avoid use in operations.\n\n[Learn more](https://iana.org/domains/example)",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "fetch_page"
+          ],
+          "error": null,
+          "final": "The fetched page contains the following text:\n\n# Example Domain\n\nThis domain is for use in documentation examples without needing permission. Avoid use in operations.\n\n[Learn more](https://iana.org/domains/example)",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_text_count",
+      "tier": 1,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "text_tools"
+          ],
+          "error": null,
+          "final": "This sentence contains 9 words.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "text_tools"
+          ],
+          "error": null,
+          "final": "This sentence contains 9 words.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "text_tools"
+          ],
+          "error": null,
+          "final": "This sentence contains 9 words.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_text_b64",
+      "tier": 1,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "text_tools"
+          ],
+          "error": null,
+          "final": "The encoded text is aGVsbG8gd29ybGQ=",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "text_tools"
+          ],
+          "error": null,
+          "final": "The encoded text is aGVsbG8gd29ybGQ=",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "text_tools"
+          ],
+          "error": null,
+          "final": "The encoded text is aGVsbG8gd29ybGQ=",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_no_invent_price",
+      "tier": 1,
+      "category": "restraint",
+      "skipped": false,
+      "chain_pass": null,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "crypto_price"
+          ],
+          "error": null,
+          "final": "The current share price of Apple is $0.18.",
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "crypto_price"
+          ],
+          "error": null,
+          "final": "The current share price of Apple is $0.18.",
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "crypto_price"
+          ],
+          "error": null,
+          "final": "The current share price of Apple is $0.18.",
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t1_no_invent_forecast",
+      "tier": 1,
+      "category": "restraint",
+      "skipped": false,
+      "chain_pass": null,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "weather",
+            "time_in_zone",
+            "weather"
+          ],
+          "error": null,
+          "final": "One year from today, the weather forecast in New York will be 26.6\u00b0C with a humidity of 36% and wind at 3.9 km/h.",
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "weather",
+            "time_in_zone",
+            "weather"
+          ],
+          "error": null,
+          "final": "Exactly one year from today, the weather forecast for New York will be 26.6\u00b0C with a humidity of 36% and wind speeds around 3.9 km/h.",
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "weather",
+            "time_in_zone",
+            "weather"
+          ],
+          "error": null,
+          "final": "Exactly one year from today, the weather forecast in New York is expected to be around 26.6\u00b0C with a humidity of 36% and wind speeds of 3.9 km/h.",
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t2_read_not_guess",
+      "tier": 2,
+      "category": "tool-selection",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 1.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "read_file",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 10 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "read_file",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data"
+          ],
+          "error": null,
+          "final": "I couldn't find the Thursday standup time in the provided notes. Could you please check the notes or provide the link again?",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "read_file",
+            "extract_data",
+            "web_search",
+            "fetch_page",
+            "extract_data",
+            "web_search",
+            "fetch_page"
+          ],
+          "error": null,
+          "final": "The time of the Thursday standup is 9:30 AM in the main conference room according to the notes.txt file.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_convert_currency",
+      "tier": 2,
+      "category": "tool-selection",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "currency_convert"
+          ],
+          "error": null,
+          "final": "200 USD is approximately 175.79 EUR.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "currency_convert"
+          ],
+          "error": null,
+          "final": "200 USD is approximately 175.79 EUR.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "currency_convert"
+          ],
+          "error": null,
+          "final": "200 USD is approximately 175.79 EUR.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_define_not_wiki",
+      "tier": 2,
+      "category": "tool-selection",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "dictionary"
+          ],
+          "error": null,
+          "final": "The word 'meticulous' means characterized by very precise, conscientious attention to details.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "dictionary"
+          ],
+          "error": null,
+          "final": "The word 'meticulous' means characterized by very precise, conscientious attention to details.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "dictionary"
+          ],
+          "error": null,
+          "final": "The word 'meticulous' means characterized by very precise, conscientious attention to details.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_kb_add",
+      "tier": 2,
+      "category": "retrieve",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've saved the information about our S3 bucket named 'argus-prod-eu' to your knowledge base. You can now use the command 'search_knowledge' to look up this information later.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've added that information about our S3 bucket to your knowledge base. You can search it later using the `search_knowledge` command.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've saved the fact about our S3 bucket name to my knowledge base. You can search for it using the command 'search_knowledge'.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_geocode_coords",
+      "tier": 2,
+      "category": "retrieve",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "geocode"
+          ],
+          "error": null,
+          "final": "The coordinates of Nairobi, Kenya are latitude -1.28333 and longitude 36.81667.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "geocode"
+          ],
+          "error": null,
+          "final": "The latitude and longitude coordinates of Nairobi, Kenya are -1.28333, 36.81667 respectively.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "geocode"
+          ],
+          "error": null,
+          "final": "The latitude and longitude coordinates of Nairobi, Kenya are -1.28333, 36.81667 respectively.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_fetch_single_page",
+      "tier": 2,
+      "category": "retrieve",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "fetch_page",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data"
+          ],
+          "error": null,
+          "final": "It seems there is no clear heading or main text provided on the home page of the given URL. Please try another page or provide a more specific prompt.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "fetch_page",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data"
+          ],
+          "error": null,
+          "final": "It seems the provided URL did not contain a main title or heading text. Please provide a different page or URL.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "fetch_page",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t2_countrows",
+      "tier": 2,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "query_rows",
+            "list_tables",
+            "create_table",
+            "query_rows"
+          ],
+          "error": null,
+          "final": "There are currently 0 rows in the 'sales' table.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "query_rows",
+            "list_tables",
+            "create_table",
+            "query_table",
+            "list_tables"
+          ],
+          "error": null,
+          "final": "I currently don't have the table 'sales_csv' ready to count the rows. Please create the table first using the 'create_table' command and then we can count the rows.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "query_rows",
+            "list_tables",
+            "create_table",
+            "query_table"
+          ],
+          "error": null,
+          "final": "It seems there was an issue with the table creation. Please ensure the table name and column definitions are correct and try again.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t2_log_error_line",
+      "tier": 2,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "read_file",
+            "extract_data",
+            "download_file",
+            "read_file"
+          ],
+          "error": null,
+          "final": "The ERROR line in the server log says '2026-03-04 08:15:47 ERROR failed to connect to payment gateway: timeout after 30s'.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "read_file",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data"
+          ],
+          "error": null,
+          "final": "The error message from the server log starting at 2026-03-04T08:15:47Z is: failed to connect to payment gateway: timeout after 30s.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "read_file",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data"
+          ],
+          "error": null,
+          "final": "The ERROR lines in the server.log file are:\n\n2026-03-04 08:15:47 ERROR failed to connect to payment gateway: timeout after 30s",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_config_port",
+      "tier": 2,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "ask_user"
+          ],
+          "error": null,
+          "final": "What port does config.json say the server listens on?",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "wikipedia",
+            "extract_data",
+            "search_knowledge",
+            "ask_user"
+          ],
+          "error": null,
+          "final": "Could you provide more details about where you saw this configuration file and how it relates to the server's listening port?",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "download_file",
+            "fetch_page",
+            "ask_user"
+          ],
+          "error": null,
+          "final": "Could you please provide the full URL of the config.json file you're referring to?",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t2_calc_discount",
+      "tier": 2,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "The final price after a 20% discount is $36.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "$36",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "The final price of the shirt after a 20% discount is $36.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_calc_scale_recipe",
+      "tier": 2,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "You need 7.5 cups of flour.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "You need 7.5 cups of flour.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "You need 7.5 cups of flour.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_no_guess_email_count",
+      "tier": 2,
+      "category": "restraint",
+      "skipped": false,
+      "chain_pass": null,
+      "judge_mean": 0.3333333333333333,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "ask_user"
+          ],
+          "error": null,
+          "final": "How many unread emails do I currently have in my inbox?",
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "ask_user"
+          ],
+          "error": null,
+          "final": "How many unread emails do I currently have in my inbox?",
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "ask_user"
+          ],
+          "error": null,
+          "final": "How many unread emails do I currently have in my inbox?",
+          "judge_score": 1
+        }
+      ]
+    },
+    {
+      "id": "t2_no_guess_traffic",
+      "tier": 2,
+      "category": "restraint",
+      "skipped": false,
+      "chain_pass": null,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "time_in_zone",
+            "geocode",
+            "geocode",
+            "geocode",
+            "geocode",
+            "geocode"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "time_in_zone",
+            "geocode",
+            "geocode",
+            "weather",
+            "time_in_zone"
+          ],
+          "error": null,
+          "final": "I'm unable to determine your drive time to the airport in current traffic as I don't have your specific airport's location.",
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "time_in_zone",
+            "geocode",
+            "wikipedia",
+            "time_in_zone"
+          ],
+          "error": null,
+          "final": "Based on the current time in Kansai International Airport, the time is 00:38 JST (Japan Standard Time) or 9:38 PM according to your local time. However, traffic conditions can vary greatly and affect travel times. Please allow extra time for driving in current traffic.",
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_no_guess_setting",
+      "tier": 2,
+      "category": "restraint",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 2.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "read_file"
+          ],
+          "error": null,
+          "final": "The configured request timeout is 47 seconds.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "ask_user"
+          ],
+          "error": null,
+          "final": "Where is settings.txt located in your workspace?",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "read_file"
+          ],
+          "error": null,
+          "final": "The configured request timeout is 47 seconds.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t3_orders_shipped",
+      "tier": 3,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 10 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 10 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 10 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_invoice_total",
+      "tier": 3,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.6666666666666666,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "extract_to_table",
+            "extract_to_table",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "The total of the line_total column is $138.48.",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "extract_to_table",
+            "extract_to_table",
+            "extract_to_table"
+          ],
+          "error": null,
+          "final": "I wasn't able to make progress \u2014 I kept repeating the same step without getting new information. Could you rephrase or add detail?",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table",
+            "final"
+          ],
+          "error": null,
+          "final": "The total of the line_total column is $100.94.",
+          "chain_correct": false,
+          "judge_score": 1
+        }
+      ]
+    },
+    {
+      "id": "t3_expenses_travel",
+      "tier": 3,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.6666666666666666,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "The total amount spent in the 'Travel' category is $80.0.",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "read_file",
+            "create_table",
+            "insert_row",
+            "update_rows"
+          ],
+          "error": null,
+          "final": "\u23f8 Waiting for your approval: update_rows (ffa5395d). Approve it in the dashboard or Telegram and I'll continue. (request e5b72ffd)",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "read_file",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "The total amount spent in the 'Travel' category from March 1st to March 3rd is $200.",
+          "chain_correct": false,
+          "judge_score": 1
+        }
+      ]
+    },
+    {
+      "id": "t3_inventory_reorder",
+      "tier": 3,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.3333333333333333,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "query_table",
+            "query_rows"
+          ],
+          "error": null,
+          "final": "There are no items currently below their reorder level according to the provided data.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "There are no items currently below their reorder level.",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "query_table",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "I wasn't able to make progress \u2014 I kept repeating the same step without getting new information. Could you rephrase or add detail?",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_sales_topproduct",
+      "tier": 3,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 1.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "The product with the highest total revenue is Gadget with a total of $4000.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "The product with the highest total revenue is 'Gadget' with a total of $999.5.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "read_file",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "The product 'Widget A' has the highest total revenue of $400.00.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t3_budget_remaining",
+      "tier": 3,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "read_file",
+            "ask_user",
+            "query_rows",
+            "load_skill",
+            "query_table",
+            "query_rows"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "extract_to_table",
+            "query_table",
+            "query_table",
+            "ask_data",
+            "create_table",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "download_file",
+            "ask_user"
+          ],
+          "error": null,
+          "final": "Is the file available publicly or do I need to upload it again?",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_receipt_total",
+      "tier": 3,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "extract_data",
+            "download_file",
+            "extract_data"
+          ],
+          "error": null,
+          "final": "The file 'readreceipt.txt' is not accessible due to internal host restrictions. Please provide a valid public URL for the receipt file.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "extract_to_table",
+            "ask_data",
+            "create_table",
+            "insert_row",
+            "query_rows",
+            "update_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "extract_data",
+            "download_file",
+            "read_file",
+            "extract_data",
+            "download_file",
+            "read_file"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_headcount_cost",
+      "tier": 3,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "extract_data",
+            "read_file",
+            "query_table",
+            "ask_data",
+            "create_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "extract_data",
+            "read_file",
+            "query_table",
+            "query_table"
+          ],
+          "error": null,
+          "final": "I seem to have made an error by calling the table 'staffing_txt' directly. Let me re-examine the data provided and calculate the total monthly staff cost manually.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "extract_to_table",
+            "ask_data",
+            "create_table",
+            "insert_row",
+            "query_rows"
+          ],
+          "error": null,
+          "final": "The total monthly staff cost for July is $5000.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_actions_to_kb",
+      "tier": 3,
+      "category": "retrieve",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 1.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "add_to_knowledge",
+            "read_document",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've added the standup notes to your knowledge base. You can now search for specific action items using the `search_knowledge` command.",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "add_to_knowledge",
+            "read_document",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've added the standup notes to your knowledge base. You can search them using the command `search_knowledge`.",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "add_to_knowledge",
+            "read_document",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've added the standup notes to your knowledge base. You can search them using the `search_knowledge` command.",
+          "chain_correct": false,
+          "judge_score": 1
+        }
+      ]
+    },
+    {
+      "id": "t3_specs_to_kb",
+      "tier": 3,
+      "category": "retrieve",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 2.6666666666666665,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "read_document",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've added the product specifications to your knowledge base. You can now use search_knowledge to look them up.",
+          "chain_correct": false,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "read_document",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've added the product specifications to your knowledge base. You can now search it with search_knowledge.",
+          "chain_correct": false,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "read_document",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've added the product specs to your knowledge base. You can now search for details using the `search_knowledge` command.",
+          "chain_correct": false,
+          "judge_score": 2
+        }
+      ]
+    },
+    {
+      "id": "t3_quarterly_total",
+      "tier": 3,
+      "category": "synthesis",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 1.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table",
+            "make_chart"
+          ],
+          "error": null,
+          "final": "The full-year total revenue across all four quarters is $6,600,000.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "read_file",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table",
+            "query_table"
+          ],
+          "error": null,
+          "final": "The full-year total revenue across all four quarters is $585,000.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "The full-year total revenue across all four quarters is $6,600,000.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_survey_winner",
+      "tier": 3,
+      "category": "synthesis",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 1.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "read_file",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "The option 'Blue' received the most votes with a total of 2 votes.",
+          "chain_correct": false,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "query_rows"
+          ],
+          "error": null,
+          "final": "It seems like there were no votes recorded yet. Please provide the survey data to proceed.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "query_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "The option 'Option B' received the most votes with a total of 150 votes.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_fetch_to_kb",
+      "tier": 3,
+      "category": "synthesis",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 2.3333333333333335,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "fetch_page",
+            "add_to_knowledge",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I have added the content of the fetched page to your knowledge base. The page describes 'Example Domain' as a domain for documentation examples without permission for operations, and provides a link for more information.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "fetch_page",
+            "add_to_knowledge",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've added the content of the page to your knowledge base. Now you can ask me about it.",
+          "chain_correct": true,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "fetch_page",
+            "add_to_knowledge",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've added a note about the example domain to your knowledge base. It says this domain is for documentation examples and should not be used in operations.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t3_fetch_summary",
+      "tier": 3,
+      "category": "synthesis",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "fetch_page",
+            "write_file"
+          ],
+          "error": null,
+          "final": "The main text has been successfully saved to example_summary.txt in your workspace.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "fetch_page",
+            "write_file"
+          ],
+          "error": null,
+          "final": "The main text has been successfully saved to example_summary.txt in your workspace.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "fetch_page",
+            "write_file"
+          ],
+          "error": null,
+          "final": "The main text has been written to example_summary.txt in your workspace.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t4_amount_total_verify",
+      "tier": 4,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "query_table",
+            "list_tables",
+            "create_table",
+            "query_table"
+          ],
+          "error": null,
+          "final": "I seem to have made an error. Let me double-check the process and provide the correct total.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "query_table",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "The total amount in the 'daily_sales' table is $1530.0.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "query_table",
+            "list_tables",
+            "create_table",
+            "query_table"
+          ],
+          "error": null,
+          "final": "It seems the table 'daily_sales' has not been populated with any rows yet. Please provide the data to populate the table, and I will calculate the total amount.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_billable_verify",
+      "tier": 4,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "Dana's total billable hours are 10.5 hours, as verified in the table.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "Dana's total billable hours are 15.5. This figure has been verified in the table.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "Dana's total billable hours are 15.0. This is verified in the table.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_open_high_verify",
+      "tier": 4,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 1.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "There are 0 high-priority tickets still open.",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "ask_data",
+            "query_table"
+          ],
+          "error": null,
+          "final": "There are 3 high-priority tickets still open.",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "There are 3 high-priority tickets still open.",
+          "chain_correct": false,
+          "judge_score": 1
+        }
+      ]
+    },
+    {
+      "id": "t4_no_fabricate_rating",
+      "tier": 4,
+      "category": "restraint",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.3333333333333333,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "read_file",
+            "create_table",
+            "insert_row",
+            "query_table",
+            "list_tables",
+            "query_table"
+          ],
+          "error": null,
+          "final": "It seems there was a misunderstanding. There is no column named 'rating' in the table 'feedback_feedback_partial'. Could you please provide more details on the structure of the data or the expected column name?",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "read_file",
+            "extract_data",
+            "query_table",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 10 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "read_file",
+            "extract_data",
+            "query_table",
+            "list_tables",
+            "add_column",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 10 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_no_fabricate_missing",
+      "tier": 4,
+      "category": "restraint",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.6666666666666666,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "Sofia's extension is 123.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "read_file",
+            "query_table",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "I couldn't find Sofia's extension in the directory. Please check if the name is spelled correctly or if there's an entry for Sofia yet.",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "read_file",
+            "query_table",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "I couldn't find Sofia's extension in the directory. Have you added her details yet?",
+          "chain_correct": false,
+          "judge_score": 1
+        }
+      ]
+    },
+    {
+      "id": "t4_no_oversearch_sleep",
+      "tier": 4,
+      "category": "restraint",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.3333333333333333,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "query_rows",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "query_rows"
+          ],
+          "error": null,
+          "final": "Your average nightly sleep duration is 7.5 hours.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "query_rows",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "query_rows"
+          ],
+          "error": null,
+          "final": "Your average nightly sleep duration from the provided data is 6.5 hours.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "query_rows",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "query_rows"
+          ],
+          "error": null,
+          "final": "Your average nightly sleep duration from the provided data is 7 hours.",
+          "chain_correct": false,
+          "judge_score": 1
+        }
+      ]
+    },
+    {
+      "id": "t4_no_oversearch_notes",
+      "tier": 4,
+      "category": "restraint",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 1.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "add_to_knowledge",
+            "read_document",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've added the decisions from the meeting notes to your knowledge base. You can search for them using the `search_knowledge` command.",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "read_document",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've saved the decisions from the meeting notes to your knowledge base. You can now use search_knowledge to look up any details you need.",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "read_document",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've added the decisions from the meeting notes to your knowledge base. You can use search_knowledge to look them up later.",
+          "chain_correct": false,
+          "judge_score": 1
+        }
+      ]
+    },
+    {
+      "id": "t4_disambiguate_jordan",
+      "tier": 4,
+      "category": "tool-selection",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 1.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "read_file",
+            "query_table",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "Jordan's extension is 312.",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "read_file",
+            "query_table",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "Jordan's extension is 312.",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "read_file",
+            "query_table",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "Jordan's extension is 312.",
+          "chain_correct": false,
+          "judge_score": 1
+        }
+      ]
+    },
+    {
+      "id": "t4_disambiguate_march",
+      "tier": 4,
+      "category": "tool-selection",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.6666666666666666,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "In March, 4 signups happened.",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "In March, there were 5 signups.",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "create_table",
+            "insert_row",
+            "create_table"
+          ],
+          "error": null,
+          "final": "I wasn't able to make progress \u2014 I kept repeating the same step without getting new information. Could you rephrase or add detail?",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_budget_reconcile",
+      "tier": 4,
+      "category": "synthesis",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "query_table",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 10 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "query_table",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 10 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "read_file",
+            "read_file",
+            "query_table",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 10 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_regional_report",
+      "tier": 4,
+      "category": "synthesis",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table",
+            "build_web_page"
+          ],
+          "error": null,
+          "final": "The sales report has been generated and saved as 'sales_report.html'.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table",
+            "build_web_page",
+            "build_web_page"
+          ],
+          "error": null,
+          "final": "The total sales across all regions is $1,135,791.23. The top regions by sales are:\n- Northeast: $123,456.78\n- West: $98,765.43\n- South: $567,890.12\n- East: $345,678.90",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "create_table",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Top Region: Southeast\nTotal Sales: 150,000.00",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_q1_total_kb",
+      "tier": 4,
+      "category": "synthesis",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 2.3333333333333335,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "read_file",
+            "query_rows",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_rows",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "The total Q1 expenses have been computed and saved in your knowledge base.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "read_file",
+            "query_table",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "The total expenses for Q1 have been saved to your knowledge base as a fact.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "read_file",
+            "query_table",
+            "list_tables",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "The total Q1 expenses are $12,500.",
+          "chain_correct": false,
+          "judge_score": 1
+        }
+      ]
+    },
+    {
+      "id": "t4_fetch_flag",
+      "tier": 4,
+      "category": "synthesis",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.3333333333333333,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "fetch_page",
+            "ask_user",
+            "extract_data",
+            "search_knowledge",
+            "write_file",
+            "extract_data"
+          ],
+          "error": null,
+          "final": "I couldn't find any contact email addresses on the page. Please provide the page content manually if you have it.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "fetch_page",
+            "extract_data",
+            "ask_user",
+            "fetch_page",
+            "extract_data",
+            "ask_user",
+            "fetch_page"
+          ],
+          "error": null,
+          "final": "I wasn't able to make progress \u2014 I kept repeating the same step without getting new information. Could you rephrase or add detail?",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "fetch_page",
+            "ask_user",
+            "search_knowledge",
+            "ask_user"
+          ],
+          "error": null,
+          "final": "I couldn't find any contact email addresses on the example.com page based on the information I have.",
+          "chain_correct": false,
+          "judge_score": 1
+        }
+      ]
+    },
+    {
+      "id": "t4_oncall_role",
+      "tier": 4,
+      "category": "synthesis",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 2.3333333333333335,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "read_document",
+            "read_document",
+            "add_to_knowledge",
+            "search_knowledge"
+          ],
+          "error": null,
+          "final": "I couldn't find the information in the knowledge base yet. I will add it now and you can search for it later.",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "read_document",
+            "read_document",
+            "add_to_knowledge",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "Marco is on call this week and his role is SRE.",
+          "chain_correct": false,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "read_document",
+            "read_document",
+            "add_to_knowledge",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "Marco is on call this week and his role is SRE.",
+          "chain_correct": false,
+          "judge_score": 3
+        }
+      ]
+    }
+  ]
+}

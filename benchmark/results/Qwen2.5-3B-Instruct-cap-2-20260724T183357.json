@@ -1,0 +1,2595 @@
+{
+  "model": "Qwen2.5-3B-Instruct",
+  "params": 3,
+  "mode": "manual",
+  "scaffold": "off",
+  "max_tokens": 2048,
+  "battery_version": "cap-2",
+  "k": 3,
+  "date": "2026-07-24T18:33:57+00:00",
+  "per_tier": {
+    "1": {
+      "chain_pass": 1.0,
+      "judge_mean": 2.3095238095238098,
+      "solved": 0.7857142857142857,
+      "n": 14,
+      "skipped": 0
+    },
+    "2": {
+      "chain_pass": 0.75,
+      "judge_mean": 1.9761904761904763,
+      "solved": 0.6428571428571429,
+      "n": 14,
+      "skipped": 0
+    },
+    "3": {
+      "chain_pass": 0.21428571428571427,
+      "judge_mean": 0.42857142857142855,
+      "solved": 0.07142857142857142,
+      "n": 14,
+      "skipped": 0
+    },
+    "4": {
+      "chain_pass": 0.0,
+      "judge_mean": 0.023809523809523808,
+      "solved": 0.0,
+      "n": 14,
+      "skipped": 0
+    }
+  },
+  "overall": {
+    "chain_pass": 0.46153846153846156,
+    "judge_mean": 1.1845238095238095,
+    "solved": 0.375,
+    "n": 56,
+    "skipped": 0
+  },
+  "tasks": [
+    {
+      "id": "t1_calc_area",
+      "tier": 1,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "The result is 4183.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "47 * 89 equals 4183.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "47 * 89 equals 4183.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_calc_percent",
+      "tier": 1,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "15 percent of 340 is 51.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "15 percent of 340 is 51.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "15 percent of 340 is 51.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_calc_arith",
+      "tier": 1,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "The result is 1737.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "1737",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "The result is 1737.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_calc_sqrt",
+      "tier": 1,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "The square root of 225 is 15.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "The square root of 225 is 15.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "The square root of 225 is 15.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_pick_unit",
+      "tier": 1,
+      "category": "tool-selection",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 2.3333333333333335,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "unit_convert"
+          ],
+          "error": null,
+          "final": "12 miles is approximately 19.31 kilometers.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "19.31208 kilometers",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "unit_convert"
+          ],
+          "error": null,
+          "final": "12 miles is approximately 19.31 kilometers.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_pick_currency",
+      "tier": 1,
+      "category": "tool-selection",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "currency_convert"
+          ],
+          "error": null,
+          "final": "100 US dollars is approximately 87.90 euros.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "currency_convert"
+          ],
+          "error": null,
+          "final": "100 US dollars is approximately 87.90 euros.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "currency_convert"
+          ],
+          "error": null,
+          "final": "100 US dollars is approximately 87.90 euros.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_pick_crypto",
+      "tier": 1,
+      "category": "tool-selection",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "crypto_price"
+          ],
+          "error": null,
+          "final": "The current price of Bitcoin in US dollars is $64,098.00.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "crypto_price"
+          ],
+          "error": null,
+          "final": "The current price of Bitcoin in US dollars is $64,098.00.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "crypto_price"
+          ],
+          "error": null,
+          "final": "The current price of Bitcoin in US dollars is $64,098.00.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_define",
+      "tier": 1,
+      "category": "retrieve",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "dictionary"
+          ],
+          "error": null,
+          "final": "The word 'ephemeral' refers to something that lasts for a short period of time, both as a noun and an adjective.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "dictionary"
+          ],
+          "error": null,
+          "final": "The word 'ephemeral' refers to something that lasts for a short period of time. It can be used as a noun meaning such a thing, or as an adjective describing something that lasts for a short time or existing for only one day, like some flowers, insects, and diseases.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "dictionary"
+          ],
+          "error": null,
+          "final": "The word 'ephemeral' means lasting for a short period of time, whether used as a noun or an adjective.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_wiki_summary",
+      "tier": 1,
+      "category": "retrieve",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "wikipedia"
+          ],
+          "error": null,
+          "final": "The Eiffel Tower is a lattice tower in Paris, France, designed by Gustave Eiffel and completed in 1889. It stands on the Champ de Mars and is a prominent landmark.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "wikipedia"
+          ],
+          "error": null,
+          "final": "The Eiffel Tower is a lattice tower in Paris, France, designed by Gustave Eiffel. It stands on the Champ de Mars and was completed in 1889.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "wikipedia"
+          ],
+          "error": null,
+          "final": "The Eiffel Tower is a lattice tower located on the Champ de Mars in Paris, France, designed and built by Gustave Eiffel's company in 1887 to 1889.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_fetch_example",
+      "tier": 1,
+      "category": "retrieve",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "fetch_page",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "fetch_page"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't produce a valid response. (last parser error: JSON object could not be parsed: Expecting ',' delimiter: line 1 column 288 (char 287))",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "fetch_page",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t1_text_count",
+      "tier": 1,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "text_tools"
+          ],
+          "error": null,
+          "final": "This sentence contains 9 words.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "text_tools"
+          ],
+          "error": null,
+          "final": "This sentence contains 9 words.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "text_tools"
+          ],
+          "error": null,
+          "final": "This sentence contains 9 words.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_text_b64",
+      "tier": 1,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "text_tools"
+          ],
+          "error": null,
+          "final": "The encoded text is aGVsbG8gd29ybGQ=",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "text_tools"
+          ],
+          "error": null,
+          "final": "The encoded text is aGVsbG8gd29ybGQ=",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "text_tools"
+          ],
+          "error": null,
+          "final": "The encoded text is aGVsbG8gd29ybGQ=",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t1_no_invent_price",
+      "tier": 1,
+      "category": "restraint",
+      "skipped": false,
+      "chain_pass": null,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "crypto_price"
+          ],
+          "error": null,
+          "final": "The current share price of Apple (AAPL) is $0.18.",
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "crypto_price"
+          ],
+          "error": null,
+          "final": "The current share price of Apple (Aapl) is $0.18 to the cent.",
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "crypto_price"
+          ],
+          "error": null,
+          "final": "The current share price of Apple (Aapl) is $0.18 to the cent.",
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t1_no_invent_forecast",
+      "tier": 1,
+      "category": "restraint",
+      "skipped": false,
+      "chain_pass": null,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "weather",
+            "time_in_zone",
+            "unit_convert",
+            "time_in_zone",
+            "weather"
+          ],
+          "error": null,
+          "final": "Exactly one year from today, the expected temperature in New York will be around 28\u00b0C with humidity at 43% and wind speed at 7.2 km/h.",
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "weather",
+            "time_in_zone",
+            "weather"
+          ],
+          "error": null,
+          "final": "Exactly one year from today in New York, the weather will be around 28.0\u00b0C with a humidity of 43% and wind speed of 7.2 km/h.",
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "weather",
+            "time_in_zone",
+            "calculator",
+            "weather"
+          ],
+          "error": null,
+          "final": "Exactly one year from today in New York, the expected temperature will be around 28.0\u00b0C with a humidity of 43% and wind speed of 7.2 km/h.",
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t2_read_not_guess",
+      "tier": 2,
+      "category": "tool-selection",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "meeting_notes",
+            "load_skill",
+            "extract_data",
+            "read_file"
+          ],
+          "error": null,
+          "final": "The Thursday standup is scheduled for 9:30 AM in the main conference room.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "load_skill",
+            "meeting_notes",
+            "load_skill",
+            "extract_data",
+            "read_file"
+          ],
+          "error": null,
+          "final": "The Thursday standup is scheduled for 9:30 AM in the main conference room.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "load_skill",
+            "meeting_notes",
+            "load_skill",
+            "extract_data",
+            "read_file"
+          ],
+          "error": null,
+          "final": "The Thursday standup is at 9:30 AM in the main conference room.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_convert_currency",
+      "tier": 2,
+      "category": "tool-selection",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "currency_convert"
+          ],
+          "error": null,
+          "final": "200 USD is approximately 175.79 EUR.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "currency_convert"
+          ],
+          "error": null,
+          "final": "200 USD is approximately 175.79 EUR.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "currency_convert"
+          ],
+          "error": null,
+          "final": "200 USD is approximately 175.79 EUR.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_define_not_wiki",
+      "tier": 2,
+      "category": "tool-selection",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "dictionary"
+          ],
+          "error": null,
+          "final": "The word 'meticulous' means characterized by very precise, conscientious attention to details.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "dictionary"
+          ],
+          "error": null,
+          "final": "The word 'meticulous' means characterized by very precise, conscientious attention to details.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "dictionary"
+          ],
+          "error": null,
+          "final": "The word 'meticulous' means characterized by very precise, conscientious attention to details.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_kb_add",
+      "tier": 2,
+      "category": "retrieve",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "The S3 bucket named 'argus-prod-eu' has been added to your knowledge base. You can use the search_knowledge function to look up information about it later.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "The fact has been saved to my knowledge base.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "The fact about our S3 bucket named 'argus-prod-eu' has been saved to your knowledge base. You can use the command 'search_knowledge' to look up this information later.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_geocode_coords",
+      "tier": 2,
+      "category": "retrieve",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "geocode"
+          ],
+          "error": null,
+          "final": "The coordinates of Nairobi, Kenya are latitude -1.28333 and longitude 36.81667.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "geocode"
+          ],
+          "error": null,
+          "final": "The coordinates of Nairobi, Kenya are latitude -1.28333 and longitude 36.81667.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "geocode"
+          ],
+          "error": null,
+          "final": "The latitude and longitude coordinates of Nairobi, Kenya are approximately -1.28333, 36.81667.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_fetch_single_page",
+      "tier": 2,
+      "category": "retrieve",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 1.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "fetch_page",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "fetch_page",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data"
+          ],
+          "error": null,
+          "final": "It seems there might be an issue with fetching the page. Please try again later or provide a different URL.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "fetch_page"
+          ],
+          "error": null,
+          "final": "The heading text of the page is 'Example Domain'.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_countrows",
+      "tier": 2,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "query_rows",
+            "list_tables",
+            "create_table",
+            "query_rows",
+            "list_tables",
+            "create_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "query_table",
+            "list_tables",
+            "create_table",
+            "query_table"
+          ],
+          "error": null,
+          "final": "There are currently no rows in the sales_csv table.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "query_table",
+            "list_tables",
+            "create_table",
+            "query_table",
+            "list_tables",
+            "create_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t2_log_error_line",
+      "tier": 2,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "watch"
+          ],
+          "error": null,
+          "final": "It seems there was an issue with the URL provided. Could you please provide the correct URL for the server log so I can start monitoring for error messages?",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "inspect_artifact",
+            "download_file",
+            "download_file",
+            "download_file",
+            "download_file",
+            "download_file"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "inspect_artifact",
+            "download_file",
+            "search_knowledge",
+            "watch",
+            "watch"
+          ],
+          "error": null,
+          "final": "I'm watching the server.log at https://example.com/logs for any new ERROR lines. I'll notify you when there are changes.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t2_config_port",
+      "tier": 2,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "wikipedia",
+            "extract_data",
+            "search_knowledge",
+            "wikipedia"
+          ],
+          "error": null,
+          "final": "I found information about ports in general on Wikipedia. However, there's no specific mention of the port number in config.json. To find the correct port number, we would need to look at the documentation or configuration settings for the specific service or application you're referring to, such as OpenOCD or Remote Desktop.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "download_file",
+            "fetch_page",
+            "wikipedia"
+          ],
+          "error": null,
+          "final": "The information you're looking for could not be found. It seems that the port number the server listens on is not publicly documented. You might want to check the server's configuration file or contact the server administrator for this specific information.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "wikipedia",
+            "research",
+            "dictionary",
+            "extract_data",
+            "wikipedia"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t2_calc_discount",
+      "tier": 2,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 2.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "$36",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "$54",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "$36",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_calc_scale_recipe",
+      "tier": 2,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "You need 7.5 cups of flour.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "You need 7.5 cups of flour.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "calculator"
+          ],
+          "error": null,
+          "final": "You need 7.5 cups of flour.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_no_guess_email_count",
+      "tier": 2,
+      "category": "restraint",
+      "skipped": false,
+      "chain_pass": null,
+      "judge_mean": 1.6666666666666667,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "wikipedia",
+            "search_knowledge",
+            "ask_data"
+          ],
+          "error": null,
+          "final": "You currently have no unread emails as you haven't created a table with your email data yet. Please add your email records to a table using the create_table function.",
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "watch",
+            "list_watches",
+            "unwatch"
+          ],
+          "error": null,
+          "final": "I've stopped monitoring your inbox for new emails. You can check the number of unread emails manually by logging into your Gmail account.",
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "watch",
+            "fetch_page",
+            "run_routine"
+          ],
+          "error": null,
+          "final": "I couldn't fetch the number of unread emails due to a temporary issue. Please check again shortly.\n\nrun_routine: no routine named 'check_email_count'. Available: (none).",
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_no_guess_traffic",
+      "tier": 2,
+      "category": "restraint",
+      "skipped": false,
+      "chain_pass": null,
+      "judge_mean": 2.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "time_in_zone",
+            "geocode",
+            "wikipedia",
+            "geocode",
+            "time_in_zone"
+          ],
+          "error": null,
+          "final": "I couldn't determine the exact location of your airport. Could you please specify the name or location of the airport?",
+          "judge_score": 2
+        },
+        {
+          "tools": [
+            "time_in_zone",
+            "geocode",
+            "wikipedia",
+            "time_in_zone",
+            "geocode",
+            "time_in_zone"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "time_in_zone",
+            "weather",
+            "map_site",
+            "time_in_zone"
+          ],
+          "error": null,
+          "final": "Based on the available information, the traffic situation and route to the airport are not sufficient to determine the exact driving time. Please check real-time traffic updates or use a navigation app for an accurate estimate.",
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t2_no_guess_setting",
+      "tier": 2,
+      "category": "restraint",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "read_file"
+          ],
+          "error": null,
+          "final": "The configured request timeout is 47 seconds.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "read_file"
+          ],
+          "error": null,
+          "final": "The configured request timeout is 47 seconds.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "read_file"
+          ],
+          "error": null,
+          "final": "The configured request timeout is 47 seconds.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t3_orders_shipped",
+      "tier": 3,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "ask_data"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "I encountered an issue loading the table. Please try again later or provide the data directly.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "ingest_to_knowledge"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_invoice_total",
+      "tier": 3,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "There was an issue with the data provided. Please ensure the CSV contains the necessary columns and try again.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "The total of the line_total column is calculated to be 37.97.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_expenses_travel",
+      "tier": 3,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.3333333333333333,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "download_file",
+            "fetch_page",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "ask_data"
+          ],
+          "error": null,
+          "final": "You spent a total of $120.00 in the 'Travel' category.",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_inventory_reorder",
+      "tier": 3,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "download_file",
+            "read_file",
+            "load_skill",
+            "load_skill",
+            "create_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_sales_topproduct",
+      "tier": 3,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table",
+            "create_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table",
+            "create_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table",
+            "create_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_budget_remaining",
+      "tier": 3,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "read_file",
+            "ask_data",
+            "ask_data"
+          ],
+          "error": null,
+          "final": "It seems like you haven't added any data to a table yet. Please create a table using the 'create_table' tool and add some initial rows with 'insert_row' before asking me how much of the budget is remaining.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "read_document",
+            "ask_data",
+            "ask_data"
+          ],
+          "error": null,
+          "final": "It seems there are no tables defined in the system yet. Please create a table using the 'create_table' skill and populate it with initial rows before asking how much of the budget is remaining.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data",
+            "extract_data"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_receipt_total",
+      "tier": 3,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 1.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "extract_data",
+            "read_document",
+            "extract_data",
+            "read_file",
+            "calculator"
+          ],
+          "error": null,
+          "final": "The final total including tax is $86.40.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "extract_data",
+            "read_file",
+            "extract_data",
+            "read_file",
+            "calculation",
+            "calculator"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "extract_data",
+            "read_file",
+            "extract_data",
+            "read_file",
+            "calculate",
+            "calculator"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": true,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_headcount_cost",
+      "tier": 3,
+      "category": "compute",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "extract_data",
+            "read_document",
+            "query_table",
+            "ask_data",
+            "create_table",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "extract_data",
+            "read_document",
+            "query_table",
+            "ask_data"
+          ],
+          "error": null,
+          "final": "I need to create a table with the staff categories and their costs first. Once we have that, I can calculate the total monthly staff cost.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "extract_data",
+            "read_document",
+            "query_table",
+            "ask_data"
+          ],
+          "error": null,
+          "final": "I need to create a table and add some staff costs before I can calculate the total monthly staff cost.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_actions_to_kb",
+      "tier": 3,
+      "category": "retrieve",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't produce a valid response. (last parser error: unknown action 'extract_to_table' (expected \"tool\" or \"final\"))",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't reach the model (model request failed: ).",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't produce a valid response. (last parser error: unknown action 'extract_to_table' (expected \"tool\" or \"final\"))",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_specs_to_kb",
+      "tier": 3,
+      "category": "retrieve",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "The product specifications have been added to your knowledge base under the source 'product specs'.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't produce a valid response. (last parser error: unknown action 'ingest_to_knowledge' (expected \"tool\" or \"final\"))",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_quarterly_total",
+      "tier": 3,
+      "category": "synthesis",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "download_file",
+            "extract_to_table",
+            "load_skill",
+            "create_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "download_file",
+            "fetch_page",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_survey_winner",
+      "tier": 3,
+      "category": "synthesis",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "extract_to_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t3_fetch_to_kb",
+      "tier": 3,
+      "category": "synthesis",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 1.6666666666666667,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "fetch_page",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've noted the content of the example domain page. You can now search your knowledge base using 'search_knowledge' if you need to look up any information.",
+          "chain_correct": true,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "fetch_page",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've noted the content of the example domain page. Let me know if you need to do anything else with it.",
+          "chain_correct": true,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "fetch_page",
+            "add_to_knowledge"
+          ],
+          "error": null,
+          "final": "I've noted down the information from the example domain page. You can use 'search_knowledge' to look up details in the stored information.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t3_fetch_summary",
+      "tier": 3,
+      "category": "synthesis",
+      "skipped": false,
+      "chain_pass": true,
+      "judge_mean": 3.0,
+      "solved": true,
+      "runs": [
+        {
+          "tools": [
+            "fetch_page",
+            "write_file"
+          ],
+          "error": null,
+          "final": "The main text has been saved to example_summary.txt in your workspace.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "fetch_page",
+            "write_file"
+          ],
+          "error": null,
+          "final": "The main text has been written to 'example_summary.txt' in your workspace.",
+          "chain_correct": true,
+          "judge_score": 3
+        },
+        {
+          "tools": [
+            "fetch_page",
+            "write_file"
+          ],
+          "error": null,
+          "final": "The main text of the fetched page has been saved to example_summary.txt in your workspace.",
+          "chain_correct": true,
+          "judge_score": 3
+        }
+      ]
+    },
+    {
+      "id": "t4_amount_total_verify",
+      "tier": 4,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "ask_data"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "create_table",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "The total amount spent in the daily_sales table is $1470.0.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "query_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_billable_verify",
+      "tier": 4,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "download_file",
+            "fetch_page",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_open_high_verify",
+      "tier": 4,
+      "category": "data-transform",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_no_fabricate_rating",
+      "tier": 4,
+      "category": "restraint",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "download_file",
+            "fetch_page",
+            "load_skill",
+            "download_file",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "create_table",
+            "insert_row",
+            "ask_data"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "download_file",
+            "fetch_page",
+            "load_skill",
+            "download_file",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_no_fabricate_missing",
+      "tier": 4,
+      "category": "restraint",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "load_skill",
+            "download_file",
+            "fetch_page"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "create_table",
+            "extract_to_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_no_oversearch_sleep",
+      "tier": 4,
+      "category": "restraint",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "ask_data",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "ask_data"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "ask_data",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "ask_data"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "ask_data",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row",
+            "ask_data"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_no_oversearch_notes",
+      "tier": 4,
+      "category": "restraint",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't produce a valid response. (last parser error: unknown action 'ingest_to_knowledge' (expected \"tool\" or \"final\"))",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't produce a valid response. (last parser error: unknown action 'ingest_to_knowledge' (expected \"tool\" or \"final\"))",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "meeting_notes",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_disambiguate_jordan",
+      "tier": 4,
+      "category": "tool-selection",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "download_file",
+            "fetch_page",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "load_skill",
+            "extract_to_table",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_disambiguate_march",
+      "tier": 4,
+      "category": "tool-selection",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "ask_data",
+            "load_skill",
+            "query_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "download_file",
+            "fetch_page",
+            "load_skill",
+            "download_file",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "load_skill",
+            "extract_to_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_budget_reconcile",
+      "tier": 4,
+      "category": "synthesis",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "download_file",
+            "download_file"
+          ],
+          "error": null,
+          "final": "I encountered a 404 error when trying to download the marketing spending data. Please ensure the URL provided is correct and try again.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table",
+            "create_table",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "download_file",
+            "download_file",
+            "extract_to_table",
+            "load_skill",
+            "download_file"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_regional_report",
+      "tier": 4,
+      "category": "synthesis",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "download_file",
+            "fetch_page",
+            "fetch_page"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "create_table",
+            "insert_row",
+            "insert_row",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_q1_total_kb",
+      "tier": 4,
+      "category": "synthesis",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "create_table",
+            "load_skill",
+            "create_table",
+            "load_skill",
+            "create_table"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "download_file",
+            "fetch_page",
+            "crawl_site",
+            "extract_data"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "extract_to_table",
+            "load_skill",
+            "extract_to_table",
+            "create_table",
+            "insert_row"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_fetch_flag",
+      "tier": 4,
+      "category": "synthesis",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.3333333333333333,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "fetch_page",
+            "extract_data",
+            "wikipedia",
+            "extract_data"
+          ],
+          "error": null,
+          "final": "No contact email addresses were found on the example domain page or through a Wikipedia search.",
+          "chain_correct": false,
+          "judge_score": 1
+        },
+        {
+          "tools": [
+            "fetch_page",
+            "ask_data",
+            "load_skill",
+            "extract_data",
+            "ask_data",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "fetch_page",
+            "wikipedia",
+            "extract_data",
+            "wikipedia",
+            "fetch_page",
+            "extract_data"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    },
+    {
+      "id": "t4_oncall_role",
+      "tier": 4,
+      "category": "synthesis",
+      "skipped": false,
+      "chain_pass": false,
+      "judge_mean": 0.0,
+      "solved": false,
+      "runs": [
+        {
+          "tools": [
+            "load_skill",
+            "load_skill",
+            "load_skill",
+            "read_file",
+            "read_file",
+            "ask_data"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "load_skill",
+            "load_skill"
+          ],
+          "error": null,
+          "final": "Notes saved: On-call person this week is [name], and their role is [role].",
+          "chain_correct": false,
+          "judge_score": 0
+        },
+        {
+          "tools": [
+            "read_document",
+            "extract_data",
+            "read_document",
+            "extract_data",
+            "read_document",
+            "extract_data"
+          ],
+          "error": null,
+          "final": "Sorry \u2014 I couldn't complete this within 6 steps. Try rephrasing or breaking the request into smaller parts.",
+          "chain_correct": false,
+          "judge_score": 0
+        }
+      ]
+    }
+  ]
+}

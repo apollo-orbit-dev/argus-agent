@@ -181,11 +181,12 @@ def test_build_series_metric_solved():
 
 def test_fixtures_resolve_beside_the_battery():
     """Regression (cap-2 pilot): the runner copies a task's `source` fixture from a `fixtures/` dir
-    BESIDE the battery file, so a battery in its own subdir uses its own fixtures. cap-1's battery at
-    benchmark/battery.json must still map to the global FIXTURES (benchmark/fixtures/); a subdir
-    battery must map to fixtures/ beside it — NOT the cap-1 location."""
+    BESIDE the battery file, so every battery in its own subdir uses its own fixtures. Each battery
+    now lives in its own sibling folder (benchmark/cap-1/, benchmark/cap-2/), so cap-1's battery at
+    benchmark/cap-1/battery.json maps to benchmark/cap-1/fixtures/ (== the default FIXTURES), and
+    cap-2's to benchmark/cap-2/fixtures/ beside it — NOT the cap-1 location."""
     from pathlib import Path
     from engine.eval.benchmark import FIXTURES
-    assert (Path("benchmark/battery.json").parent / "fixtures").resolve() == FIXTURES.resolve()
+    assert (Path("benchmark/cap-1/battery.json").parent / "fixtures").resolve() == FIXTURES.resolve()
     assert (Path("benchmark/cap-2/battery.json").parent / "fixtures") == Path("benchmark/cap-2/fixtures")
     assert Path("benchmark/cap-2/battery.json").parent / "fixtures" != FIXTURES
