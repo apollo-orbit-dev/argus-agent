@@ -22,6 +22,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional
 
+import yaml
+
 from engine.tools.base import Tool
 
 log = logging.getLogger("argus.skills")
@@ -77,11 +79,64 @@ class SkillContext:
     active_skill: Optional[str] = None
 
 
-def parse_frontmatter(text: str) -> tuple[dict, str]:
-    """Minimal `---`-delimited frontmatter parser (no yaml dependency).
+# Matches a top-level (unindented) `key: value` frontmatter line. Indented lines
+# (multi-line YAML list items, nested block content) are left untouched so YAML's
+# own block-scalar rules apply to them.
+_TOPLEVEL_KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*):(.*)$")
 
-    Supports scalar `key: value` and list `tools: [a, b]` or `tools: a, b`.
-    Returns (meta, body). Raises ValueError if frontmatter is absent/malformed.
+
+def _yaml_safe_line(line: str) -> str:
+    """Defensively quote a bare `key: value` line's value before handing the block to
+    yaml.safe_load.
+
+    The existing library skills (authored against the old hand-rolled splitter, which
+    just took everything after the first ':') are NOT valid YAML as-is: a plain
+    (unquoted) YAML scalar can't itself contain ": " (colon-space), e.g.
+    `description: ... for each channel: how concise ...` in report_builder.md. Rather
+    than requiring every skill file to be quoted, JSON-quote (a valid subset of YAML
+    double-quoted scalars) any top-level scalar value that isn't already a flow
+    collection (`[...]`/`{...}`) or already quoted, so it round-trips as a single
+    string regardless of embedded colons.
+    """
+    m = _TOPLEVEL_KEY_RE.match(line)
+    if not m:
+        return line
+    key, rest = m.group(1), m.group(2)
+    val = rest.strip()
+    if not val:
+        return line  # value continues on following (indented) lines
+    if val[0] in "[{":
+        return line  # flow list/map — let yaml parse it natively
+    if val[0] in "'\"" and len(val) >= 2 and val[-1] == val[0]:
+        return line  # already quoted
+    if val[0] in "|>":
+        return line  # block scalar indicator — value is on following indented lines
+    return f"{key}: {json.dumps(val)}"
+
+
+def _coerce_str_list(val) -> list:
+    """Coerce a YAML-parsed `tools`/`triggers` value to list[str].
+
+    Accepts a real YAML list, a single scalar, or a comma-separated string (back-compat
+    for the inline forms `tools: [a, b]` and `tools: a, b`).
+    """
+    if val is None:
+        return []
+    if isinstance(val, list):
+        return [str(v).strip() for v in val if str(v).strip()]
+    if isinstance(val, str):
+        if "," in val:
+            return [t.strip() for t in val.split(",") if t.strip()]
+        return [val.strip()] if val.strip() else []
+    return [str(val)]
+
+
+def parse_frontmatter(text: str) -> tuple[dict, str]:
+    """`---`-delimited frontmatter parser backed by yaml.safe_load.
+
+    Supports scalar `key: value`, flow lists (`tools: [a, b]`), comma-separated
+    scalars (`tools: a, b`), and real multi-line YAML lists. Returns (meta, body).
+    Raises ValueError if frontmatter is absent/malformed.
     """
     if not text.startswith("---"):
         raise ValueError("missing frontmatter (must start with '---')")
@@ -95,20 +150,19 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
             break
     if end is None:
         raise ValueError("frontmatter not closed with '---'")
-    meta: dict = {}
-    for line in lines[1:end]:
-        if not line.strip() or line.strip().startswith("#"):
-            continue
-        if ":" not in line:
-            continue
-        key, _, val = line.partition(":")
-        key = key.strip()
-        val = val.strip()
-        if key in ("tools", "triggers"):
-            val = val.strip("[]")
-            meta[key] = [t.strip().strip("'\"") for t in val.split(",") if t.strip()]
-        else:
-            meta[key] = val.strip("'\"")
+    block = "\n".join(_yaml_safe_line(line) for line in lines[1:end])
+    try:
+        meta = yaml.safe_load(block)
+    except yaml.YAMLError as e:
+        raise ValueError(f"invalid frontmatter YAML: {e}") from e
+    if meta is None:
+        meta = {}
+    if not isinstance(meta, dict):
+        raise ValueError("frontmatter must parse to a YAML mapping")
+    if "tools" in meta:
+        meta["tools"] = _coerce_str_list(meta["tools"])
+    if "triggers" in meta:
+        meta["triggers"] = _coerce_str_list(meta["triggers"])
     body = "\n".join(lines[end + 1:]).strip()
     return meta, body
 
