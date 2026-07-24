@@ -7,6 +7,7 @@ import io
 import json
 import pathlib
 import sys
+import tempfile
 
 from engine.sandbox.runner import main, run_payload
 
@@ -59,7 +60,7 @@ def test_module_imports_only_stdlib():
             mods.update(n.name.split(".")[0] for n in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             mods.add(node.module.split(".")[0])
-    assert mods <= {"json", "sys", "traceback", "__future__", "contextlib", "io"}, \
+    assert mods <= {"json", "sys", "traceback", "__future__", "contextlib", "io", "os", "tempfile"}, \
         f"non-stdlib import: {mods}"
 
 
@@ -85,6 +86,31 @@ def test_a_tool_that_prints_does_not_corrupt_the_stdout_json_contract():
     obj = json.loads(lines[0])  # must not raise
     assert obj == {"ok": True, "result": "fine"}
     assert "printed junk" not in stdout
+
+
+def test_a_subprocess_style_write_to_the_real_fd_1_does_not_corrupt_the_json_contract():
+    """A subprocess CHILD spawned by tool code inherits the real fd 1, not sys.stdout - so it can
+    write past the sys.stdout-only redirect. Simulate that with a direct os.write(1, ...) and
+    confirm the real fd 1 stays clean AND run_payload's own return value is unaffected."""
+    import os
+
+    code = "import os\ndef run(args):\n    os.write(1, b'junk\\n')\n    return 'fine'"
+
+    real_stdout_fd = 1
+    saved = os.dup(real_stdout_fd)
+    with tempfile.TemporaryFile() as capture:
+        os.dup2(capture.fileno(), real_stdout_fd)
+        try:
+            out = run_payload({"code": code, "args": {}})
+        finally:
+            sys.stdout.flush()
+            os.dup2(saved, real_stdout_fd)
+            os.close(saved)
+        capture.seek(0)
+        captured_real_fd1 = capture.read().decode()
+
+    assert "junk" not in captured_real_fd1
+    assert out == {"ok": True, "result": "fine"}
 
 
 def test_tool_stderr_is_also_isolated():
