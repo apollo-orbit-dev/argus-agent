@@ -1270,6 +1270,45 @@
     loadSandboxStatus();
   });
 
+  /* ---- service (systemd auto-start) card ---- */
+  async function loadServiceStatus(){
+    var el = $('serviceStatus');
+    try {
+      var s = await (await fetch('/service/status')).json();
+      if (s.supported === false){
+        el.textContent = s.reason || 'Linux/systemd only';
+        $('serviceInstallBtn').disabled = true;
+        $('serviceUninstallBtn').disabled = true;
+        return;
+      }
+      var flags = ['installed','enabled','active','linger'].filter(function(k){ return s[k]; });
+      el.textContent = s.name + ' — ' + (flags.length ? flags.join(', ') : 'not installed');
+      $('serviceInstallBtn').disabled = false;
+      $('serviceUninstallBtn').disabled = !s.installed;
+    } catch(e){ el.textContent = 'status unavailable'; }
+  }
+  $('serviceRecheckBtn').addEventListener('click', loadServiceStatus);
+  $('serviceInstallBtn').addEventListener('click', async function(){
+    var btn = this, out = $('serviceOutput');
+    btn.disabled = true; out.style.display = 'block'; out.textContent = 'installing…';
+    try {
+      var d = await (await fetch('/service/install', { method: 'POST' })).json();
+      out.textContent = d.note || d.reason || JSON.stringify(d);
+      toast(d.ok ? 'Service installed' : 'Install failed — see output', d.ok ? 'ok' : 'err');
+    } catch(e){ out.textContent = 'install failed: ' + e.message; }
+    btn.disabled = false; loadServiceStatus();
+  });
+  $('serviceUninstallBtn').addEventListener('click', async function(){
+    var btn = this, out = $('serviceOutput');
+    btn.disabled = true; out.style.display = 'block'; out.textContent = 'removing…';
+    try {
+      var d = await (await fetch('/service/uninstall', { method: 'POST' })).json();
+      out.textContent = d.note || d.reason || JSON.stringify(d);
+      toast('Service removed', 'ok');
+    } catch(e){ out.textContent = 'uninstall failed: ' + e.message; }
+    btn.disabled = false; loadServiceStatus();
+  });
+
   /* ---- controls popover ---- */
   var controlsBtn = $('controlsBtn');
   var controlsPopover = $('controlsPopover');
@@ -2947,7 +2986,7 @@
   pageLoaders.settings = function(){
     loadRoles(); loadCommands(); loadNotify();
     loadSystemPrompt(); loadSoul(); loadEnv();
-    loadSandboxStatus();
+    loadSandboxStatus(); loadServiceStatus();
   };
 
   var startPage = (function(){ try { return localStorage.getItem('argus_page') || 'console'; } catch(e){ return 'console'; } })();
