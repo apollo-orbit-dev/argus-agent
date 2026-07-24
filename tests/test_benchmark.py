@@ -177,3 +177,15 @@ def test_build_series_metric_solved():
     r = _backfill_solved(_fake_result("m", 3, {1: True}))
     s = build_series([r], "cap-1", metric="solved")
     assert s["1"][0][1] == 1.0   # (params, value, judge) — value is the solved rate for metric=solved
+
+
+def test_fixtures_resolve_beside_the_battery():
+    """Regression (cap-2 pilot): the runner copies a task's `source` fixture from a `fixtures/` dir
+    BESIDE the battery file, so a battery in its own subdir uses its own fixtures. cap-1's battery at
+    benchmark/battery.json must still map to the global FIXTURES (benchmark/fixtures/); a subdir
+    battery must map to fixtures/ beside it — NOT the cap-1 location."""
+    from pathlib import Path
+    from engine.eval.benchmark import FIXTURES
+    assert (Path("benchmark/battery.json").parent / "fixtures").resolve() == FIXTURES.resolve()
+    assert (Path("benchmark/cap-2/battery.json").parent / "fixtures") == Path("benchmark/cap-2/fixtures")
+    assert Path("benchmark/cap-2/battery.json").parent / "fixtures" != FIXTURES

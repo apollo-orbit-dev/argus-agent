@@ -174,7 +174,7 @@ def _dep_available(requires: str, cfg) -> bool:
 # ------------------------------- run orchestration -------------------------------
 
 
-async def _run_task(cfg, judge_fn, task: dict, k: int, timeout: float) -> dict:
+async def _run_task(cfg, judge_fn, task: dict, k: int, timeout: float, fixtures_dir: Path = FIXTURES) -> dict:
     from engine.engine import Engine
     from engine.eval.capture import run_and_capture
     from engine.eval.scoring import score_case
@@ -192,7 +192,7 @@ async def _run_task(cfg, judge_fn, task: dict, k: int, timeout: float) -> dict:
             for src in ([task["source"]] if isinstance(task.get("source"), str) else task.get("source") or []):
                 dst = Path(engine._workspace_dir)
                 dst.mkdir(parents=True, exist_ok=True)
-                shutil.copy(FIXTURES / src, dst / src)
+                shutil.copy(fixtures_dir / src, dst / src)
             cap = await run_and_capture(engine, f"bench-{task['id']}-{i}", task["prompt"], timeout)
             r = {"tools": cap["tools"], "error": cap["error"], "final": cap["final"]}
             if "expect" in task:
@@ -226,9 +226,13 @@ async def run_model(model_spec: str, params: int, mode: str | None, k: int, judg
     battery = json.loads(battery_path.read_text())
     cfg = resolve_config(model_spec, mode, baseline)
     judge_fn = make_judge(judge_spec)
+    # Fixtures live in a `fixtures/` dir beside the battery file, so a battery in its own subdir
+    # (e.g. benchmark/cap-2/battery.json) uses benchmark/cap-2/fixtures/. cap-1 (benchmark/battery.json)
+    # resolves to benchmark/fixtures/ — unchanged.
+    fixtures_dir = battery_path.parent / "fixtures"
     results = []
     for task in battery["tasks"]:
-        results.append(await _run_task(cfg, judge_fn, task, k, timeout))
+        results.append(await _run_task(cfg, judge_fn, task, k, timeout, fixtures_dir))
     agg = aggregate(results)
     name = model_spec.partition("=")[0]
     return {"model": name, "params": params, "mode": mode or cfg.tool_calling_mode,
