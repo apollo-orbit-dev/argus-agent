@@ -109,6 +109,8 @@ def _yaml_safe_line(line: str) -> str:
         return line  # flow list/map — let yaml parse it natively
     if val[0] in "'\"" and len(val) >= 2 and val[-1] == val[0]:
         return line  # already quoted
+    if val[0] in "|>":
+        return line  # block scalar indicator — value is on following indented lines
     return f"{key}: {json.dumps(val)}"
 
 

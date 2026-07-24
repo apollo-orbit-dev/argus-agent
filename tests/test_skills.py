@@ -68,6 +68,25 @@ def test_parse_frontmatter_unquoted_value_with_colon_still_works():
     assert meta["tools"] == ["calculator"]
 
 
+def test_parse_frontmatter_block_scalar_description():
+    # A `description: |` block scalar is the natural YAML way to write a long,
+    # multi-line description. The pre-quoting pass must leave the `|` indicator line
+    # untouched so yaml.safe_load treats the following indented lines as its value.
+    meta, body = parse_frontmatter(
+        "---\n"
+        "name: block-scalar\n"
+        "description: |\n"
+        "  First line of the description.\n"
+        "  Second line of the description.\n"
+        "tools: [calculator]\n"
+        "---\n"
+        "Do it.\n")
+    assert meta["description"] == (
+        "First line of the description.\nSecond line of the description.\n")
+    assert meta["tools"] == ["calculator"]
+    assert body == "Do it."
+
+
 def test_parse_frontmatter_malformed_yaml_raises():
     import pytest
     with pytest.raises(ValueError):
