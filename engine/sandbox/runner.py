@@ -38,9 +38,13 @@ def _redirect_real_fds():
     saved1 = os.dup(1)
     saved2 = os.dup(2)
     with tempfile.TemporaryFile() as tmp:
-        os.dup2(tmp.fileno(), 1)
-        os.dup2(tmp.fileno(), 2)
         try:
+            # dup2 inside the try so a partial failure (fd 1 redirected but fd 2's dup2 raises)
+            # still hits the finally and restores fd 1 — the only path that could otherwise leave
+            # the JSON result going to the tempfile (silent empty output). dup2(saved,fd) in the
+            # finally is a safe restore even if the redirect below never took.
+            os.dup2(tmp.fileno(), 1)
+            os.dup2(tmp.fileno(), 2)
             yield
         finally:
             sys.stdout.flush()
