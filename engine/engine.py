@@ -3,7 +3,8 @@
 Knows nothing about FastAPI or Telegram. The backend, dashboard, and Telegram
 bot are all clients of this. Owns the tool/skill registries, the SessionStore
 (single owner of state), the EventBus (single event source), and the model
-client. This M1 skeleton echoes; the real loop is wired in M2.
+client. The agent loop itself lives in engine/loop.py — run_task() assembles each run's
+context (registries, skill, mode, step budget) and drives it.
 """
 from __future__ import annotations
 

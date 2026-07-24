@@ -214,3 +214,25 @@ async def test_admin_token_absent_means_open(client):
     c, eng, _ = client
     async with c:
         assert (await c.get("/config/env")).status_code == 200
+
+
+async def test_run_endpoint_honors_admin_token(tmp_path, monkeypatch):
+    # /run drives the agent (tools, files, sandbox) — the most consequential endpoint. When a token is
+    # set it must be gated too; previously it was the one open door on a token-protected instance.
+    cfg = Config(model_base_url="http://x/v1", model_name="main", telegram_bot_token="",
+                 admin_token="s3cret")
+    eng = Engine(cfg, env_path=str(tmp_path / ".env"))
+    (tmp_path / ".env").write_text("MODEL_NAME=main\n")
+
+    async def _fake_run_task(*a, **k):
+        return "ok"
+    monkeypatch.setattr(eng, "run_task", _fake_run_task)
+    app = create_app(eng)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+        # no header -> 401 (the gate fires before run_task, so no model call happens)
+        r = await c.post("/run", json={"session_id": "s", "text": "hi"})
+        assert r.status_code == 401
+        # correct header -> passes the gate
+        r = await c.post("/run", json={"session_id": "s", "text": "hi"},
+                         headers={"X-Admin-Token": "s3cret"})
+        assert r.status_code == 200 and r.json()["answer"] == "ok"
