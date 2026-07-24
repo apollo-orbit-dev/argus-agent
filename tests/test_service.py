@@ -189,3 +189,11 @@ def test_cli_service_install_dry_run(monkeypatch, capsys):
 def test_cli_service_unsupported_returns_1(monkeypatch):
     monkeypatch.setattr(service, "status", lambda name=None: {"ok": False, "supported": False, "reason": "nope"})
     assert cli.main(["service", "status"]) == 1
+
+
+def test_cli_service_uninstall_rejects_dry_run(monkeypatch, capsys):
+    # --dry-run only means something for `install`; on uninstall it must NOT perform a real removal.
+    monkeypatch.setattr(service, "uninstall", lambda name=None: pytest.fail("uninstall must not run under --dry-run"))
+    rc = cli.main(["service", "uninstall", "--dry-run"])
+    assert rc == 2
+    assert "no effect" in capsys.readouterr().out

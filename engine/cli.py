@@ -156,6 +156,10 @@ def cmd_service(args):
     if action == "install":
         r = service.install(name=args.name, dry_run=args.dry_run)
     elif action == "uninstall":
+        if getattr(args, "dry_run", False):
+            print("service: --dry-run has no effect on uninstall (use it with `install` to preview "
+                  "the unit). No changes made.")
+            return 2
         r = service.uninstall(name=args.name)
     else:
         r = service.status(name=args.name)
