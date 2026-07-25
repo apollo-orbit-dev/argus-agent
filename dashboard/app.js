@@ -1185,6 +1185,17 @@
   function reflectBoolSwitch(id, val){ var el = $(id); if (el && document.activeElement !== el) el.checked = !!val; }
 
   var lastConfig = {};
+  // Live registry size for the "K of N tools" hint next to Disclosure K — populated by loadLibrary()
+  // (same counts the Tools panel shows: builtin + conditional-enabled + created), so a bare K box
+  // never ships without the operator being able to see what it's hiding. null until first loaded.
+  var toolRegistryTotal = null;
+  function updateDiscKHint(){
+    var el = $('discKHint'); if (!el) return;
+    var k = lastConfig.tool_disclosure_k;
+    if (k == null || toolRegistryTotal == null){ el.textContent = ''; return; }
+    var pct = toolRegistryTotal > 0 ? Math.round(100 * (1 - Math.min(k, toolRegistryTotal) / toolRegistryTotal)) : 0;
+    el.textContent = 'K=' + k + ' of ' + toolRegistryTotal + ' tools — ' + Math.max(0, pct) + '% hidden';
+  }
   function applyConfig(cfg){
     lastConfig = cfg || {};
     reflectSeg(document.querySelector('[data-knob="tool_calling_mode"]'), cfg.tool_calling_mode);
@@ -1194,6 +1205,11 @@
     var skillSel = $('skillPicker');
     var explicit = cfg.skill_selection_mode === 'explicit';
     skillSel.disabled = !explicit;
+
+    reflectSeg(document.querySelector('[data-knob="tool_disclosure_mode"]'), cfg.tool_disclosure_mode);
+    setInputVal('inDiscK', cfg.tool_disclosure_k);
+    setInputVal('inDiscCore', cfg.tool_disclosure_core);
+    updateDiscKHint();
 
     reflectBoolSwitch('observerToggle', cfg.enable_observer);
     setInputVal('observerThreshold', cfg.observer_repeat_threshold);
@@ -1277,6 +1293,14 @@
   wireNumberField('inMaxTokens', 'model_max_tokens');
   wireNumberField('inMaxSteps', 'max_steps');
   wireNumberField('inAutoCompact', 'auto_compact_tokens');
+  function wireTextField(id, key){
+    var el = $(id); if (!el) return;
+    el.addEventListener('change', function(){
+      patchConfigKey(key, el.value.trim()).catch(function(e){ toast('Failed to set ' + key, 'err'); });
+    });
+  }
+  wireNumberField('inDiscK', 'tool_disclosure_k');
+  wireTextField('inDiscCore', 'tool_disclosure_core');
   function wireBoolSwitch(id, key){
     var el = $(id); if (!el) return;
     el.addEventListener('change', function(){ patchConfigKey(key, el.checked).catch(function(){ toast('Failed to set ' + key, 'err'); loadConfig(); }); });
@@ -2283,6 +2307,10 @@
       var totalSkills = (s.builtin||[]).length + (s.created||[]).length;
       $('toolsCountBadge').textContent = totalTools + ' total';
       $('skillsCountBadge').textContent = totalSkills + ' total';
+      // The live registry size for the Disclosure K hint — builtin + conditional-enabled + created is
+      // the full set a turn could see (mirrors Engine.tools_overview / tools_overview_names).
+      toolRegistryTotal = totalTools + cond.length;
+      updateDiscKHint();
       document.querySelectorAll('[data-lib-delete]').forEach(function(b){
         b.addEventListener('click', function(){
           var kind = b.getAttribute('data-lib-delete'), name = b.getAttribute('data-lib-name');
@@ -3133,6 +3161,7 @@
   renderSessionList();
   loadConfig();
   loadSkills();
+  loadLibrary();   // also populates the Disclosure K "of N tools" hint — no new polling, one-time load
   loadUsage();
   pollStatus();
   setInterval(pollStatus, 5000);

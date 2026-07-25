@@ -157,6 +157,26 @@
                     <button data-val="hybrid">hybrid</button>
                   </div>
                 </div>
+                <div class="field">
+                  <label class="field-label">Tool disclosure</label>
+                  <div class="segmented" data-group="discmode" data-knob="tool_disclosure_mode">
+                    <button data-val="off">off</button>
+                    <button data-val="keyword">keyword</button>
+                    <button data-val="embedding">embedding</button>
+                    <button data-val="hybrid">hybrid</button>
+                  </div>
+                  <div class="field-note">A hidden tool is not disabled — it still executes if the model names it, and <code>find_tool</code> can retrieve it into view. This only trims what's advertised each turn.</div>
+                </div>
+                <div class="field">
+                  <label class="field-label">Disclosure K <span class="card-hint" id="discKHint"></span></label>
+                  <input type="number" id="inDiscK" min="1" style="width:100%;">
+                  <div class="field-note">Total tools in view — core + pinned + retrieved — not the number retrieved.</div>
+                </div>
+                <div class="field">
+                  <label class="field-label">Disclosure core</label>
+                  <input type="text" id="inDiscCore" placeholder="find_tool,ask_user,calculator,..." style="width:100%;">
+                  <div class="field-note"><code>find_tool</code> is force-pinned regardless of this list — removing it here does not disable the escape hatch.</div>
+                </div>
                 <div class="field row-inline" style="justify-content:space-between;">
                   <label class="switch">
                     <input type="checkbox" id="observerToggle">

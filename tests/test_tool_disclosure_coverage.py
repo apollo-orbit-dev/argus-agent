@@ -6,10 +6,17 @@ and the benchmark would surface it only as a mysterious per-task regression afte
 Here, every cap-2 task's required tool chain is checked against the tool set `select_visible` would
 actually hand the model for that task's prompt.
 
-WHAT IT FOUND (see the xfail below): at the shipped defaults (mode=keyword, K=12, core =
-find_tool/ask_user/calculator/get_current_time/about_argus) only 26 of the 56 cap-2 tasks keep every
-tool their chain needs. The assertion is NOT relaxed to accommodate that — the marker is strict, so
-the day the ranker, the core set or K is fixed this test XPASSes and CI forces the marker's removal.
+K and CORE are read from `Config()` defaults rather than hardcoded, so this test can never drift from
+what actually ships — a future default change is measured here automatically instead of silently
+going stale.
+
+HISTORY: at K=12 (the original shipped default, pre enriched-descriptions), 30 of the 56 cap-2 tasks
+lost a tool their chain needed — read_file in all 30. That was a strict xfail here (see argus-89t):
+raising K alone needed ~60 of ~70 tools before it went green (no real cut), so the fix was enriching
+the tool descriptions the keyword ranker scores (desc-exp, merged to main) and, on that improved
+signal, moving the default to K=40 — the smallest K on the measured sweep with zero coverage misses
+(52/52 chain tasks, 43% of the catalog hidden). The gap is now closed and the assertion is unrelaxed:
+this test PASSES for real at the shipped default, no xfail.
 
 Do not weaken the assertion to make it pass. A miss is a finding about the core set, K, or the
 ranker, and the fix is one of those three.
@@ -25,34 +32,14 @@ from engine.tools.base import ToolRegistry
 from engine.tools.disclosure import select_visible
 
 BATTERY = Path("benchmark/cap-2/battery.json")
-K = 12
-CORE = "find_tool,ask_user,calculator,get_current_time,about_argus".split(",")
+K = Config().tool_disclosure_k
+CORE = Config().tool_disclosure_core.split(",")
 
-# The measured state of the world at the shipped defaults, recorded as the actual NAMED tasks (not
-# just a count) so a regression that swaps WHICH tasks fail — same count, different tasks, net zero
-# under a bare `<= 30` — cannot hide. A fixer that closes part of the gap edits this set DOWN to what
-# they actually fixed; a `<=`/count-only bound would let that improvement mask a same-sized
-# regression elsewhere. Keyword ranking has no lexical bridge from "how many rows are in sales.csv"
-# to read_file (whose whole doc is 13 content words), so read_file alone accounts for 30 of the 30
-# failing tasks; insert_row (11), create_table (6), query_table (2), unit_convert (1) and write_file
-# (1) follow. Raising K with the default core needs K≈60 of ~70 tools before it goes green — i.e. no
-# cut at all — so K is not the lever. Extending the core set to 13 names at K=16 does reach zero, but
-# that is hand-fitting the core set to this battery, which would defeat the purpose of the pre-flight;
-# it is a maintainer's call, not a silent default change.
-BASELINE_FAILING_TASKS = frozenset({
-    "t1_pick_unit",
-    "t2_read_not_guess", "t2_countrows", "t2_log_error_line", "t2_config_port",
-    "t2_no_guess_setting",
-    "t3_orders_shipped", "t3_invoice_total", "t3_expenses_travel", "t3_inventory_reorder",
-    "t3_sales_topproduct", "t3_budget_remaining", "t3_actions_to_kb", "t3_specs_to_kb",
-    "t3_quarterly_total", "t3_survey_winner",
-    "t4_amount_total_verify", "t4_billable_verify", "t4_open_high_verify",
-    "t4_no_fabricate_rating", "t4_no_fabricate_missing", "t4_no_oversearch_sleep",
-    "t4_no_oversearch_notes", "t4_disambiguate_jordan", "t4_disambiguate_march",
-    "t4_budget_reconcile", "t4_regional_report", "t4_q1_total_kb", "t4_fetch_flag",
-    "t4_oncall_role",
-})
-assert len(BASELINE_FAILING_TASKS) == 30
+# The measured state of the world at the shipped default (K=40, enriched descriptions): zero cap-2
+# tasks lose a required tool. Recorded as a set (not just a count) so a regression that swaps WHICH
+# task fails — same count, different task — cannot hide behind a `<= N` bound.
+BASELINE_FAILING_TASKS = frozenset()
+assert len(BASELINE_FAILING_TASKS) == 0
 
 
 def _tasks() -> list[dict]:
@@ -115,14 +102,6 @@ def _miss_ids(registry: ToolRegistry, **kw) -> set[str]:
     return {line.split(" (tier")[0] for line in _misses(registry, **kw)}
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "MEASURED FINDING, not a flake: at mode=keyword / K=12 / the shipped core set, 30 of the 56 "
-    "cap-2 tasks lose a tool their chain needs — read_file in all 30. Keyword overlap normalised by "
-    "query length has no bridge from a prompt's vocabulary ('rows', 'sales.csv') to a terse tool doc, "
-    "and it systematically favours tools with LONG descriptions. This is the ship-gate blocker in the "
-    "spec's §8: disclosure must not be flipped on for a real deploy until the ranker (or the core "
-    "set, or K) closes it. strict=True: fix it and this test XPASSes, which fails CI until the marker "
-    "is removed."))
 async def test_every_cap2_task_sees_its_required_tools(tmp_path):
     registry = await _full_run_registry(tmp_path)
     assert len(registry.names()) > K, "registry must be larger than K or this proves nothing"
@@ -164,7 +143,9 @@ async def test_view_is_actually_a_cut(tmp_path):
     registry — a 'view' that hides nothing would pass trivially."""
     registry = await _full_run_registry(tmp_path)
     total = len(registry.names())
-    assert total >= 2 * K, f"expected the full registry ({total}) to be well over K={K}"
+    # At the shipped default (K=40 of ~70), the cut is real (~43% hidden) but no longer a 2x margin
+    # the way K=12 was — assert the view is genuinely smaller, not an arbitrary multiple of K.
+    assert total > K, f"expected the full registry ({total}) to be larger than K={K}"
     for task in _tasks()[:10]:
         visible = select_visible(registry, task["prompt"], mode="keyword", k=K, core=CORE, pinned=())
         assert len(visible) == K
