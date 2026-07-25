@@ -418,7 +418,7 @@
 
   /* transcript chat/messaging view (user right, assistant left, tool output as a muted note) */
   .chat{ display:flex; flex-direction:column; gap:9px; padding:6px 4px 12px; }
-  .chat-row{ display:flex; }
+  .chat-row{ display:flex; flex-wrap:wrap; }
   .chat-row.me{ justify-content:flex-end; }
   .chat-row.them{ justify-content:flex-start; }
   .chat-bubble{ max-width:80%; padding:8px 12px; border-radius:14px; font-size:13px; line-height:1.45;
@@ -432,7 +432,7 @@
      confirmed; a failed /run leaves it visible but flagged, never silently removed. */
   .chat-bubble.pending{ opacity:.55; }
   .chat-bubble.failed{ background:rgba(242,92,110,.1); border-color:rgba(242,92,110,.4); opacity:1; }
-  .chat-optimistic-note{ margin-top:3px; font-family:var(--font-mono); font-size:10px;
+  .chat-optimistic-note{ flex-basis:100%; margin-top:3px; font-family:var(--font-mono); font-size:10px;
     letter-spacing:.2px; color:var(--danger); text-align:right; }
   /* A harness-injected steering note. Stored with role:"user" (the model has no mid-conversation
      system slot), so without this it renders as a bubble on the owner's side and reads as if they
