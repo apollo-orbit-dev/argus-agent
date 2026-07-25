@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -17,6 +18,12 @@ OBSERVER_NUDGE = (
     "[note] You have now run this exact tool call more than once and gotten the same "
     "result. Do not repeat it — try a different tool or different arguments, or give the "
     "user your best answer with the information you already have.")
+
+FUZZY_REPEAT_NUDGE = (
+    "[note] You've run several similar tool calls in a row, each a small variation of the last "
+    "(e.g. refining the same search). If you're just tweaking the query, consider whether the "
+    "results you already have are enough to answer — or switch to a materially different approach "
+    "or tool — rather than continuing to refine.")
 
 CREATE_VERIFY_NUDGE = (
     "[note] You've created several tools in a row without running one. create_tool only "
@@ -32,6 +39,27 @@ from engine.modes.base import ToolCallingMode
 from engine.protocol import FinalAnswer, ParseFailure, ToolCall
 from engine.state import SessionStore
 from engine.tools.base import ToolRegistry
+
+
+def _value_tokens(args) -> set[str]:
+    """Lowercased alphanumeric word tokens from the string/scalar VALUES of a tool's args.
+    Keys are EXCLUDED so stable arg names (e.g. 'query') don't inflate similarity."""
+    vals: list[str] = []
+    def walk(x):
+        if isinstance(x, dict):
+            for v in x.values(): walk(v)
+        elif isinstance(x, (list, tuple)):
+            for v in x: walk(v)
+        else:
+            vals.append(str(x))
+    walk(args if isinstance(args, (dict, list, tuple)) else {"_": args})
+    return set(re.findall(r"[a-z0-9]+", " ".join(vals).lower()))
+
+
+def _jaccard(a: set, b: set) -> float:
+    if not a and not b: return 1.0
+    if not a or not b:  return 0.0
+    return len(a & b) / len(a | b)
 
 
 def _with_unechoed(answer: str, echoed: list[str]) -> str:
@@ -66,6 +94,8 @@ class LoopDeps:
     system_prompt: str = ""
     enable_observer: bool = True
     observer_threshold: int = 2
+    fuzzy_repeat_window: int = 3        # consecutive same-tool calls to inspect
+    fuzzy_repeat_jaccard: float = 0.4   # mean consecutive value-token Jaccard to nudge
     think: Optional[bool] = None   # None = model default (reasoning on); adaptive router may set it
     reasoning: Optional[str] = None  # per-turn reasoning LEVEL (off|low|medium|high) from the adaptive router; wins over think
     approvals: object = None       # ApprovalBroker | None; None -> no gating (master-flag-off parity)
@@ -136,6 +166,8 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
     create_names: dict[str, int] = {}  # observer: create_tool/skill NAME -> times (ignores code)
     consecutive_creates = 0            # observer: creates in a row with no tool actually run
     create_verify_nudged = False
+    recent_calls: list[tuple[str, set]] = []   # observer: (tool, value-token-set) per ToolCall
+    fuzzy_repeat_nudged = False                 # fire the fuzzy nudge at most once per turn
 
     async def observer_repeat_check(step: int, call: "ToolCall", sig: str) -> None:
         """At the repeat threshold, nudge the model to change approach.
@@ -243,6 +275,28 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
             deps.store.append_message(session_id, {"role": "assistant", "content": answer})
             await emit(step, "final", {"answer": answer})
             return answer
+
+        # Observer: a THIRD, softer channel — same tool + high value-token overlap across the
+        # last N calls (e.g. a search query refined again and again). Never ends the turn, and
+        # fires at most once per turn; the exact-repeat STOP above already returned for an
+        # identical call, so this never double-fires on top of it.
+        recent_calls.append((call.tool, _value_tokens(call.args)))
+        if (deps.enable_observer and not fuzzy_repeat_nudged
+                and len(recent_calls) >= deps.fuzzy_repeat_window):
+            window = recent_calls[-deps.fuzzy_repeat_window:]
+            if all(t == call.tool for t, _ in window):
+                pairs = [_jaccard(window[i][1], window[i + 1][1])
+                         for i in range(len(window) - 1)]
+                # pairs is empty only if the window holds <2 calls (window misconfigured to <=1);
+                # guard the mean so a bad config can't ZeroDivisionError the turn.
+                mean_j = sum(pairs) / len(pairs) if pairs else 0.0
+                if pairs and mean_j >= deps.fuzzy_repeat_jaccard:
+                    fuzzy_repeat_nudged = True
+                    deps.store.append_message(
+                        session_id, {"role": "user", "content": FUZZY_REPEAT_NUDGE})
+                    await emit(step, "observer",
+                               {"issue": "fuzzy_repeat_nudge", "tool": call.tool,
+                                "window": deps.fuzzy_repeat_window, "mean_jaccard": round(mean_j, 3)})
 
         v = deps.registry.validate(call.tool, call.args)
         await emit(step, "validation", {"tool": call.tool, "ok": v.ok, "error": v.error})
