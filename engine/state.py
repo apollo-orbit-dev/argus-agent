@@ -192,6 +192,17 @@ class SessionStore:
                 self._db.commit()
         return sid
 
+    def session_name(self, session_id: str) -> str | None:
+        """Current display name, or None if the session has no row yet (or there's no db — pure
+        in-memory mode). Used by the auto-title feature to check whether the placeholder id-name
+        (set at creation, see create_session/_persist) is still in place before renaming — so a
+        manual rename is never clobbered."""
+        if self._db is None:
+            return None
+        with self._lock:
+            row = self._db.execute("SELECT name FROM sessions WHERE id=?", (session_id,)).fetchone()
+        return row["name"] if row else None
+
     def rename_session(self, session_id: str, name: str) -> None:
         with self._lock:
             if self._db is not None:

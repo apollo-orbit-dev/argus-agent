@@ -28,7 +28,7 @@ from engine.modes.base import get_mode
 from engine.rules.detect import RULE_EXTRACT_PROMPT, has_rule_cue
 from engine.scheduler import Scheduler
 from engine.skills.base import SkillRegistry, get_selector
-from engine.state import SessionStore
+from engine.state import SessionStore, _is_ephemeral
 from engine.tools.base import ToolRegistry
 from engine.tools.about import AboutArgusTool
 from engine.tools.clarify import AskUserTool
@@ -257,6 +257,27 @@ def _low_value_fact(fact: str) -> bool:
     if len(f) > 90 and _SENTENCE_BREAK_RE.search(f):  # 2+ sentences → reasoning, not a single fact
         return True
     return False
+
+
+AUTO_TITLE_PROMPT = (
+    "Write a short, specific title (3-6 words) for this conversation, summarizing what it's "
+    "about. Plain text only — no quotes, no trailing punctuation, no prefix like 'Title:'. "
+    "Reply with ONLY the title.")
+
+_TITLE_MAX_LEN = 60
+
+
+def _sanitize_title(text: str | None) -> str:
+    """Clean a model-generated session title before it's stored: strip wrapping quotes/whitespace,
+    collapse internal newlines, and cap the length. Returns '' for empty/whitespace input — the
+    signature of a reasoning model that answered with thinking left on (see think=False at the
+    auto_title_session call site) — so the caller can treat that as "no usable title"."""
+    t = (text or "").strip()
+    t = t.strip("\"'` \t\n")
+    t = " ".join(t.split())
+    if len(t) > _TITLE_MAX_LEN:
+        t = t[:_TITLE_MAX_LEN].rstrip()
+    return t
 
 
 SKILL_CREATION_DIRECTIVE = (
@@ -863,6 +884,19 @@ class Engine:
                            timeout=self._config.request_timeout,
                            max_tokens=self._config.model_max_tokens,
                            provider=conn.get("provider", "auto"))
+
+    def _aux_model_configured(self) -> bool:
+        """Whether an aux (background) model call actually has somewhere to go — the SAME
+        resolution `_aux_model_client()` uses (the `utility` role if mapped, else the main chat
+        model), stopping short of building a client. Lets a background caller (auto-titling) skip
+        the call entirely and silently no-op when no model is configured at all, rather than firing
+        a request that has nowhere to land."""
+        label = self.model_presets_store.get_role("utility")
+        conn = self.model_presets_store.resolve(label) if label else None
+        if conn is not None:
+            return bool((conn.get("base_url") or "").strip() and (conn.get("model_name") or "").strip())
+        c = self._config
+        return bool((c.model_base_url or "").strip() and (c.model_name or "").strip())
 
     # ---- model connections + capability roles ----
     @property
@@ -1535,6 +1569,13 @@ class Engine:
             rt = asyncio.create_task(self.autodetect_rule(session_id, text))
             self._bg_tasks.add(rt)
             rt.add_done_callback(self._bg_tasks.discard)
+        # Give a fresh session a real title once it has a first completed turn, instead of leaving
+        # the raw id as its display name — background, so it never adds latency. Silently no-ops if
+        # the session was already (re)named, or if no chat model is configured at all.
+        if c.enable_auto_title_session:
+            tt = asyncio.create_task(self.auto_title_session(session_id))
+            self._bg_tasks.add(tt)
+            tt.add_done_callback(self._bg_tasks.discard)
         return answer
 
     # meta/trivial tools whose repetition shouldn't trigger a "make a tool" nudge
@@ -1891,6 +1932,52 @@ class Engine:
             await deliver(session_id, msg)
         except Exception:
             log.debug("rule-saved notify failed", exc_info=True)
+
+    async def auto_title_session(self, session_id: str) -> Optional[str]:
+        """Background: replace a fresh session's placeholder id-name with a real title, once it has
+        a first completed turn — instead of leaving the raw 'ses_xxxxxxxxxx' as its display name
+        forever. Fired from run_task's tail (same shape as autoextract/autodetect_rule), so it never
+        adds latency to the turn itself.
+
+        Only takes effect while the session STILL has its placeholder name (name == id) — a manual
+        rename always wins and this never overwrites it (checkable via SessionStore.session_name,
+        no new flag needed).
+
+        Silently does nothing — never raises, never blocks, never logs above debug — when: there's
+        no chat model configured at all (see _aux_model_configured; THE acceptance requirement for
+        this feature), the aux call raises or times out, or the model returns empty/whitespace (the
+        signature of a reasoning model left with thinking ON — see the think=False note below). Any
+        of those simply leaves the id-name in place."""
+        if _is_ephemeral(session_id):
+            return None
+        current = self.store.session_name(session_id)
+        if current is None or current != session_id:
+            return None                        # no row yet, or already given a real name — skip
+        if not self._aux_model_configured():
+            return None                        # no model configured at all -> silent skip
+        try:
+            conv = self.store.conversation(session_id)
+        except Exception:
+            return None
+        convo = "\n".join(f"{m.get('role')}: {m.get('content')}" for m in conv[:6] if m.get("content"))
+        if not convo.strip():
+            return None
+        try:
+            # think=False: like every other non-main-loop model call (compact, autoextract, the
+            # reasoning router), this MUST disable thinking — a reasoning model otherwise spends its
+            # whole max_tokens budget on the hidden reasoning pass and returns empty content.
+            resp = await self._aux_model_client().chat(
+                [{"role": "system", "content": AUTO_TITLE_PROMPT},
+                 {"role": "user", "content": convo[:2000]}],
+                max_tokens=40, think=False)
+            title = _sanitize_title(resp.content)
+        except Exception:
+            log.debug("auto_title_session failed", exc_info=True)
+            return None
+        if not title:
+            return None                        # empty/whitespace response -> leave id-name in place
+        self.store.rename_session(session_id, title)
+        return title
 
     # ---- context usage + compaction ----
     async def usage(self, session_id: str) -> dict:
