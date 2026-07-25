@@ -35,13 +35,13 @@ def render_skill_markdown(name: str, description: str, tools: list[str], procedu
     (a JSON double-quoted string parses as a valid YAML double-quoted scalar). `tools`
     are identifiers, so they stay an inline flow list.
 
-    Caveat: json.dumps escapes non-BMP characters (e.g. emoji) as surrogate pairs,
-    which yaml.safe_load reads back as lone surrogate code points rather than the
-    original char. Pre-existing and shared with the _yaml_safe_line pre-pass; BMP text
-    (the common case) round-trips exactly.
+    Note: json.dumps(..., ensure_ascii=False) emits non-BMP characters (e.g. emoji)
+    literally rather than escaping them as surrogate-pair \\uXXXX sequences, so they
+    round-trip exactly through yaml.safe_load. Shared with the _yaml_safe_line pre-pass.
     """
     tools_line = "[" + ", ".join(tools) + "]"
-    return (f"---\nname: {json.dumps(name)}\ndescription: {json.dumps(description)}\n"
+    return (f"---\nname: {json.dumps(name, ensure_ascii=False)}\n"
+            f"description: {json.dumps(description, ensure_ascii=False)}\n"
             f"tools: {tools_line}\n---\n"
             f"{procedure.strip()}\n")
 

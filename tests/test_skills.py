@@ -68,6 +68,18 @@ def test_parse_frontmatter_unquoted_value_with_colon_still_works():
     assert meta["tools"] == ["calculator"]
 
 
+def test_parse_frontmatter_unquoted_value_with_emoji_roundtrips():
+    # An unquoted description containing emoji (non-BMP chars) must round-trip
+    # unchanged through the _yaml_safe_line pre-pass (json.dumps ensure_ascii=False).
+    meta, body = parse_frontmatter(
+        "---\nname: emoji-test\n"
+        "description: plan a trip 🌍🚀 with emoji\n"
+        "tools: [calculator]\n---\nDo it.\n")
+    assert meta["description"] == "plan a trip 🌍🚀 with emoji"
+    assert meta["tools"] == ["calculator"]
+    assert body == "Do it."
+
+
 def test_parse_frontmatter_block_scalar_description():
     # A `description: |` block scalar is the natural YAML way to write a long,
     # multi-line description. The pre-quoting pass must leave the `|` indicator line

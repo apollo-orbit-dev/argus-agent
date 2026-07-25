@@ -111,7 +111,7 @@ def _yaml_safe_line(line: str) -> str:
         return line  # already quoted
     if val[0] in "|>":
         return line  # block scalar indicator — value is on following indented lines
-    return f"{key}: {json.dumps(val)}"
+    return f"{key}: {json.dumps(val, ensure_ascii=False)}"
 
 
 def _coerce_str_list(val) -> list:

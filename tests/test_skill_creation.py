@@ -32,6 +32,17 @@ def test_render_markdown_roundtrips():
     assert meta["name"] == "t" and meta["tools"] == ["calculator"] and body == "1. Do it."
 
 
+def test_render_markdown_roundtrips_emoji():
+    name = "trip planner 🌍🚀"
+    description = "plans a trip 🧳 with emoji 🎉"
+    md = render_skill_markdown(name, description, ["calculator"], "1. Do it.")
+    from engine.skills.base import parse_frontmatter
+    meta, body = parse_frontmatter(md)
+    assert meta["name"] == name
+    assert meta["description"] == description
+    assert body == "1. Do it."
+
+
 def test_render_markdown_quotes_colons_and_quotes_at_write_time():
     """name/description containing colons and a quote char must round-trip exactly,
     AND the emitted frontmatter must be valid YAML on its own (no pre-pass needed)."""
