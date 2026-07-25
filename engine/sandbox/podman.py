@@ -12,10 +12,14 @@ import shutil
 import subprocess
 import time
 
-from engine.sandbox.runtime import ExecResult, SandboxUnavailable, validate_workspace
+from engine.sandbox.runtime import ExecResult, SandboxUnavailable, validate_instance, validate_workspace
 
 log = logging.getLogger("argus.sandbox")
 
+# Legacy/unnamespaced container prefix, kept as documentation of the pre-namespacing name. Nothing
+# reads it any more: every call site goes through self.name_prefix, which __init__ derives (and which
+# is byte-identical to this when sandbox_instance is ""). The class constants NETWORK_NAME/EGRESS_NAME
+# below are the ones that still serve class-level access; this global is not.
 _NAME_PREFIX = "argus-ws-"
 
 # available() is called on the hot per-turn path (Engine.run_task's fail-closed gate) plus every
@@ -65,7 +69,7 @@ class PodmanRuntime:
     def __init__(self, binary: str = "podman", image: str = "argus-sandbox:local",
                  workspaces_root: str = "data/workspaces", memory: str = "2g",
                  pids_limit: int = 256, cpus: str = "2", idle_minutes: int = 30,
-                 sweep_interval_s: float = 60.0, network_mode: str = "proxy"):
+                 sweep_interval_s: float = 60.0, network_mode: str = "proxy", instance: str = ""):
         self.binary = binary
         self.image = image
         self.workspaces_root = os.path.abspath(workspaces_root)
@@ -73,6 +77,24 @@ class PodmanRuntime:
         self.memory = memory
         self.pids_limit = pids_limit
         self.cpus = cpus
+        # Podman object names (container/network) are GLOBAL per OS user — instance namespaces all
+        # three so two same-user Argus instances (e.g. a daily one and a dev one) don't collide on
+        # them. "" (default) reproduces today's names byte-identical: name_prefix == _NAME_PREFIX,
+        # NETWORK_NAME/EGRESS_NAME == the class defaults above. Infix, not suffix, so the "argus-"
+        # prefix operators grep/`podman ps` for stays intact and the instance lives in one place.
+        self.instance = validate_instance(instance)
+        _ns = f"{self.instance}-" if self.instance else ""
+        self.name_prefix = f"argus-{_ns}ws-"
+        self.NETWORK_NAME = f"argus-{_ns}internal"
+        self.EGRESS_NAME = f"argus-{_ns}egress"
+        if self.instance:
+            log.info(
+                "sandbox: instance=%r — using namespaced podman objects %s*, %s, %s. Objects under "
+                "the unnamespaced legacy names (argus-ws-<workspace>, argus-egress, argus-internal) "
+                "are NOT managed by this process; if they are orphaned from a previous run, remove "
+                "them manually with `podman rm -f argus-ws-<ws> argus-egress && "
+                "podman network rm argus-internal`.",
+                self.instance, self.name_prefix, self.EGRESS_NAME, self.NETWORK_NAME)
         self._last_exec: dict[str, float] = {}
         self._avail_cache: "tuple[float, bool] | None" = None
         self._cgroup_cache: "tuple[float, frozenset[str]] | None" = None
@@ -87,7 +109,7 @@ class PodmanRuntime:
     # ---------------- naming & paths ----------------
 
     def container_name(self, name: str) -> str:
-        return _NAME_PREFIX + validate_workspace(name)
+        return self.name_prefix + validate_workspace(name)
 
     def workspace_dir(self, name: str) -> str:
         return os.path.join(self.workspaces_root, validate_workspace(name))
@@ -300,8 +322,8 @@ class PodmanRuntime:
         ok = self._run([self.binary, "info"], timeout=15)
         img = self._run([self.binary, "image", "exists", self.image], timeout=15)
         ps = self._run([self.binary, "ps", "--format", "{{.Names}}"], timeout=15)
-        running = [n[len(_NAME_PREFIX):] for n in ps.stdout.split()
-                   if n.startswith(_NAME_PREFIX)]
+        running = [n[len(self.name_prefix):] for n in ps.stdout.split()
+                   if n.startswith(self.name_prefix)]
         # Same fields ensure_workspace's argv would actually use — so /sandbox/status (and the
         # dashboard's Sandbox card) show the operator exactly which caps this host cannot enforce,
         # rather than let a dropped --memory/--cpus/--pids-limit pass unnoticed (see _resource_caps).

@@ -27,6 +27,11 @@ def sandbox_supported() -> bool:
 # rejected here so it can never reach either.
 WORKSPACE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 
+# sandbox_instance is interpolated into podman object names (container/network) that reach a podman
+# argv, same reasoning as WORKSPACE_RE. "" (the default, meaning "not namespaced") is handled by the
+# caller, not this regex — validate_instance below passes "" straight through.
+INSTANCE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,15}$")
+
 
 class SandboxUnavailable(RuntimeError):
     """The container runtime is not usable. Callers turn this into a tool-level message."""
@@ -38,6 +43,19 @@ def validate_workspace(name: str) -> str:
             f"invalid workspace name {name!r}: use lowercase letters, digits, '-' and '_', "
             "starting with a letter or digit, 32 characters max")
     return name
+
+
+def validate_instance(instance: str) -> str:
+    """"" (the default, meaning "not namespaced") always passes through unchanged. Anything else
+    must match INSTANCE_RE. This is belt-and-braces alongside the pydantic pattern on
+    Config.sandbox_instance — PodmanRuntime is constructed directly in tests, bypassing Config."""
+    if instance == "":
+        return instance
+    if not isinstance(instance, str) or not INSTANCE_RE.match(instance):
+        raise ValueError(
+            f"invalid sandbox instance {instance!r}: use lowercase letters, digits, '-' and '_', "
+            "starting with a letter or digit, 16 characters max, or '' to disable")
+    return instance
 
 
 @dataclass

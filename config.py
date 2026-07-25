@@ -34,6 +34,11 @@ SandboxNetwork = Literal["proxy", "lan", "none"]
 # so it cannot start with '-' (podman would read that as a flag) and cannot contain whitespace or
 # shell metacharacters.
 _SANDBOX_IMAGE_RE = r"^[a-z0-9][a-z0-9._/-]*(?::[A-Za-z0-9._-]+)?$"
+# sandbox_instance is interpolated into podman object names that reach a podman argv. Defence in
+# depth: PATCH /config IS admin-gated (backend/app.py), but the schema rejects anything readable as
+# a flag or metacharacter regardless of who can set it — the value also arrives from .env and from
+# direct construction in tests. "" = disabled (legacy names).
+_SANDBOX_INSTANCE_RE = r"^$|^[a-z0-9][a-z0-9_-]{0,15}$"
 # "global": one shared memory bank keyed on memory_user_id, so facts follow the
 # person across every interface (dashboard, Telegram). "session": legacy per-session
 # isolation — each conversation (each Telegram chat, the dashboard) has its own memory.
@@ -126,6 +131,11 @@ class Config(BaseSettings):
     # "none": airgapped.
     sandbox_network: SandboxNetwork = "proxy"
     sandbox_workspace: str = "default"        # workspace for sessions with no profile
+    # Podman object names are GLOBAL per OS user. Two Argus instances as the same user (a daily one
+    # and a dev one on different ports) otherwise collide on argus-ws-<workspace>/argus-egress/
+    # argus-internal — and instance A's startup reap stops instance B's containers. Set this on the
+    # SECOND instance to namespace all three. Default "" keeps today's names byte-identical.
+    sandbox_instance: str = Field("", pattern=_SANDBOX_INSTANCE_RE)
     sandbox_idle_minutes: int = Field(30, ge=1)
     sandbox_exec_timeout: float = Field(120.0, gt=0)
     # Approval-gated dependency installs: when a created tool needs a non-stdlib import,
@@ -300,7 +310,7 @@ class Config(BaseSettings):
         "enable_tool_creation", "tool_creation_allow_network", "created_tool_timeout",
         "enable_code_interpreter", "code_interpreter_timeout", "code_interpreter_allow_network",
         "enable_sandbox", "sandbox_runtime", "sandbox_image", "sandbox_network", "sandbox_workspace",
-        "sandbox_idle_minutes", "sandbox_exec_timeout",
+        "sandbox_instance", "sandbox_idle_minutes", "sandbox_exec_timeout",
         "enable_dep_approval", "tool_secret_names", "enable_trusted_tools", "enable_action_verify",
         "adaptive_thinking",
         "enable_skill_creation", "enable_soul_editing", "enable_datastore", "enable_tables",
