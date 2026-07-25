@@ -38,6 +38,43 @@ async def test_run_and_capture_records_error_not_raise():
     assert r["error"] is not None and r["tools"] == [] and r["final"] == ""
 
 
+async def test_run_and_capture_collects_observer_issues():
+    """The benchmark scores `no_observer` off this key. When it was never collected, the predicate
+    saw an empty set and passed VACUOUSLY — a battery could assert 'the loop never gave up' and be
+    told it was true on a turn the loop killed. Ordered, one entry per firing."""
+    evs = [_Ev("tool_call", {"tool": "web_search", "args": {"query": "x"}}),
+           _Ev("observer", {"issue": "repeat_nudge", "tool": "web_search"}),
+           _Ev("observer", {"issue": "stuck_repeating", "tool": "web_search"}),
+           _Ev("observer", {}),                     # malformed / no issue -> ignored
+           _Ev("final", {"answer": "gave up"})]
+    r = await run_and_capture(_FakeEngine(evs), "s", "p", timeout=5)
+    assert r["observer"] == ["repeat_nudge", "stuck_repeating"]
+
+
+async def test_run_and_capture_reports_observer_key_even_when_nothing_fired():
+    """Always present, so `no_observer` distinguishes 'clean run' from 'never recorded'."""
+    r = await run_and_capture(_FakeEngine([_Ev("tool_call", {"tool": "calculator"})]), "s", "p", timeout=5)
+    assert r["observer"] == []
+
+
+async def test_captured_run_feeds_no_observer_scoring():
+    """Guards the SEAM, not either side of it. capture and score_case were each individually
+    correct while the pipeline between them was broken: capture never emitted `observer`, so
+    `no_observer` scored every benchmark run vacuously. Both unit suites stayed green throughout.
+    """
+    from engine.eval.scoring import score_case
+
+    killed = await run_and_capture(_FakeEngine(
+        [_Ev("tool_call", {"tool": "web_search"}),
+         _Ev("observer", {"issue": "stuck_repeating", "tool": "web_search"})]), "s", "p", timeout=5)
+    verdict = score_case({"no_observer": ["stuck_repeating"]}, killed)
+    assert verdict["chain_correct"] is False          # would be True under the old vacuous pass
+    assert "stuck_repeating" in verdict["reasons"][0]
+
+    clean = await run_and_capture(_FakeEngine([_Ev("tool_call", {"tool": "web_search"})]), "s", "p", timeout=5)
+    assert score_case({"no_observer": ["stuck_repeating"]}, clean)["chain_correct"] is True
+
+
 def test_make_judge_backend_selection():
     assert make_judge(None) is None
     assert callable(make_judge("claude:opus"))     # CLI backend

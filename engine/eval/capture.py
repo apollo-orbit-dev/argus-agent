@@ -9,8 +9,14 @@ import asyncio
 async def run_and_capture(engine, session: str, prompt: str, timeout: float = 120.0) -> dict:
     """Subscribe to the engine's event stream, run the turn, and return what happened:
     {"tools": [ordered tool names], "create_table_args": [args of each create_table call],
-     "final": <final answer, truncated>, "error": <str|None>}. Never raises — a timeout or crash
-     is recorded as an error cell so a sweep keeps going."""
+     "observer": [ordered observer issue names], "final": <final answer, truncated>,
+     "error": <str|None>}. Never raises — a timeout or crash is recorded as an error cell so a
+     sweep keeps going.
+
+    `observer` is always present (empty when nothing fired). scoring.score_case's `no_observer`
+    predicate reads this key and treats a MISSING one as clean, so omitting it made that predicate
+    pass vacuously for every benchmark run — a battery could assert "the loop never gave up" and be
+    told it held on a turn the loop actually killed."""
     events: list = []
 
     async def collect():
@@ -30,12 +36,16 @@ async def run_and_capture(engine, session: str, prompt: str, timeout: float = 12
     await asyncio.sleep(0.1)                       # drain buffered events before cancelling the collector
     task.cancel()
 
-    tools, ct_args = [], []
+    tools, ct_args, obs = [], [], []
     for ev in events:
         data = getattr(ev, "data", {}) or {}
         if ev.kind == "tool_call" and data.get("tool"):
             tools.append(data["tool"])
             if data["tool"] == "create_table":
                 ct_args.append(data.get("args"))
-    return {"tools": tools, "create_table_args": ct_args,
+        # observer issues are the proximate effect of a loop-level intervention: a turn killed by
+        # `stuck_repeating` is a turn the loop gave up on, not one the model failed on its merits.
+        elif ev.kind == "observer" and data.get("issue"):
+            obs.append(data["issue"])
+    return {"tools": tools, "create_table_args": ct_args, "observer": obs,
             "final": (final or "")[:2000], "error": err}
