@@ -32,6 +32,32 @@ def test_render_markdown_roundtrips():
     assert meta["name"] == "t" and meta["tools"] == ["calculator"] and body == "1. Do it."
 
 
+def test_render_markdown_quotes_colons_and_quotes_at_write_time():
+    """name/description containing colons and a quote char must round-trip exactly,
+    AND the emitted frontmatter must be valid YAML on its own (no pre-pass needed)."""
+    name = 'weird: name "with" quote'
+    description = 'how "concise": be brief'
+    md = render_skill_markdown(name, description, ["calculator"], "1. Do it.")
+
+    from engine.skills.base import parse_frontmatter
+    meta, body = parse_frontmatter(md)
+    assert meta["name"] == name
+    assert meta["description"] == description
+    assert meta["tools"] == ["calculator"]
+    assert body == "1. Do it."
+
+    # Prove the frontmatter is self-valid YAML: parse it with bare yaml.safe_load,
+    # with NO _yaml_safe_line pre-pass involved.
+    import yaml
+    lines = md.splitlines()
+    end = next(i for i in range(1, len(lines)) if lines[i].strip() == "---")
+    block = "\n".join(lines[1:end])
+    raw_meta = yaml.safe_load(block)
+    assert raw_meta["name"] == name
+    assert raw_meta["description"] == description
+    assert raw_meta["tools"] == ["calculator"]
+
+
 def test_create_skill_registers_and_writes(tmp_path):
     ct, sk = _make(tmp_path)
     out = asyncio.run(ct.run(ct.Params(
