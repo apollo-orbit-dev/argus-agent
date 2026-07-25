@@ -27,6 +27,10 @@ log = logging.getLogger(__name__)
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _TYPES = {"text": "TEXT", "string": "TEXT", "str": "TEXT", "integer": "INTEGER", "int": "INTEGER",
           "real": "REAL", "number": "REAL", "float": "REAL", "date": "TEXT",
+          # numeric aliases -> REAL/INTEGER affinity so these behave like real/integer, not the TEXT
+          # fallback (a declared-numeric column must be summable; only a model-declared TEXT column
+          # is the accepted risk for the text-aggregate guard below).
+          "numeric": "REAL", "decimal": "REAL", "double": "REAL", "money": "REAL", "bigint": "INTEGER",
           # A list/nested value: stored as JSON text (insert coerces a list/dict automatically) and
           # queryable with json_extract()/json_each(). Aliases so a schema can self-document the intent.
           "json": "TEXT", "list": "TEXT", "array": "TEXT", "object": "TEXT"}
@@ -39,10 +43,12 @@ _MAX_ROWS = 500
 # valid query is not.
 _AGG_FNS = ("sum", "avg", "total")   # COUNT/MIN/MAX over text are legitimate; not guarded
 _AGG_RE = re.compile(
-    r"\b(sum|avg|total)\s*\(\s*(?:distinct\s+)?(?:([A-Za-z_]\w*)\s*\.\s*)?([A-Za-z_]\w*)\s*\)", re.I)
+    r"\b(" + "|".join(_AGG_FNS) + r")\s*\(\s*(?:distinct\s+)?(?:([A-Za-z_]\w*)\s*\.\s*)?([A-Za-z_]\w*)\s*\)",
+    re.I)
 _FROM_RE = re.compile(r"\b(?:from|join)\s+([A-Za-z_]\w*)", re.I)
 _SUBQ_RE = re.compile(r"\b(?:from|join)\s*\(", re.I)
 _STRLIT_RE = re.compile(r"'[^']*'")  # blank literals first so 'SUM(notes)' as DATA can't match
+_COMMENT_RE = re.compile(r"--[^\n]*|/\*.*?\*/", re.S)  # scrub AFTER literals: a -- inside a string isn't a comment
 
 
 class TableError(Exception):
@@ -314,9 +320,11 @@ class TableStore:
         low = s.lstrip().lower()
         if low.startswith("with"):
             return  # CTE: column provenance not statically resolvable here — pass through
-        if _SUBQ_RE.search(s):
+        # blank string literals first (so a -- or /* inside a string isn't mistaken for a comment,
+        # and 'SUM(notes)' as DATA can't match), THEN scrub comments — order matters both ways.
+        scrubbed = _COMMENT_RE.sub(" ", _STRLIT_RE.sub("''", s))
+        if _SUBQ_RE.search(scrubbed):
             return  # derived table (FROM/JOIN a subquery) — same reasoning
-        scrubbed = _STRLIT_RE.sub("''", s)  # blank string literals first so 'SUM(notes)' as DATA can't match
         matches = list(_AGG_RE.finditer(scrubbed))
         if not matches:
             return

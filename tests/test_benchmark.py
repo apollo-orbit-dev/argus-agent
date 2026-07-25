@@ -163,6 +163,14 @@ def test_task_verdict_abort_rate_is_fraction_of_k():
     assert v["abort_rate"] == 0.0    # measured clean, distinct from None (no data)
 
 
+def test_task_verdict_abort_rate_observer_only_fallback():
+    # no "aborted" key at all -- must fall back to deriving it from "observer" (benchmark.py:66-67)
+    runs = [{"chain_correct": True, "judge_score": 3, "observer": ["stuck_repeating"]},
+            {"chain_correct": True, "judge_score": 3, "observer": []},
+            {"chain_correct": True, "judge_score": 3, "observer": []}]
+    assert task_verdict(runs, 3)["abort_rate"] == 1 / 3
+
+
 def test_abort_rate_none_when_no_observer_data():
     # legacy-shaped runs: no "observer" and no "aborted" key at all
     runs = [{"chain_correct": True, "judge_score": 3}] * 3
@@ -236,12 +244,25 @@ def test_render_report_has_abort_column():
     assert "abort" in header
     body_lines = [l for l in md.splitlines()[6:] if l.startswith("|")]
     assert body_lines, "expected at least one result row"
-    for line in body_lines:
+    # render_report emits one row per result, in the same params-sorted order _load_results/render_report
+    # use internally -- zip them up so we can tell which rows are legacy (no observer data ever
+    # recorded) vs. a future post-argus-92a result, and only apply the strict —/n/a assertion to the
+    # legacy ones. Asserting it for EVERY row is a time bomb: it breaks the moment a real abort-rate
+    # result (a genuine percentage, not — or n/a) is committed to benchmark/results/.
+    results = [r for r in B._load_results() if r.get("battery_version") == "cap-1"]
+    results.sort(key=lambda r: r.get("params", 0))
+    assert len(body_lines) == len(results)
+    for line, r in zip(body_lines, results):
         cells = [c.strip() for c in line.split("|")]
         # abort is the 7th cell: | model | params | mode | scaffold | max_tok | solved | abort | ...
         abort_cell = cells[7]
-        assert abort_cell != "0%", f"legacy row must not show a fabricated 0%: {line}"
-        assert abort_cell in ("—", "n/a"), f"legacy row should render — or n/a, got {abort_cell!r}: {line}"
+        has_observer_data = r.get("scaffold") != "off" and any(
+            "aborted" in run or "observer" in run
+            for t in r.get("tasks", []) for run in t.get("runs", []))
+        assert abort_cell != "0%" or has_observer_data, \
+            f"legacy row must not show a fabricated 0%: {line}"
+        if not has_observer_data:
+            assert abort_cell in ("—", "n/a"), f"legacy row should render — or n/a, got {abort_cell!r}: {line}"
 
 
 def test_build_series_metric_solved():
