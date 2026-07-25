@@ -8,7 +8,8 @@
 
 $ErrorActionPreference = "Stop"
 $RepoUrl = "https://github.com/apollo-orbit-dev/argus-agent"
-$DirName = "argus"
+$DefaultDirName = "argus"
+$DirName = $DefaultDirName
 
 function Info($m) { Write-Host "  $m" }
 function Ok($m)   { Write-Host "  [OK] $m" -ForegroundColor Green }
@@ -41,6 +42,40 @@ Ok "git found"
 if ((Test-Path "main.py") -and (Test-Path "pyproject.toml")) {
     Info "Already inside an Argus checkout - skipping clone."
 } else {
+    # Install folder name - Enter keeps the default "argus". Prompting here makes running a
+    # second Argus instance (e.g. a daily one and a dev one) next to the first easy: each
+    # install picks its own folder.
+    $attempts = 0
+    $maxAttempts = 5
+    while ($true) {
+        if ($attempts -eq 0) { $reply = Read-Host "  Install folder name [$DefaultDirName]" }
+        else { $reply = Read-Host "  Install folder name (or press Enter/q to cancel)" }
+
+        # Empty/q only means "cancel" once we're re-prompting after a collision - on the very
+        # first ask it just means "keep the default", same as the port prompt.
+        if ($attempts -gt 0 -and ([string]::IsNullOrEmpty($reply) -or $reply -eq "q")) { Fail "Install cancelled." }
+
+        $candidate = $DefaultDirName
+        if ($reply) {
+            if ($reply -match '^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$') { $candidate = $reply }
+            else { Warn "'$reply' is not a valid folder name - using $DefaultDirName" }
+        }
+
+        # Refuse to clobber an existing install. That directory may hold the operator's .env
+        # (API keys) and data/ (sessions, tables, memory) - overwriting or half-upgrading it is
+        # real data loss, and the whole point of this prompt is installing a second instance
+        # NEXT TO a first one, not into it. Re-prompt for a different name rather than aborting
+        # outright - bounded, so it can't spin forever.
+        if ((Test-Path $candidate) -and ((Test-Path (Join-Path $candidate ".env")) -or (Test-Path (Join-Path $candidate "data") -PathType Container))) {
+            Warn "$(Join-Path (Get-Location).Path $candidate) already looks like an existing Argus install (found .env or data/) - it will not be touched."
+            $attempts++
+            if ($attempts -ge $maxAttempts) { Fail "Too many attempts choosing a folder name - re-run and pick one that isn't an existing install." }
+            continue
+        }
+        $DirName = $candidate
+        break
+    }
+
     if (Test-Path $DirName) { Warn "./$DirName already exists - using it instead of cloning again." }
     else {
         Info "Cloning $RepoUrl ..."; git clone $RepoUrl $DirName; Ok "cloned into ./$DirName"
@@ -49,6 +84,9 @@ if ((Test-Path "main.py") -and (Test-Path "pyproject.toml")) {
         if ($LatestTag) { git -C $DirName -c advice.detachedHead=false checkout -q $LatestTag; Ok "checked out latest release $LatestTag" }
     }
     Set-Location $DirName
+    if ($DirName -ne $DefaultDirName) {
+        Info "Using a non-default folder name - if you enable the sandbox, also set SANDBOX_INSTANCE in .env so this instance gets its own podman namespace."
+    }
 }
 $ProjectDir = (Get-Location).Path
 

@@ -11,7 +11,8 @@
 set -e
 
 REPO_URL="https://github.com/apollo-orbit-dev/argus-agent"
-DIR_NAME="argus"
+DEFAULT_DIR_NAME="argus"
+DIR_NAME="$DEFAULT_DIR_NAME"
 
 info()  { printf '  %s\n' "$1"; }
 ok()    { printf '  \033[32m✓\033[0m %s\n' "$1"; }
@@ -47,6 +48,63 @@ if [ -f "main.py" ] && [ -f "pyproject.toml" ]; then
     info "Already inside an Argus checkout — skipping clone."
     PROJECT_DIR="$(pwd)"
 else
+    # Install folder name — Enter keeps the default "argus". Prompting here makes running
+    # a second Argus instance (e.g. a daily one and a dev one) next to the first easy: each
+    # install picks its own folder. Read from /dev/tty so it works even when the script is
+    # piped in (curl ... | bash); falls back to the default with no terminal (non-interactive
+    # install).
+    if [ -r /dev/tty ]; then
+        ATTEMPTS=0
+        MAX_ATTEMPTS=5
+        while :; do
+            if [ "$ATTEMPTS" -eq 0 ]; then
+                printf '  Install folder name [%s]: ' "$DEFAULT_DIR_NAME" > /dev/tty
+            else
+                printf '  Install folder name (or press Enter/Ctrl-D/q to cancel): ' > /dev/tty
+            fi
+            read -r REPLY_DIR < /dev/tty || REPLY_DIR=""
+
+            # Empty/q/Ctrl-D only means "cancel" once we're re-prompting after a collision —
+            # on the very first ask it just means "keep the default", same as the port prompt.
+            if [ "$ATTEMPTS" -gt 0 ] && { [ -z "$REPLY_DIR" ] || [ "$REPLY_DIR" = "q" ]; }; then
+                fail "Install cancelled."
+            fi
+
+            CANDIDATE="$DEFAULT_DIR_NAME"
+            if [ -n "$REPLY_DIR" ]; then
+                if printf '%s' "$REPLY_DIR" | grep -qE '^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$'; then
+                    CANDIDATE="$REPLY_DIR"
+                else
+                    warn "'$REPLY_DIR' is not a valid folder name — using $DEFAULT_DIR_NAME"
+                fi
+            fi
+
+            # Refuse to clobber an existing install. That directory may hold the operator's
+            # .env (API keys) and data/ (sessions, tables, memory) — overwriting or
+            # half-upgrading it is real data loss, and the whole point of this prompt is
+            # installing a second instance NEXT TO a first one, not into it. Re-prompt for a
+            # different name rather than aborting outright — bounded, so it can't spin forever.
+            if [ -d "$CANDIDATE" ] && { [ -e "$CANDIDATE/.env" ] || [ -d "$CANDIDATE/data" ]; }; then
+                warn "$(pwd)/$CANDIDATE already looks like an existing Argus install (found .env or data/) — it will not be touched."
+                ATTEMPTS=$((ATTEMPTS + 1))
+                if [ "$ATTEMPTS" -ge "$MAX_ATTEMPTS" ]; then
+                    fail "Too many attempts choosing a folder name — re-run and pick one that isn't an existing install."
+                fi
+                continue
+            fi
+            DIR_NAME="$CANDIDATE"
+            break
+        done
+    else
+        # No terminal to prompt (e.g. curl ... | bash) — keep the default name, but still
+        # refuse to touch an existing install. There is nobody to re-prompt on a piped /
+        # non-interactive install, so on a collision we exit here rather than loop — do NOT
+        # turn this into an interactive retry, it would hang forever with no tty to read from.
+        if [ -d "$DIR_NAME" ] && { [ -e "$DIR_NAME/.env" ] || [ -d "$DIR_NAME/data" ]; }; then
+            fail "$(pwd)/$DIR_NAME already looks like an existing Argus install (found .env or data/). Re-run interactively (not piped) and pick a different folder name."
+        fi
+    fi
+
     if [ -d "$DIR_NAME" ]; then
         warn "./$DIR_NAME already exists — using it instead of cloning again."
     else
@@ -62,6 +120,9 @@ else
     fi
     cd "$DIR_NAME"
     PROJECT_DIR="$(pwd)"
+    if [ "$DIR_NAME" != "$DEFAULT_DIR_NAME" ]; then
+        info "Using a non-default folder name — if you enable the sandbox, also set SANDBOX_INSTANCE in .env so this instance gets its own podman namespace."
+    fi
 fi
 
 # --- virtualenv ---------------------------------------------------------------
