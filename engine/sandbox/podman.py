@@ -524,7 +524,9 @@ class PodmanRuntime:
                     f"workspace ({expected!r}). Podman object names are global per OS user, so this "
                     "container most likely belongs to a different Argus instance running as the "
                     "same OS user. Set SANDBOX_INSTANCE in THIS instance's .env so it gets its own "
-                    "namespaced podman objects, then retry.")
+                    "namespaced podman objects, then retry. Or, if this container is a stale "
+                    "leftover from this instance's own earlier workspace directory, remove it: "
+                    f"podman rm -f {cname}")
             if not self._container_network_matches_mode(cname):
                 # Recreating is safe: these containers are stateless, the bind-mounted workspace
                 # holds all state, and the create path right below already handles "the container

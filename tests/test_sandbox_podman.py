@@ -603,8 +603,48 @@ def test_ensure_workspace_refuses_to_adopt_a_container_with_a_foreign_mount(tmp_
         rt.ensure_workspace("default")
     msg = str(exc_info.value)
     assert "SANDBOX_INSTANCE" in msg
-    assert expected in msg
-    assert foreign_mount in msg
+    # realpath both sides: the message is built from os.path.realpath()'d values, and tmp_path's
+    # prefix can itself be a symlink (e.g. macOS /tmp -> /private/tmp) — comparing raw strings would
+    # spuriously fail there even though the guard behaved correctly.
+    assert os.path.realpath(expected) in msg
+    assert os.path.realpath(foreign_mount) in msg
+    subcommands = [c[1] for c in calls]
+    assert "rm" not in subcommands, "a foreign container must never be removed, only refused"
+    assert "run" not in subcommands
+
+
+def test_foreign_mount_refuses_even_when_the_network_also_mismatches(tmp_path):
+    """Pins the ORDERING invariant, not just the outcome. The test above uses the default
+    `networks_json='{"argus-internal":{}}'`, which MATCHES proxy mode's expected network — so the
+    network-mismatch branch never fires there, and that test would keep passing even if someone
+    moved the mount check to AFTER the network check (the mount check would still be the only thing
+    reached, by accident of the fixture data, not because the ordering is actually enforced).
+
+    Here the container is BOTH foreign-mounted AND network-mismatched ('podman'-shaped vs. proxy's
+    'argus-internal'). If the mount check ever gets reordered to run after the network-mismatch
+    branch, the network branch fires first and `rm -f`s what may be a live sibling instance's
+    container before the mount check ever gets a chance to refuse — silently destroying it instead
+    of raising. This is the only test that catches that reordering.
+
+    THIS TEST WAS VERIFIED NON-VACUOUS: temporarily moving the mount check below the
+    network-mismatch branch in `ensure_workspace` made this test fail (a bare `rm -f` fired and no
+    SandboxUnavailable was raised) while the test above kept passing — confirming the gap this test
+    closes. The correct ordering was restored afterward."""
+    rt = PodmanRuntime(workspaces_root=str(tmp_path), network_mode="proxy")
+    rt._egress_cache = (time.time(), True, "")   # not under test here
+    expected = rt.workspace_dir("default")
+    foreign_mount = os.path.join(str(tmp_path), "some-other-instance-workspaces", "default")
+    assert foreign_mount != expected
+    calls = []
+    rt._run = _workspace_fake_run(calls, state="running",
+                                   networks_json='{"podman":{}}',   # lan-shaped: MISMATCHES proxy
+                                   mount_source=foreign_mount)
+    with pytest.raises(SandboxUnavailable) as exc_info:
+        rt.ensure_workspace("default")
+    msg = str(exc_info.value)
+    assert "SANDBOX_INSTANCE" in msg
+    assert os.path.realpath(expected) in msg
+    assert os.path.realpath(foreign_mount) in msg
     subcommands = [c[1] for c in calls]
     assert "rm" not in subcommands, "a foreign container must never be removed, only refused"
     assert "run" not in subcommands
