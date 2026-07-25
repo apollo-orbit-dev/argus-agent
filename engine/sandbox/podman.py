@@ -182,6 +182,22 @@ class PodmanRuntime:
         check (finding 1): both need "what is this container REALLY on", not what we assume."""
         return [self.binary, "inspect", "-f", "{{json .NetworkSettings.Networks}}", cname]
 
+    def _mount_source_argv(self, cname: str) -> list[str]:
+        """Introspect the HOST-side source of `cname`'s `/home/argus` bind mount — the authoritative
+        answer to "whose workspace is this container actually reading and writing", as opposed to
+        what we assume from the name alone.
+
+        Podman object names are GLOBAL per OS user, so two same-user Argus instances that forgot to
+        set SANDBOX_INSTANCE can compute the byte-identical container name. `ensure_workspace`'s
+        adopt-by-name path used to stop at "does a container with this name exist and is its network
+        right" — it never checked whether the bind mount baked in at that container's CREATE time
+        (`_run_argv`'s `-v {workspace_dir}:/home/argus:Z`) still points at THIS instance's
+        `workspace_dir`. A container can have more than one mount, so this filters to the one whose
+        destination is exactly `/home/argus` rather than taking "the" mount source."""
+        return [self.binary, "inspect", "-f",
+                '{{range .Mounts}}{{if eq .Destination "/home/argus"}}{{.Source}}{{end}}{{end}}',
+                cname]
+
     def _proxy_liveness_argv(self) -> list[str]:
         """A short `podman exec` that opens a TCP connection to 127.0.0.1:PROXY_PORT from INSIDE
         the sidecar — the only way to prove something is actually LISTENING there, as opposed to
@@ -452,6 +468,37 @@ class PodmanRuntime:
             return has_internal
         return not is_empty and not has_internal   # lan
 
+    def _foreign_workspace_mount(self, cname: str, name: str) -> "tuple[str, str] | None":
+        """Detect an EXISTING container named `cname` whose `/home/argus` bind mount points
+        somewhere other than this instance's own `workspace_dir(name)` — the signature of another,
+        same-user Argus instance that never set SANDBOX_INSTANCE, so its podman objects collided
+        with ours (see `_mount_source_argv`). Returns `(expected, actual)` — both `realpath`'d, so a
+        symlinked `workspaces_root` doesn't produce a false positive — on a CONFIRMED mismatch, or
+        `None` when it matches OR when nothing conclusive could be determined.
+
+        Deliberately conservative in the "nothing conclusive" direction: an inspect that fails (older
+        podman, container gone between the state check and here) or reports no mount at that
+        destination (unexpected template output on some podman version) falls through to today's
+        adopt-by-name behavior rather than refusing a healthy single-instance setup. Only a mount
+        source that inspect actually reported, and that differs, is treated as a mismatch — a false
+        positive here would break a working setup, which is worse than the bug this guards against.
+
+        MUST be checked before `_container_network_matches_mode`'s caller `rm -f`s a mismatched
+        container below: that removal is only safe when the container is confirmed to be OUR own
+        (stale network, same workspace) — if a foreign-mount container fell into that branch instead,
+        we would destroy another live instance's container while trying to protect it."""
+        mount = self._run(self._mount_source_argv(cname), timeout=20)
+        if not mount.ok:
+            return None
+        source = (mount.stdout or "").strip()
+        if not source:
+            return None
+        expected = os.path.realpath(self.workspace_dir(name))
+        actual = os.path.realpath(source)
+        if actual == expected:
+            return None
+        return expected, actual
+
     def ensure_workspace(self, name: str) -> None:
         if self.network_mode == "proxy":
             # Best-effort, TTL-cached repair: a startup ensure_egress() failure (podman not ready
@@ -465,6 +512,19 @@ class PodmanRuntime:
         os.makedirs(self.workspace_dir(name), exist_ok=True)
         state = self._run([self.binary, "inspect", "-f", "{{.State.Status}}", cname], timeout=20)
         if state.exit_code == 0:
+            # Checked BEFORE the network-mismatch branch below on purpose (see
+            # `_foreign_workspace_mount`'s docstring): that branch `rm -f`s the container, which is
+            # only safe once we know `cname` is genuinely ours. Refuse-only here, never rm/adopt —
+            # the container may belong to a live sibling instance.
+            foreign = self._foreign_workspace_mount(cname, name)
+            if foreign is not None:
+                expected, actual = foreign
+                raise SandboxUnavailable(
+                    f"{cname} already exists but is mounted from {actual!r}, not this instance's "
+                    f"workspace ({expected!r}). Podman object names are global per OS user, so this "
+                    "container most likely belongs to a different Argus instance running as the "
+                    "same OS user. Set SANDBOX_INSTANCE in THIS instance's .env so it gets its own "
+                    "namespaced podman objects, then retry.")
             if not self._container_network_matches_mode(cname):
                 # Recreating is safe: these containers are stateless, the bind-mounted workspace
                 # holds all state, and the create path right below already handles "the container

@@ -315,9 +315,11 @@ def test_exec_sweeps_idle_workspaces_but_never_the_one_it_just_used(tmp_path):
 
     def fake_run(argv, *, stdin="", timeout=30.0):
         seen.append(argv[1])
-        # ensure_workspace's finding-1 network-mismatch check also shells out as `inspect` (with a
-        # different format string) — not under test here, so hand back a network that matches this
-        # runtime's default `proxy` mode rather than letting it be misread as a mismatch.
+        # ensure_workspace's mount-mismatch and finding-1 network-mismatch checks also shell out as
+        # `inspect` (with different format strings) — neither is under test here, so hand back
+        # "inconclusive"/matching answers rather than letting either be misread as a mismatch.
+        if argv[1] == "inspect" and "Mounts" in argv[3]:
+            return ExecResult(0, "", "")
         if argv[1] == "inspect" and "NetworkSettings" in argv[3]:
             return ExecResult(0, '{"argus-internal":{}}', "")
         return responses[argv[1]]
@@ -338,6 +340,8 @@ def test_exec_does_not_sweep_before_the_sweep_interval_elapses(tmp_path):
     responses = {"inspect": ExecResult(0, "running\n", ""), "exec": ExecResult(0, "", "")}
 
     def fake_run(argv, *, stdin="", timeout=30.0):
+        if argv[1] == "inspect" and "Mounts" in argv[3]:
+            return ExecResult(0, "", "")   # inconclusive — not under test here
         if argv[1] == "inspect" and "NetworkSettings" in argv[3]:
             return ExecResult(0, '{"argus-internal":{}}', "")   # matches default `proxy` mode
         return responses[argv[1]]
@@ -350,15 +354,20 @@ def test_exec_does_not_sweep_before_the_sweep_interval_elapses(tmp_path):
     assert "stale" in rt._last_exec, "the sweep interval hasn't elapsed yet — nothing should fire"
 
 
-def _script_run(responses, *, networks_json='{"argus-internal":{}}'):
+def _script_run(responses, *, networks_json='{"argus-internal":{}}', mount_source=""):
     """Return a fake `_run` that maps the podman subcommand (argv[1]) to a canned ExecResult, so
-    ensure_workspace can be driven without a real podman binary. ensure_workspace now issues TWO
-    different `inspect` calls (container state, then — finding 1 — its real network attachment),
-    both with argv[1] == "inspect" but a different format string (argv[3]); they're disambiguated
-    here the same way `_egress_fake_run` already disambiguates the sidecar's two inspect calls.
-    `networks_json` defaults to a value that matches `proxy` (these tests' default network_mode),
-    so a test that isn't about network-mismatch detection doesn't have to know this call exists."""
+    ensure_workspace can be driven without a real podman binary. ensure_workspace now issues THREE
+    different `inspect` calls (container state, its bind-mount source — the mount-mismatch check
+    this file's tests are about — then, finding 1, its real network attachment), all with
+    argv[1] == "inspect" but a different format string (argv[3]); they're disambiguated here the
+    same way `_egress_fake_run` already disambiguates the sidecar's two inspect calls.
+    `mount_source` defaults to "" (empty stdout == inconclusive == falls through, never refuses) and
+    `networks_json` defaults to a value that matches `proxy` (these tests' default network_mode), so
+    a test that isn't about mount- or network-mismatch detection doesn't have to know either call
+    exists."""
     def fake_run(argv, *, stdin="", timeout=30.0):
+        if argv[1] == "inspect" and "Mounts" in argv[3]:
+            return ExecResult(0, mount_source, "")
         if argv[1] == "inspect" and "NetworkSettings" in argv[3]:
             return ExecResult(0, networks_json, "")
         return responses[argv[1]]
@@ -404,6 +413,8 @@ def test_ensure_workspace_unpauses_rather_than_starts_a_paused_container(tmp_pat
     def fake_run(argv, *, stdin="", timeout=30.0):
         calls.append(argv[1])
         if argv[1] == "inspect":
+            if "Mounts" in argv[3]:
+                return ExecResult(0, "", "")   # empty == inconclusive == not under test here
             if "NetworkSettings" in argv[3]:
                 return ExecResult(0, '{"argus-internal":{}}', "")   # matches default `proxy` mode
             return ExecResult(0, "paused\n", "")
@@ -436,10 +447,14 @@ def test_ensure_workspace_returns_when_start_succeeds_on_an_exited_container(tmp
 # create) rather than silently adopting or resurrecting the stale container.
 # ---------------------------------------------------------------------------------------------
 def _workspace_fake_run(calls, *, state="running", networks_json='{"argus-internal":{}}',
-                         start_ok=True, run_ok=True, rm_ok=True):
+                         start_ok=True, run_ok=True, rm_ok=True, mount_source="", mount_ok=True):
     """Drive ensure_workspace's whole container-adoption state machine without a real podman
-    binary: the `.State.Status` inspect, the `.NetworkSettings.Networks` inspect (this review's
-    finding 1), start/unpause, `rm -f`, and `run` (creation)."""
+    binary: the `.State.Status` inspect, the `/home/argus` mount-source inspect (SANDBOX_INSTANCE
+    collision guard), the `.NetworkSettings.Networks` inspect (this review's finding 1),
+    start/unpause, `rm -f`, and `run` (creation). `mount_source` defaults to "" — an empty-but-ok
+    inspect result, which `_foreign_workspace_mount` treats as inconclusive (falls through, same as
+    before this guard existed) — so tests that aren't about the mount check don't have to know it
+    exists."""
     def fake_run(argv, *, stdin="", timeout=30.0):
         calls.append(list(argv))
         if argv[1] == "info":
@@ -448,6 +463,8 @@ def _workspace_fake_run(calls, *, state="running", networks_json='{"argus-intern
             # it here so this test drives the same state machine regardless of the host.
             return ExecResult(0, "[cpu memory pids]", "")
         if argv[1] == "inspect":
+            if "Mounts" in argv[3]:
+                return ExecResult(0 if mount_ok else 1, mount_source, "" if mount_ok else "no such container")
             if "NetworkSettings" in argv[3]:
                 return ExecResult(0, networks_json, "")
             if state is None:
@@ -545,6 +562,107 @@ def test_ensure_workspace_recreates_in_every_mode_when_the_network_does_not_matc
     rt.ensure_workspace("default")
     subcommands = [c[1] for c in calls]
     assert "rm" in subcommands
+
+
+# ---------------------------------------------------------------------------------------------
+# Guard against podman object-name collisions between two same-user Argus instances: names are
+# GLOBAL per OS user, but the bind mount is baked in at the adopted container's CREATE time. Before
+# this guard, ensure_workspace would happily adopt a same-named container whose /home/argus mount
+# belongs to a totally different instance's workspace_dir — host-side file tools would then disagree
+# with the sandbox about what "the workspace" even is, silently. This must be checked BEFORE the
+# network-mismatch branch above, because that branch `rm -f`s the container; if a mount-mismatched
+# container fell through to it, we'd destroy another live instance's container while protecting it.
+# ---------------------------------------------------------------------------------------------
+def test_ensure_workspace_adopts_a_running_container_whose_mount_matches(tmp_path):
+    """The positive case: existing behavior is unchanged when the mount genuinely is ours."""
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    rt._egress_cache = (time.time(), True, "")   # not under test here
+    expected = rt.workspace_dir("default")
+    calls = []
+    rt._run = _workspace_fake_run(calls, state="running", mount_source=expected)
+    rt.ensure_workspace("default")   # must not raise
+    subcommands = [c[1] for c in calls]
+    assert "rm" not in subcommands
+    assert "run" not in subcommands
+
+
+def test_ensure_workspace_refuses_to_adopt_a_container_with_a_foreign_mount(tmp_path):
+    """The bug this guards against: a same-user sibling Argus instance created a container with the
+    same name (podman object names are global per OS user), so ours would otherwise adopt it and
+    silently execute against the SIBLING's workspace. Must raise SandboxUnavailable naming both
+    paths and SANDBOX_INSTANCE, and must NEVER `rm` — the container is (or may be) a live sibling's,
+    not garbage."""
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    rt._egress_cache = (time.time(), True, "")   # not under test here
+    expected = rt.workspace_dir("default")
+    foreign_mount = os.path.join(str(tmp_path), "some-other-instance-workspaces", "default")
+    assert foreign_mount != expected
+    calls = []
+    rt._run = _workspace_fake_run(calls, state="running", mount_source=foreign_mount)
+    with pytest.raises(SandboxUnavailable) as exc_info:
+        rt.ensure_workspace("default")
+    msg = str(exc_info.value)
+    assert "SANDBOX_INSTANCE" in msg
+    assert expected in msg
+    assert foreign_mount in msg
+    subcommands = [c[1] for c in calls]
+    assert "rm" not in subcommands, "a foreign container must never be removed, only refused"
+    assert "run" not in subcommands
+
+
+def test_ensure_workspace_falls_through_when_mount_inspect_fails(tmp_path):
+    """Conservative direction: an inspect that fails outright (older podman, container vanished
+    between the state check and here) must NOT be treated as a confirmed mismatch — that would
+    refuse a perfectly healthy single-instance setup. Falls through to today's adopt-by-name
+    behavior instead."""
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    rt._egress_cache = (time.time(), True, "")   # not under test here
+    calls = []
+    rt._run = _workspace_fake_run(calls, state="running", mount_ok=False)
+    rt.ensure_workspace("default")   # must not raise
+    subcommands = [c[1] for c in calls]
+    assert "rm" not in subcommands
+
+
+def test_ensure_workspace_falls_through_when_mount_inspect_reports_nothing(tmp_path):
+    """Same conservative direction, different cause: inspect succeeds but the template matched no
+    mount (unexpected podman output shape) — empty stdout, exit 0. Must not be treated as a
+    mismatch either."""
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    rt._egress_cache = (time.time(), True, "")   # not under test here
+    calls = []
+    rt._run = _workspace_fake_run(calls, state="running", mount_source="")
+    rt.ensure_workspace("default")   # must not raise
+    subcommands = [c[1] for c in calls]
+    assert "rm" not in subcommands
+
+
+def test_ensure_workspace_still_recreates_our_own_container_on_network_mismatch(tmp_path):
+    """The mount-mismatch guard must not swallow the pre-existing network-mismatch/rm path for a
+    container that genuinely IS ours (matching mount) but was created under a stale
+    sandbox_network — this is finding 1's behavior, and it must still fire once the mount is
+    confirmed to match."""
+    rt = PodmanRuntime(workspaces_root=str(tmp_path), network_mode="proxy")
+    rt._egress_cache = (time.time(), True, "")   # not under test here
+    expected = rt.workspace_dir("default")
+    calls = []
+    rt._run = _workspace_fake_run(calls, state="running", networks_json='{"podman":{}}',  # lan-shaped
+                                   mount_source=expected)
+    rt.ensure_workspace("default")
+    subcommands = [c[1] for c in calls]
+    assert "rm" in subcommands, "our own mismatched-network container must still be recreated"
+    assert "run" in subcommands
+
+
+def test_mount_source_argv_targets_the_home_argus_destination(tmp_path):
+    """Lock the inspect template's shape: it must filter to the mount whose destination is
+    /home/argus (a container can have more than one mount) rather than grabbing "the" source."""
+    rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    argv = rt._mount_source_argv("some-container")
+    assert argv[:3] == [rt.binary, "inspect", "-f"]
+    assert argv[-1] == "some-container"
+    assert "/home/argus" in argv[3]
+    assert "Mounts" in argv[3]
 
 
 # ---------------------------------------------------------------------------------------------
