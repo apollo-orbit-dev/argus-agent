@@ -15,6 +15,7 @@ def test_sandbox_defaults():
     assert c.sandbox_runtime == "podman"
     assert c.sandbox_image == "argus-sandbox:local"
     assert c.sandbox_workspace == "default"
+    assert c.sandbox_instance == ""
     assert c.sandbox_idle_minutes == 30
     assert c.sandbox_exec_timeout == 120.0
 
@@ -22,7 +23,7 @@ def test_sandbox_defaults():
 def test_sandbox_fields_round_trip_through_env():
     c = _mk()
     for name in ("enable_sandbox", "sandbox_runtime", "sandbox_image", "sandbox_workspace",
-                 "sandbox_idle_minutes", "sandbox_exec_timeout"):
+                 "sandbox_instance", "sandbox_idle_minutes", "sandbox_exec_timeout"):
         assert name in c._ENV_FIELDS, f"{name} missing from _ENV_FIELDS"
 
 
@@ -74,6 +75,26 @@ def test_sandbox_image_rejects_whitespace():
     c = _mk()
     with pytest.raises(ValidationError):
         c.patch({"sandbox_image": "argus sandbox:local"})
+
+
+def test_sandbox_instance_valid_value_round_trips():
+    c = _mk(sandbox_instance="dev")
+    assert c.sandbox_instance == "dev"
+    c2 = c.patch({"sandbox_instance": ""})
+    assert c2.sandbox_instance == ""
+
+
+@pytest.mark.parametrize("bad", ["-x", "a b", "A", "a" * 17])
+def test_sandbox_instance_rejects_invalid_values(bad):
+    """sandbox_instance reaches a podman argv (container/network names). PATCH /config has no admin
+    gate, so the schema must reject a leading-flag value, whitespace, uppercase, and anything over
+    the 16-char limit before it can ever get there — mirrors the sandbox_image confused-deputy
+    tests."""
+    with pytest.raises(ValidationError):
+        _mk(sandbox_instance=bad)
+    c = _mk()
+    with pytest.raises(ValidationError):
+        c.patch({"sandbox_instance": bad})
 
 
 def test_sandbox_network_defaults_to_proxy():

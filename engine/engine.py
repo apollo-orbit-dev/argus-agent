@@ -437,7 +437,8 @@ class Engine:
                 image=config.sandbox_image,
                 workspaces_root=str(root / "workspaces"),
                 idle_minutes=config.sandbox_idle_minutes,
-                network_mode=config.sandbox_network)
+                network_mode=config.sandbox_network,
+                instance=config.sandbox_instance)
         self.events = EventBus()
         self.store = SessionStore(str(root / "sessions.db"))
         self.registry = build_base_registry(config, self._data_dir)
@@ -628,13 +629,16 @@ class Engine:
                 # process from booting — worse than dropping one turn's trace.
                 log.exception("startup trace prune failed; continuing without pruning")
 
-        # Startup reap: stop any argus-ws-* containers left running from a previous process (crash,
-        # deploy, kill -9 — anything that skips graceful shutdown). This is the CROSS-PROCESS half of
-        # idle cleanup; the in-process half (_maybe_stop_idle) only fires from inside exec(), so a
-        # workspace that is never touched again after this process exits would otherwise run forever.
-        # Safe because stage-1 containers are stateless — the bind-mounted workspace dir holds the
-        # actual state, and ensure_workspace() recreates the container on demand — so stopping one
-        # that happens to still be alive loses nothing.
+        # Startup reap: stop any containers under THIS instance's name prefix (argus-ws-* by default,
+        # argus-<instance>-ws-* when sandbox_instance is set) left running from a previous process
+        # (crash, deploy, kill -9 — anything that skips graceful shutdown). status() already filters
+        # on self.name_prefix, so this only ever reaps this process's own containers — never another
+        # same-host Argus instance's, even when both run as the same OS user. This is the
+        # CROSS-PROCESS half of idle cleanup; the in-process half (_maybe_stop_idle) only fires from
+        # inside exec(), so a workspace that is never touched again after this process exits would
+        # otherwise run forever. Safe because stage-1 containers are stateless — the bind-mounted
+        # workspace dir holds the actual state, and ensure_workspace() recreates the container on
+        # demand — so stopping one that happens to still be alive loses nothing.
         if config.enable_sandbox and self.sandbox is not None:
             try:
                 st = self.sandbox.status()

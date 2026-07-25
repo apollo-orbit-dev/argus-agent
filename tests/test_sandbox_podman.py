@@ -51,6 +51,51 @@ def test_container_name_is_namespaced():
     assert rt.container_name("default") == "argus-ws-default"
 
 
+def test_instance_namespaces_all_three_names(tmp_path):
+    """sandbox_instance ("dev" here) is interpolated into all three podman object names — infix,
+    not suffix, so the "argus-" prefix and the fact the instance lives in one place both hold."""
+    rt = PodmanRuntime(workspaces_root=str(tmp_path), instance="dev")
+    assert rt.container_name("default") == "argus-dev-ws-default"
+    net_argv = rt._network_create_argv()
+    assert "argus-dev-internal" in net_argv
+    proxy_argv = rt._proxy_run_argv()
+    assert "argus-dev-egress" in proxy_argv and "argus-dev-internal" in proxy_argv
+    run_argv = rt._run_argv("default")
+    joined = " ".join(run_argv)
+    assert "HTTP_PROXY=http://argus-dev-egress:3128" in joined
+    # all distinct from each other and from the unnamespaced defaults
+    names = {rt.container_name("default"), rt.NETWORK_NAME, rt.EGRESS_NAME}
+    assert len(names) == 3
+    assert not names & {"argus-ws-default", "argus-internal", "argus-egress"}
+
+
+def test_two_instances_do_not_collide(tmp_path):
+    default_rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    dev_rt = PodmanRuntime(workspaces_root=str(tmp_path), instance="dev")
+    default_names = {default_rt.container_name("default"), default_rt.NETWORK_NAME,
+                      default_rt.EGRESS_NAME}
+    dev_names = {dev_rt.container_name("default"), dev_rt.NETWORK_NAME, dev_rt.EGRESS_NAME}
+    assert default_names.isdisjoint(dev_names)
+
+
+def test_status_only_lists_this_instances_workspaces(tmp_path, monkeypatch):
+    """Regression test for the reap-stealing bug: status() must strip only THIS instance's own
+    prefix, and must not mistake another instance's container for one of its own."""
+    def _fake_run(self, argv, **kw):
+        if argv[:2] == [self.binary, "ps"]:
+            return ExecResult(0, "argus-ws-default argus-dev-ws-default\n", "")
+        return ExecResult(0, "", "")
+
+    monkeypatch.setattr(PodmanRuntime, "_run", _fake_run)
+    monkeypatch.setattr(shutil, "which", lambda *_a, **_kw: "/usr/bin/podman")
+
+    default_rt = PodmanRuntime(workspaces_root=str(tmp_path))
+    assert default_rt.status()["workspaces"] == ["default"]
+
+    dev_rt = PodmanRuntime(workspaces_root=str(tmp_path), instance="dev")
+    assert dev_rt.status()["workspaces"] == ["default"]
+
+
 def test_run_argv_is_isolated_by_default(tmp_path):
     """Stage 2 default is "proxy": the container joins the internal network, whose only exit is
     the policy-enforcing sidecar — never the unrestricted default bridge. See

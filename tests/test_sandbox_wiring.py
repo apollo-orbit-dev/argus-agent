@@ -260,6 +260,13 @@ def test_sandbox_idle_minutes_flows_to_the_runtime():
     assert eng.sandbox.idle_minutes == 5
 
 
+def test_sandbox_instance_flows_to_the_runtime():
+    eng = _engine(enable_sandbox=True, sandbox_instance="dev",
+                 sandbox_runtime="definitely-not-a-real-binary")
+    assert eng.sandbox.instance == "dev"
+    assert eng.sandbox.container_name("default") == "argus-dev-ws-default"
+
+
 def test_engine_startup_reaps_leftover_containers(monkeypatch, tmp_path):
     """The no-op stop_idle() call at Engine.__init__ (always a no-op: _last_exec is empty at
     construction) is replaced by a real cross-process reaper: stop whatever `podman ps` reports as
