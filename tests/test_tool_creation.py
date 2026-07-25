@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from config import Config
 from engine.engine import Engine, builtin_tool_names, compose_tool_creation_directive
@@ -239,10 +239,114 @@ def test_inspect_tool_returns_source(tmp_path):
     asyncio.run(ct.run(ct.Params(name="mytool", description="does a thing",
         parameters={"n": {"type": "integer"}},
         code="def run(args):\n    return str(args['n'])", test_args={"n": 1})))
-    it = InspectToolTool(str(tmp_path))
+    it = InspectToolTool(reg, str(tmp_path))
     out = asyncio.run(it.run(it.Params(name="mytool")))
     assert "mytool" in out and "def run(args)" in out and "does a thing" in out
-    assert "no created tool" in asyncio.run(it.run(it.Params(name="nope"))).lower()
+    assert "no tool named" in asyncio.run(it.run(it.Params(name="nope"))).lower()
+
+
+def test_inspect_tool_finds_builtin():
+    """inspect_tool ALSO works on built-in tools — shows description + argument schema, so the
+    model can call one it's unsure of (or from inside created-tool code) without guessing."""
+    from engine.experimental.tool_creation import InspectToolTool
+
+    class Geocode(Tool):
+        name = "geocode"
+        description = "Resolve a place name to coordinates."
+
+        class Params(BaseModel):
+            location: str = Field(..., description="place name")
+
+        async def run(self, args):
+            return "stub"
+
+    reg = ToolRegistry()
+    reg.register(Geocode())
+    it = InspectToolTool(reg)
+    out = asyncio.run(it.run(it.Params(name="geocode")))
+    assert "geocode" in out
+    assert "Resolve a place name to coordinates." in out
+    assert "location" in out
+    assert "built-in" in out
+    assert "no tool named" not in out.lower()
+
+
+def test_inspect_tool_unknown_lists_both(tmp_path):
+    """A miss lists BOTH created and built-in tools — the old message only mentioned created
+    tools, which taught the model that a built-in it hadn't heard of simply didn't exist."""
+    from engine.experimental.tool_creation import InspectToolTool
+
+    class Calculator(Tool):
+        name = "calculator"
+        description = "c"
+
+        class Params(BaseModel):
+            pass
+
+        async def run(self, args):
+            return "x"
+
+    reg = ToolRegistry()
+    reg.register(Calculator())
+    ct = CreateToolTool(reg, allow_network=False, persist_dir=str(tmp_path))
+    asyncio.run(ct.run(ct.Params(name="mytool", description="d", parameters={},
+        code="def run(args):\n    return 'x'", test_args={})))
+    it = InspectToolTool(reg, str(tmp_path))
+    out = asyncio.run(it.run(it.Params(name="nope")))
+    assert "no tool named 'nope'" in out
+    created_part, builtin_part = out.split("Created tools:")[1].split("Built-in tools:")
+    assert "mytool" in created_part
+    assert "calculator" in builtin_part
+
+
+def test_inspect_tool_created_shadows_builtin(tmp_path):
+    """When a created tool has the SAME name as a built-in, inspect_tool must describe the
+    created tool — that's the one that will actually execute (last-writer-wins registration)."""
+    from engine.experimental.tool_creation import InspectToolTool
+
+    class Geocode(Tool):
+        name = "geocode"
+        description = "built-in geocode"
+
+        class Params(BaseModel):
+            location: str = Field(..., description="place name")
+
+        async def run(self, args):
+            return "stub"
+
+    reg = ToolRegistry()
+    ct = CreateToolTool(reg, allow_network=False, persist_dir=str(tmp_path))
+    asyncio.run(ct.run(ct.Params(name="geocode", description="my geocode",
+        parameters={"location": {"type": "string"}},
+        code="def run(args):\n    return args['location']", test_args={"location": "Miami"})))
+    reg.register(Geocode())   # registered AFTER — shadows only if inspect_tool got it wrong
+    it = InspectToolTool(reg, str(tmp_path))
+    out = asyncio.run(it.run(it.Params(name="geocode")))
+    assert "def run(args)" in out
+    assert "built-in" not in out
+
+
+def test_inspect_tool_no_persist_dir():
+    """With no persist_dir at all, inspect_tool must still render built-in tools — the old
+    'no created tools are available' early return blocked that."""
+    from engine.experimental.tool_creation import InspectToolTool
+
+    class Calculator(Tool):
+        name = "calculator"
+        description = "c"
+
+        class Params(BaseModel):
+            pass
+
+        async def run(self, args):
+            return "x"
+
+    reg = ToolRegistry()
+    reg.register(Calculator())
+    it = InspectToolTool(reg)
+    out = asyncio.run(it.run(it.Params(name="calculator")))
+    assert "no created tools are available" not in out
+    assert "built-in" in out
 
 
 def test_created_tool_added_to_sink_for_later_turns():

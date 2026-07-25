@@ -905,30 +905,66 @@ class InspectToolTool(Tool):
         "Show the source code, parameters, and description of a tool you (or a past session) "
         "created. Use this BEFORE revising or extending a tool: read how it fetches its data — "
         "which library, how it authenticates — then call create_tool with the SAME name and code "
-        "that keeps that working pattern and adds what you need. Argument: name."
+        "that keeps that working pattern and adds what you need. Also works on BUILT-IN tools: "
+        "shows their name, description and argument schema so you know exactly how to call them "
+        "(from a turn, or from inside created-tool code). Argument: name."
     )
 
     class Params(BaseModel):
         name: str = Field(..., description="the created tool's name")
 
-    def __init__(self, persist_dir: Optional[str]):
+    def __init__(self, registry: ToolRegistry, persist_dir: Optional[str] = None):
+        self.registry = registry
         self.persist_dir = persist_dir
 
     async def run(self, args: "InspectToolTool.Params") -> str:
-        if not self.persist_dir or not os.path.isdir(self.persist_dir):
-            return "inspect_tool: no created tools are available."
-        safe = re.sub(r"[^a-z0-9_]+", "_", (args.name or "").lower()).strip("_")
-        path = os.path.join(self.persist_dir, f"{safe}.json")
-        if not os.path.exists(path):
-            avail = [f[:-5] for f in sorted(os.listdir(self.persist_dir)) if f.endswith(".json")]
-            return f"inspect_tool: no created tool named '{args.name}'. Created tools: {', '.join(avail) or '(none)'}."
-        try:
-            m = json.load(open(path, encoding="utf-8"))
-        except Exception as e:
-            return f"inspect_tool: could not read '{args.name}': {e}"
-        return (f"Tool '{m['name']}' — {m.get('description', '')}\n"
-                f"parameters: {json.dumps(m.get('parameters', {}))}\n"
-                f"code:\n{m['code']}")
+        name = args.name
+        safe = re.sub(r"[^a-z0-9_]+", "_", (name or "").lower()).strip("_")
+
+        # 1. Created tool (persisted) — describe the stored source.
+        if self.persist_dir and os.path.isdir(self.persist_dir):
+            path = os.path.join(self.persist_dir, f"{safe}.json")
+            if os.path.exists(path):
+                try:
+                    m = json.load(open(path, encoding="utf-8"))
+                except Exception as e:
+                    return f"inspect_tool: could not read '{name}': {e}"
+                return (f"Tool '{m['name']}' (created) — {m.get('description', '')}\n"
+                        f"parameters: {json.dumps(m.get('parameters', {}))}\n"
+                        f"code:\n{m['code']}")
+
+        # 2. Registry hit — created-but-unpersisted DynamicTool, or a built-in.
+        tool = self.registry.get(name) or self.registry.get(safe)
+        if tool is not None:
+            if isinstance(tool, DynamicTool):
+                label = "(created — source not persisted)"
+            else:
+                label = "(built-in)"
+            sch = tool.Params.model_json_schema()
+            out = (f"Tool '{tool.name}' {label} — {tool.description}\n"
+                   f"parameters: {json.dumps(sch.get('properties', {}))}\n"
+                   f"required: {', '.join(sch.get('required', [])) or '(none)'}\n")
+            if "$defs" in sch:
+                out += f"definitions: {json.dumps(sch['$defs'])}\n"
+            if not isinstance(tool, DynamicTool):
+                arg_example = next(iter(sch.get("properties", {})), "...")
+                out += (
+                    "This is a BUILT-IN tool — it has no editable source and cannot be revised or "
+                    "deleted. You CAN call it directly, and you can call it from inside created-tool "
+                    f"code as a plain function: {tool.name}({{\"{arg_example}\": ...}}) returns its "
+                    "output as a STRING (json.loads() it if it returns JSON)."
+                )
+            return out
+
+        # 3. Miss — list what IS available, both created and built-in.
+        created = set()
+        if self.persist_dir and os.path.isdir(self.persist_dir):
+            created |= {f[:-5] for f in os.listdir(self.persist_dir) if f.endswith(".json")}
+        created |= {t.name for t in self.registry.list() if isinstance(t, DynamicTool)}
+        builtins = sorted(t.name for t in self.registry.list() if not isinstance(t, DynamicTool))
+        return (f"inspect_tool: no tool named '{name}'. "
+                f"Created tools: {', '.join(sorted(created)) or '(none)'}. "
+                f"Built-in tools: {', '.join(builtins) or '(none)'}.")
 
 
 class DeleteToolTool(Tool):

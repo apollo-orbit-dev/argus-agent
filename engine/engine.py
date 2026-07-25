@@ -100,6 +100,7 @@ TOOL_CREATION_DIRECTIVE = (
     "with the same name), and DELETED (delete_tool) — these are your own tools, not built-ins. If a "
     "tool appears in inspect_tool or is not one of the core built-ins ({builtin_tools}), it is a "
     "CREATED tool you can delete on request. "
+    "inspect_tool also shows a BUILT-IN's arguments — use it before calling one you're unsure of. "
     "When asked to remove SEVERAL tools (e.g. 'all the youtube tools', 'any X tools'), call delete_tool "
     "for EVERY matching tool one by one — do not stop after the first — then tell the user exactly which "
     "tools you deleted. Never claim you removed them all after deleting just one. "
@@ -1426,7 +1427,7 @@ class Engine:
                     if hasattr(t, "registry"):
                         t.registry = run_registry   # let them CALL_TOOL this run's tools
                     run_registry.register(t)
-                run_registry.register(InspectToolTool(self._created_tools_dir))
+                run_registry.register(InspectToolTool(run_registry, persist_dir=self._created_tools_dir))
                 run_registry.register(DeleteToolTool(
                     run_registry, persist_dir=self._created_tools_dir,
                     created_sink=self._created_tools))
@@ -2058,7 +2059,7 @@ class Engine:
         conditional += group(
             c.enable_tool_creation and native,
             ("create_tool", "Write and register a new tool from a natural-language spec + Python code."),
-            ("inspect_tool", "Inspect a previously created tool's code/schema."),
+            ("inspect_tool", "Inspect any tool — a created tool's code, or a built-in's argument schema."),
             ("delete_tool", "Delete a previously created tool."),
         )
         conditional += group(
