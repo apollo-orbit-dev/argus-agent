@@ -129,7 +129,7 @@ async def test_alias_to_builtin_command_dispatches(tmp_path):
                 effective_message=NS(text="/fresh", reply_text=reply_text, photo=None))
     await catch_all(update, NS(args=None))
     assert eng.reset_calls == ["1"]               # the built-in actually ran (not sent to the model)
-    assert any("New conversation" in r for r in replies)
+    assert any("same session" in r for r in replies)
 
 
 async def test_unknown_alias_stays_silent(tmp_path):

@@ -42,7 +42,10 @@ log = logging.getLogger("argus.telegram")
 # allowed chat). Each (command, description) must have a matching handler below.
 # This is the maintainable source of truth; add a row + a handler to add a command.
 BOT_COMMANDS = [
-    ("new", "Start a new conversation (clears history)"),
+    ("reset", "Reset this conversation — clears context, keeps the session"),
+    ("session", "Show this chat's session id (tap to copy)"),
+    ("sessions", "List sessions — ids, message counts, last active"),
+    ("rename", "Name this session: /rename <name>"),
     ("usage", "Show context size and session usage"),
     ("compact", "Summarize & shrink the conversation context"),
     ("mode", "Show or switch tool-calling mode (native | manual)"),
@@ -308,6 +311,19 @@ async def deliver_new(reply_to, text: str) -> None:
             log.debug("could not send answer message", exc_info=True)
 
 
+async def reply_html(msg, text: str) -> None:
+    """Reply with Telegram-HTML (command replies are otherwise plain text); on a parse error,
+    strip the tags and unescape entities so the reply still lands as clean plain text."""
+    try:
+        await msg.reply_text(text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+    except Exception:
+        try:
+            stripped = re.sub(r"</?(code|b|i)>", "", text)
+            await msg.reply_text(_html.unescape(stripped))
+        except Exception:
+            log.debug("could not send reply_html fallback", exc_info=True)
+
+
 def split_for_telegram(text: str, limit: int = 3900) -> list[str]:
     """Break a long answer into <=limit-char pieces at paragraph/line/word boundaries, so a long
     reply is delivered as SEVERAL messages instead of being cut off with '… (truncated)'."""
@@ -487,6 +503,78 @@ def cron_text(jobs: list[dict]) -> str:
     for j in jobs:
         lines.append(f"• {j.get('instruction','?')[:60]}\n    {j.get('schedule','')} · next {str(j.get('next_run',''))[:16]}")
     return "\n".join(lines)
+
+
+def _session_row(sessions: list[dict], session_id: str) -> dict | None:
+    """Find a session dict by id, or None if it isn't in the list."""
+    for s in sessions:
+        if s.get("id") == session_id:
+            return s
+    return None
+
+
+def _esc(s: Any) -> str:
+    """HTML-escape (Telegram HTML, NOT MarkdownV2 — never backslash-escape)."""
+    return _html.escape(str(s), quote=False)
+
+
+def _when(s: dict) -> str:
+    """Session's ``updated`` ISO timestamp -> 'YYYY-MM-DD HH:MM' (same [:16] trick as cron_text)."""
+    return str(s.get("updated") or "")[:16]
+
+
+def _session_line(s: dict, current_id: str) -> str:
+    sid = s.get("id", "?")
+    name = s.get("name", sid)
+    mark = "  ← current" if sid == current_id else ""
+    label = "" if name == sid else f"{_esc(name)} "
+    return (f"• {label}<code>{_esc(sid)}</code>{mark}\n"
+            f"    {s.get('message_count', 0)} msgs · last active {_esc(_when(s))}")
+
+
+def sessions_text(sessions: list[dict], current_id: str, limit: int = 20) -> str:
+    """Render ``engine.list_sessions()`` into a reply string. Caps at ``limit`` rows (most
+    recently updated first — list_sessions() is already ORDER BY updated DESC) but ALWAYS
+    includes the current session even if it falls outside that slice."""
+    if not sessions:
+        return "No saved sessions yet."
+    shown = sessions[:limit]
+    extra = [s for s in sessions[limit:] if s.get("id") == current_id]
+    hidden = max(0, len(sessions) - len(shown) - len(extra))
+    lines = [f"Sessions ({len(sessions)}):"]
+    lines += [_session_line(s, current_id) for s in shown + extra]
+    if hidden > 0:
+        lines.append(f"…and {hidden} more.")
+    lines.append("This one: /session · Rename it: /rename &lt;name&gt;")
+    return "\n".join(lines)
+
+
+def session_text(sessions: list[dict], session_id: str) -> str:
+    """Render this chat's session id (and name, if renamed) for /session."""
+    s = _session_row(sessions, session_id)
+    if s is None:
+        return f"This chat's session: <code>{_esc(session_id)}</code>"
+    name = s.get("name", session_id)
+    name_line = "" if name == session_id else f"{_esc(name)}\n"
+    return (f"{name_line}<code>{_esc(session_id)}</code>\n"
+            f"{s.get('message_count', 0)} msgs · last active {_esc(_when(s))}\n"
+            "Rename it: /rename &lt;name&gt;")
+
+
+def rename_command(engine: Any, session_id: str, args: list) -> str:
+    """/rename <name> — implements the *pure* decision logic so it can be unit-tested
+    without a running engine when args is empty (bare /rename)."""
+    name = " ".join(args).strip()[:80].strip()
+    if not name:
+        sessions = engine.list_sessions()
+        s = _session_row(sessions, session_id)
+        cur = s.get("name", session_id) if s else session_id
+        return f"Current name: {_esc(cur)}  ·  id <code>{_esc(session_id)}</code>\nRename: /rename &lt;name&gt;"
+    sessions = engine.list_sessions()
+    if _session_row(sessions, session_id) is None:
+        return "This chat has no saved session yet — send me a message first, then /rename."
+    engine.rename_session(session_id, name)
+    return f"✓ Renamed to {_esc(name)}."
 
 
 # --------------------------------------------------------------------------
@@ -754,7 +842,27 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
         if chat_id is None:
             return
         engine.reset(str(chat_id))
-        await update.effective_message.reply_text("🆕 New conversation — history cleared.")
+        await update.effective_message.reply_text(
+            "↺ Conversation reset — I've cleared my working context. This is still the same "
+            "session and the transcript is kept; /session shows its id.")
+
+    async def on_sessions(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        chat_id = await _guard(update)
+        if chat_id is None:
+            return
+        await reply_html(update.effective_message, sessions_text(engine.list_sessions(), str(chat_id)))
+
+    async def on_session(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        chat_id = await _guard(update)
+        if chat_id is None:
+            return
+        await reply_html(update.effective_message, session_text(engine.list_sessions(), str(chat_id)))
+
+    async def on_rename(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        chat_id = await _guard(update)
+        if chat_id is None:
+            return
+        await reply_html(update.effective_message, rename_command(engine, str(chat_id), ctx.args))
 
     async def on_restart(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = await _guard(update)
@@ -1053,8 +1161,11 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
     app = Application.builder().token(config.telegram_bot_token).concurrent_updates(True).build()
     app.add_handler(CommandHandler("start", on_help))
     app.add_handler(CommandHandler("help", on_help))
-    app.add_handler(CommandHandler("new", on_new))
-    app.add_handler(CommandHandler("reset", on_new))          # alias (not in the menu)
+    app.add_handler(CommandHandler("reset", on_new))
+    app.add_handler(CommandHandler("new", on_new))            # alias (not in the menu)
+    app.add_handler(CommandHandler("sessions", on_sessions))
+    app.add_handler(CommandHandler("session", on_session))
+    app.add_handler(CommandHandler("rename", on_rename))
     app.add_handler(CommandHandler("usage", on_usage))
     app.add_handler(CommandHandler("compact", on_compact))
     app.add_handler(CommandHandler("mode", on_mode))
