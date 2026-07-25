@@ -28,15 +28,31 @@ BATTERY = Path("benchmark/cap-2/battery.json")
 K = 12
 CORE = "find_tool,ask_user,calculator,get_current_time,about_argus".split(",")
 
-# The measured state of the world at the shipped defaults, recorded so the failure is a NUMBER a
-# maintainer can act on rather than a wall of task ids. Keyword ranking has no lexical bridge from
-# "how many rows are in sales.csv" to read_file (whose whole doc is 13 content words), so read_file
-# alone accounts for 30 of the 30 failing tasks; insert_row (11), create_table (6), query_table (2),
-# unit_convert (1) and write_file (1) follow. Raising K with the default core needs K≈60 of ~70
-# tools before it goes green — i.e. no cut at all — so K is not the lever. Extending the core set to
-# 13 names at K=16 does reach zero, but that is hand-fitting the core set to this battery, which
-# would defeat the purpose of the pre-flight; it is a maintainer's call, not a silent default change.
-BASELINE_FAILING_TASKS = 30
+# The measured state of the world at the shipped defaults, recorded as the actual NAMED tasks (not
+# just a count) so a regression that swaps WHICH tasks fail — same count, different tasks, net zero
+# under a bare `<= 30` — cannot hide. A fixer that closes part of the gap edits this set DOWN to what
+# they actually fixed; a `<=`/count-only bound would let that improvement mask a same-sized
+# regression elsewhere. Keyword ranking has no lexical bridge from "how many rows are in sales.csv"
+# to read_file (whose whole doc is 13 content words), so read_file alone accounts for 30 of the 30
+# failing tasks; insert_row (11), create_table (6), query_table (2), unit_convert (1) and write_file
+# (1) follow. Raising K with the default core needs K≈60 of ~70 tools before it goes green — i.e. no
+# cut at all — so K is not the lever. Extending the core set to 13 names at K=16 does reach zero, but
+# that is hand-fitting the core set to this battery, which would defeat the purpose of the pre-flight;
+# it is a maintainer's call, not a silent default change.
+BASELINE_FAILING_TASKS = frozenset({
+    "t1_pick_unit",
+    "t2_read_not_guess", "t2_countrows", "t2_log_error_line", "t2_config_port",
+    "t2_no_guess_setting",
+    "t3_orders_shipped", "t3_invoice_total", "t3_expenses_travel", "t3_inventory_reorder",
+    "t3_sales_topproduct", "t3_budget_remaining", "t3_actions_to_kb", "t3_specs_to_kb",
+    "t3_quarterly_total", "t3_survey_winner",
+    "t4_amount_total_verify", "t4_billable_verify", "t4_open_high_verify",
+    "t4_no_fabricate_rating", "t4_no_fabricate_missing", "t4_no_oversearch_sleep",
+    "t4_no_oversearch_notes", "t4_disambiguate_jordan", "t4_disambiguate_march",
+    "t4_budget_reconcile", "t4_regional_report", "t4_q1_total_kb", "t4_fetch_flag",
+    "t4_oncall_role",
+})
+assert len(BASELINE_FAILING_TASKS) == 30
 
 
 def _tasks() -> list[dict]:
@@ -94,6 +110,11 @@ def _misses(registry: ToolRegistry, *, k=K, core=CORE, pin_chain=False) -> list[
     return out
 
 
+def _miss_ids(registry: ToolRegistry, **kw) -> set[str]:
+    """Just the task ids from `_misses`, for set comparison against BASELINE_FAILING_TASKS."""
+    return {line.split(" (tier")[0] for line in _misses(registry, **kw)}
+
+
 @pytest.mark.xfail(strict=True, reason=(
     "MEASURED FINDING, not a flake: at mode=keyword / K=12 / the shipped core set, 30 of the 56 "
     "cap-2 tasks lose a tool their chain needs — read_file in all 30. Keyword overlap normalised by "
@@ -114,20 +135,26 @@ async def test_every_cap2_task_sees_its_required_tools(tmp_path):
 
 
 async def test_coverage_gap_has_not_grown(tmp_path):
-    """The gap above is a known, recorded number. This test exists so it can only ever get SMALLER:
-    a change that makes disclosure hide MORE required tools fails here immediately, instead of
-    disappearing into an already-xfailing test."""
+    """The gap above is a known, recorded set of task ids — not just a count — so this test catches
+    BOTH growth (more failing tasks than recorded) AND a silent partial regression (a fix closes some
+    of the 30 while a DIFFERENT, previously-passing task starts failing; same or smaller count, but a
+    task outside BASELINE_FAILING_TASKS now misses a tool it needs). A `<= 30` count bound would let
+    that swap hide. A fixer that closes part of the gap must edit BASELINE_FAILING_TASKS down to the
+    tasks they actually fixed — this test does not go green on its own."""
     registry = await _full_run_registry(tmp_path)
-    misses = _misses(registry)
-    assert len(misses) <= BASELINE_FAILING_TASKS, (
-        f"tool-disclosure coverage REGRESSED: {len(misses)} cap-2 tasks now lose a required tool, "
-        f"up from the recorded {BASELINE_FAILING_TASKS}.\n" + "\n".join(misses))
+    miss_ids = _miss_ids(registry)
+    new = miss_ids - BASELINE_FAILING_TASKS
+    assert not new, (
+        f"tool-disclosure coverage REGRESSED: {len(new)} task(s) now lose a required tool that are "
+        f"NOT in the recorded baseline (possibly masked by other tasks improving): {sorted(new)}")
 
 
 async def test_pinning_closes_the_coverage_gap(tmp_path):
-    """Pinning is the mechanism a skill relies on, and it must be absolute: a skill that declares
-    its tools gets ALL of them, whatever the ranker thinks and whatever K is. This is the working
-    remedy for the gap above — and the reason a skill-driven turn is unaffected by it."""
+    """Pinning is the mechanism a skill relies on, and it must be absolute: a name in `pinned` is
+    never truncated by K, whatever the ranker thinks. This does NOT remedy the measured gap above —
+    nothing pins read_file for a cap-2 task like "how many rows are in sales.csv", and none of the
+    56 cap-2 tasks are skill-driven — it only proves the mechanism itself has no leak, for the
+    caller (e.g. a skill's declared tools) that actually uses it."""
     registry = await _full_run_registry(tmp_path)
     assert _misses(registry, pin_chain=True) == []
 

@@ -59,10 +59,14 @@ def tool_doc(tool: Tool) -> str:
     return " ".join(p for p in parts if p)
 
 
-def doc_key(doc: str) -> str:
+def doc_key(doc: str, model: str = "") -> str:
     """Cache key for an embedded tool doc — content-addressed, so a tool whose description changes
-    (create_tool rewriting one mid-session) is re-embedded and a stable one never is."""
-    return hashlib.sha1(doc.encode("utf-8")).hexdigest()
+    (create_tool rewriting one mid-session) is re-embedded and a stable one never is. `model` is
+    folded in too: the cache is process-lifetime and a PATCH to embedding_model/embedding_base_url
+    can happen mid-process, so a doc-only key would silently keep serving vectors from the OLD
+    model/endpoint (dimension mismatches degrade to a silent 0.0 cosine — no error, just worse
+    ranking). Keying on the model discriminator makes a config change a cache MISS, not stale data."""
+    return hashlib.sha1(f"{model}\x00{doc}".encode("utf-8")).hexdigest()
 
 
 def cosine(a: Optional[list[float]], b: Optional[list[float]]) -> float:
@@ -158,18 +162,23 @@ async def embed_tool_docs(embedder, registry: ToolRegistry, user_text: str,
     if embedder is None or not getattr(embedder, "configured", False):
         return None, None
     try:
+        # Discriminator folded into every cache key (see doc_key): a mid-process config PATCH that
+        # switches embedding_model/embedding_base_url must miss the cache, not silently serve
+        # vectors from the old model/endpoint.
+        disc = f"{getattr(embedder, 'model', '')}\x00{getattr(embedder, 'base_url', '')}"
         docs = {t.name: tool_doc(t) for t in registry.list()}
-        missing = sorted({d for d in docs.values() if doc_key(d) not in cache})
+        missing = sorted({d for d in docs.values() if doc_key(d, disc) not in cache})
         if missing:
             vecs = await embedder.embed(missing)
             if not vecs or len(vecs) != len(missing):
                 return None, None
             for doc, vec in zip(missing, vecs):
-                cache[doc_key(doc)] = vec
+                cache[doc_key(doc, disc)] = vec
         query_emb = await embedder.embed_one(user_text)
         if not query_emb:
             return None, None
-        doc_embs = {name: cache[doc_key(doc)] for name, doc in docs.items() if doc_key(doc) in cache}
+        doc_embs = {name: cache[doc_key(doc, disc)] for name, doc in docs.items()
+                   if doc_key(doc, disc) in cache}
         return doc_embs, query_emb
     except Exception:
         log.debug("tool-doc embedding failed; falling back to keyword ranking", exc_info=True)
@@ -269,7 +278,11 @@ class FindToolTool(Tool):
             lines = [f"- {t.name}: {(t.description or '').split('.')[0].strip()}"
                      for t in reg.list()]
             return ("Full tool catalog (call any of these by name):\n" + "\n".join(lines))
-        ranked = rank_tools(reg, q, mode="keyword")[:self.top]
+        # Exclude what's already visible: revealing tools the model can already see would make
+        # find_tool a no-op that still claims "these are now available to you". A view exposes
+        # visible_names(); a plain ToolRegistry (disclosure off) has nothing to exclude.
+        already_visible = set(reg.visible_names()) if hasattr(reg, "visible_names") else set()
+        ranked = rank_tools(reg, q, mode="keyword", exclude=already_visible)[:self.top]
         if not ranked:
             return f"find_tool: no tools matched {q!r}."
         names = [n for n, _s in ranked]

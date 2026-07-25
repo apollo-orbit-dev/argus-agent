@@ -353,6 +353,22 @@ async def test_find_tool_without_a_registry_explains_itself_instead_of_crashing(
     assert "error" in out.lower()
 
 
+async def test_find_tool_only_reveals_tools_that_are_not_already_visible():
+    """The description promises 'a tool that isn't listed above'. If ranking doesn't exclude what's
+    already visible, the top-N can be entirely tools the model already sees — reveal() adds nothing
+    and 'these are now available to you' is a lie about tools the model already had."""
+    full = reg_of(_tool("currency_convert", "convert currency amount currency"),
+                 _tool("currency_lookup", "look up currency currency currency rates"),
+                 _tool("currency_history", "currency currency currency history"))
+    # All three score on "currency"; the first two are already visible, so only the third is hidden.
+    view = DisclosedRegistry(full, ["currency_convert", "currency_lookup"])
+    ft = FindToolTool(view, top=5)
+    out = await ft.run(FindToolTool.Params(query="currency"))
+    assert "currency_history" in out
+    assert "currency_convert" not in out and "currency_lookup" not in out
+    assert view.visible_names() == ["currency_convert", "currency_lookup", "currency_history"]
+
+
 def test_find_tool_is_a_reserved_builtin_name():
     """Registered only when disclosure is on, so with disclosure off the name would otherwise be
     free for create_tool to squat — and would then be mistaken for the real escape hatch."""
@@ -423,6 +439,17 @@ async def test_configured_core_set_is_always_visible(tmp_path):
                                        tool_disclosure_k=6)
     visible = set(deps.registry.visible_names())
     assert {"find_tool", "ask_user", "calculator", "get_current_time", "about_argus"} <= visible
+
+
+async def test_find_tool_is_pinned_even_when_a_custom_core_omits_it(tmp_path):
+    """find_tool is the escape hatch, not just another core name: an operator-set
+    TOOL_DISCLOSURE_CORE that forgets it must not leave it rankable — a hidden find_tool would be
+    exactly the unrecoverable failure the escape hatch exists to prevent, silently."""
+    _e, deps = await _capture_registry(tmp_path, tool_disclosure_mode="keyword",
+                                       tool_disclosure_k=2,
+                                       tool_disclosure_core="ask_user,calculator")
+    assert "find_tool" in deps.registry.names()          # sanity: registered at all
+    assert "find_tool" in deps.registry.visible_names()  # THE fix: pinned regardless of core
 
 
 async def test_disclosure_event_is_emitted_with_the_view(tmp_path):

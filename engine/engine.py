@@ -1537,7 +1537,11 @@ class Engine:
                 _active = self.skill_registry.get(ctx.active_skill)
                 if _active is not None:
                     skill_tools = set(_active.tools or ())
-            pinned = set(core_names) | skill_tools | {t.name for t in ctx.extra_tools}
+            # find_tool is force-pinned regardless of the configured core: it is the escape hatch,
+            # so an operator-set TOOL_DISCLOSURE_CORE that omits it must not leave it rankable —
+            # the one turn that most needs find_tool is exactly the one where it could otherwise
+            # be ranked out of the view.
+            pinned = set(core_names) | skill_tools | {t.name for t in ctx.extra_tools} | {"find_tool"}
             run_registry.register(FindToolTool())     # BEFORE selection, so it is a real tool
             doc_embs = query_emb = None
             if c.tool_disclosure_mode in ("embedding", "hybrid"):
@@ -1683,6 +1687,13 @@ class Engine:
             return answer
         # Finish the remaining removals in a BOUNDED, creation-disabled loop: repeating a
         # delete/cancel never needs to build tools, and the tight step cap prevents any flail.
+        # NOTE: `deps.registry.list()` is UNFILTERED even when disclosure is on — DisclosedRegistry's
+        # list()/names() deliberately see every tool (dispatch is never narrowed, see
+        # engine/tools/disclosure.py). So `lean` is rebuilt from the FULL catalog, not the turn's
+        # advertised subset, and this follow-up turn's tool list (and its own "disclosure" event, if
+        # any) does not reflect the K-limited view the ORIGINAL turn had. Widening here is the safe
+        # direction — it is a plain ToolRegistry, not a view, so this bounded follow-up sees more,
+        # never fewer, tools than the turn it's completing.
         import dataclasses
         lean = ToolRegistry()
         for t in deps.registry.list():
