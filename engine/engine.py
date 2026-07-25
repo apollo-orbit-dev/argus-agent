@@ -897,12 +897,18 @@ class Engine:
         return self.rules.set_enabled(rule_id, enabled)
 
     def _model_client(self) -> ModelClient:
+        # Identity (URL/model/key/provider/reasoning) comes from config — the chat role is PROJECTED
+        # there on switch. The per-connection request options are NOT projected (they'd leak into a
+        # global .env and destroy the global-fallback semantics), so resolve the chat connection
+        # here and layer its overrides on top.
         c = self._config
+        st = self.model_presets_store
+        label = st.get_role("chat")
+        conn = st.resolve(label) if label else None
         return ModelClient(c.model_base_url, c.model_name, c.model_api_key,
-                           timeout=c.request_timeout, temperature=c.model_temperature,
-                           max_tokens=c.model_max_tokens, top_p=c.model_top_p,
-                           top_k=c.model_top_k, presence_penalty=c.model_presence_penalty,
-                           provider=c.model_provider, reasoning=c.model_reasoning)
+                           timeout=c.request_timeout, max_tokens=c.model_max_tokens,
+                           provider=c.model_provider, reasoning=c.model_reasoning,
+                           **self._conn_client_kwargs(conn, global_sampling=True))
 
     def _aux_model_client(self) -> ModelClient:
         """Model for cheap BACKGROUND work — compaction, autoextract, the reasoning router,
@@ -916,7 +922,8 @@ class Engine:
         return ModelClient(conn["base_url"], conn["model_name"], self._connection_key(conn),
                            timeout=self._config.request_timeout,
                            max_tokens=self._config.model_max_tokens,
-                           provider=conn.get("provider", "auto"))
+                           provider=conn.get("provider", "auto"),
+                           **self._conn_client_kwargs(conn))   # no global tier — see the helper
 
     def _aux_model_configured(self) -> bool:
         """Whether an aux (background) model call actually has somewhere to go — the SAME
@@ -984,8 +991,54 @@ class Engine:
                 return ok
         return "dummy"
 
+    def _conn_client_kwargs(self, conn, *, global_sampling: bool = False) -> dict:
+        """The per-connection request options to hand ModelClient: sampling overrides, extra_body
+        and reasoning_style. Anything unset is OMITTED rather than passed as None, so a connection
+        with nothing configured builds a byte-identical request to before this existed.
+
+        Sampling precedence (highest first): a per-call chat(temperature=) -> this connection's
+        sampling.<k> -> the global config.model_<k> -> omitted, letting the server decide. That
+        global tier fires ONLY with global_sampling=True, i.e. only for the CHAT client: aux,
+        probe and caption calls send no sampling today, and inheriting the global tier there would
+        start sending a temperature on calls that have never carried one.
+
+        Note extra_body deliberately sits OUTSIDE this chain — ModelClient merges it last, after
+        even a per-call temperature. The main loop passes an explicit temperature on every call, so
+        anything weaker would leave an extra_body temperature permanently inert."""
+        from engine.model_presets import SAMPLING_KEYS
+        conn = conn if isinstance(conn, dict) else {}
+        samp = conn.get("sampling")
+        samp = samp if isinstance(samp, dict) else {}
+        out: dict = {}
+        for key, cfg_field in (("temperature", "model_temperature"), ("top_p", "model_top_p"),
+                               ("top_k", "model_top_k"),
+                               ("presence_penalty", "model_presence_penalty")):
+            if samp.get(key) is not None:
+                # A hand-edited connections.json isn't validated by ModelPresetStore.add()'s
+                # _clean_sampling — coerce here too, and DROP (never propagate) a value that
+                # can't cast, so a bad stored value degrades instead of crashing every turn.
+                try:
+                    out[key] = SAMPLING_KEYS[key](samp[key])
+                except (TypeError, ValueError):
+                    continue
+            elif global_sampling and getattr(self._config, cfg_field) is not None:
+                out[key] = getattr(self._config, cfg_field)
+        extra = conn.get("extra_body")
+        if isinstance(extra, dict) and extra:
+            out["extra_body"] = extra
+        style = conn.get("reasoning_style")
+        style = style.strip().lower() if isinstance(style, str) else ""
+        if style and style != "auto":
+            out["reasoning_style"] = style
+        return out
+
     def _project_role(self, capability: str, conn: dict) -> None:
-        """Push a connection's fields into the live config the relevant subsystem reads."""
+        """Push a connection's fields into the live config the relevant subsystem reads.
+
+        Deliberately does NOT project sampling / extra_body / reasoning_style: those are read
+        straight off the connection at client-build time (`_conn_client_kwargs`). Projecting them
+        would persist one connection's per-model quirks into the global .env, where they'd then
+        apply to every OTHER connection that hasn't overridden them."""
         key = self._connection_key(conn)
         if capability == "chat":
             self.patch_config({"model_base_url": conn["base_url"], "model_name": conn["model_name"],
@@ -1027,7 +1080,8 @@ class Engine:
             return {"ok": False, "status": 0, "detail": f"no connection '{name}'", "latency_ms": None}
         client = ModelClient(conn["base_url"], conn["model_name"], self._connection_key(conn),
                              timeout=min(self._config.request_timeout, 12),
-                             provider=conn.get("provider", "auto"))
+                             provider=conn.get("provider", "auto"),
+                             **self._conn_client_kwargs(conn))
         caps = conn.get("capabilities") or []
         kind = "embedding" if ("embedding" in caps and "chat" not in caps) else "chat"
         return await client.probe(kind)
@@ -1042,11 +1096,14 @@ class Engine:
 
     def model_preset_add(self, model_name: str, base_url: str = "", context_window=None,
                          label: str = "", provider: str = "auto", api_key=None,
-                         capabilities=None) -> dict:
+                         capabilities=None, sampling=None, extra_body=None,
+                         reasoning_style=None) -> dict:
         # a bare model id (no URL) is assumed to be an OpenRouter model
         base_url = base_url or "https://openrouter.ai/api/v1"
         return self.model_presets_store.add(label or model_name, base_url, model_name, provider,
-                                            context_window, api_key=api_key, capabilities=capabilities)
+                                            context_window, api_key=api_key,
+                                            capabilities=capabilities, sampling=sampling,
+                                            extra_body=extra_body, reasoning_style=reasoning_style)
 
     def model_preset_remove(self, arg: str) -> int:
         return self.model_presets_store.remove(arg)
@@ -1083,7 +1140,8 @@ class Engine:
         """Describe one image with a (multimodal) vision connection; returns text for the chat model."""
         from engine.model_client import ModelClient
         mc = ModelClient(conn["base_url"], conn["model_name"], self._connection_key(conn),
-                         timeout=self._config.request_timeout, provider=conn.get("provider", "auto"))
+                         timeout=self._config.request_timeout, provider=conn.get("provider", "auto"),
+                         **self._conn_client_kwargs(conn))
         try:
             resp = await mc.chat([{"role": "user", "content": [
                 {"type": "text", "text": "Describe this image in detail — objects, text, people, "

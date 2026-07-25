@@ -2523,6 +2523,13 @@
       var pills = document.createElement('span'); pills.className = 'cc-pills';
       (usedBy[c.label] || []).forEach(function(r){ var p = document.createElement('span'); p.className = 'role-pill'; p.textContent = r; pills.appendChild(p); });
       idline.appendChild(pills);
+      // A connection carrying non-default request options behaves differently from its siblings —
+      // surface that on the card so it doesn't take opening the modal to notice.
+      if (connHasAdvanced(c)){
+        var adv = document.createElement('span'); adv.className = 'cc-adv'; adv.textContent = 'custom';
+        adv.title = 'has per-connection request options (sampling / extra body / reasoning format)';
+        idline.appendChild(adv);
+      }
       var result = document.createElement('span'); result.className = 'cc-test';
       var actions = document.createElement('div'); actions.className = 'cc-actions';
       var test = document.createElement('button'); test.className = 'btn btn-sm'; test.textContent = 'Test';
@@ -2559,6 +2566,10 @@
     if (!url){ hint.textContent = 'blank = OpenRouter'; return; }
     hint.textContent = 'detected: ' + ((prov && prov !== 'auto') ? prov : providerOf(url));
   }
+  function connHasAdvanced(c){
+    var s = c.sampling, e = c.extra_body, r = c.reasoning_style;
+    return !!((s && Object.keys(s).length) || (e && Object.keys(e).length) || (r && r !== 'auto'));
+  }
   function openConnModal(conn){
     renderCapsChecks();
     $('connModalTitle').textContent = conn ? ('Edit connection: ' + conn.label) : 'Add connection';
@@ -2572,6 +2583,15 @@
     $('cnKey').placeholder = hasKey ? 'set — blank keeps the current key' : 'blank inherits provider key';
     var caps = {}; if (conn) (conn.capabilities || []).forEach(function(x){ caps[x] = true; });
     document.querySelectorAll('.cn-cap').forEach(function(cb){ cb.checked = !!caps[cb.value]; });
+    // Advanced: sampling reads back as '' when the key is ABSENT, but as '0' when it was
+    // explicitly overridden to zero — presence, not truthiness, is the contract.
+    var samp = (conn && conn.sampling) || {};
+    [['cnTemp','temperature'],['cnTopP','top_p'],['cnTopK','top_k'],['cnPresPen','presence_penalty']]
+      .forEach(function(p){ $(p[0]).value = (samp[p[1]] === undefined || samp[p[1]] === null) ? '' : String(samp[p[1]]); });
+    $('cnReasoningStyle').value = (conn && conn.reasoning_style) || 'auto';
+    var eb = (conn && conn.extra_body) || {};
+    $('cnExtraBody').value = Object.keys(eb).length ? JSON.stringify(eb, null, 2) : '';
+    $('cnAdvanced').open = !!(conn && connHasAdvanced(conn));
     $('connModalMsg').textContent = '';
     updateProviderHint();
     openModal('connModal');
@@ -2598,6 +2618,31 @@
     var key = $('cnKey').value.trim();
     if (key && key.indexOf('/') > -1) { msg.textContent = "That looks like a model ID, not a key — leave it blank to inherit the provider's key."; msg.classList.add('err'); return; }
     if (key) body.api_key = key;
+    // Sampling: only NON-BLANK inputs become keys, so a cleared field means "unset" while a typed
+    // "0" survives as a real override. Always sent (even as {}) so clearing a field actually clears.
+    var sampling = {}, sampBad = null;
+    [['cnTemp','temperature'],['cnTopP','top_p'],['cnTopK','top_k'],['cnPresPen','presence_penalty']]
+      .forEach(function(p){
+        var v = $(p[0]).value; if (typeof v !== 'string' || v.trim() === '') return;
+        var n = Number(v); if (!isFinite(n)) { sampBad = p[1]; return; }
+        sampling[p[1]] = (p[1] === 'top_k') ? Math.trunc(n) : n;
+      });
+    if (sampBad) { msg.textContent = sampBad + ' must be a number.'; msg.classList.add('err'); return; }
+    body.sampling = sampling;
+    body.reasoning_style = $('cnReasoningStyle').value || 'auto';
+    var raw = $('cnExtraBody').value.trim(), extra = {};
+    if (raw){
+      try { extra = JSON.parse(raw); }
+      catch(e){ msg.textContent = 'Extra request body is not valid JSON: ' + e.message; msg.classList.add('err'); $('cnAdvanced').open = true; return; }
+      if (!extra || typeof extra !== 'object' || Array.isArray(extra)) {
+        msg.textContent = 'Extra request body must be a JSON object, e.g. {"key": "value"}.'; msg.classList.add('err'); $('cnAdvanced').open = true; return;
+      }
+      var banned = ['messages','model','stream'].filter(function(k){ return Object.prototype.hasOwnProperty.call(extra, k); });
+      if (banned.length) {
+        msg.textContent = 'Extra request body may not set: ' + banned.join(', ') + '.'; msg.classList.add('err'); $('cnAdvanced').open = true; return;
+      }
+    }
+    body.extra_body = extra;
     var btn = this; btn.disabled = true;
     try {
       var r = await fetch('/model/presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

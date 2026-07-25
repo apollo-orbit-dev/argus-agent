@@ -1,6 +1,7 @@
 """Thin async OpenAI-compatible chat client (httpx). Config-driven; no hardcoding."""
 from __future__ import annotations
 
+import copy
 import re
 from typing import Optional
 
@@ -9,6 +10,18 @@ import httpx
 from engine.protocol import ModelResponse
 
 _THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
+
+# Reasoning wire-format dialects a connection can pin explicitly. "auto" keeps the historical
+# provider-inferred behaviour (see _reasoning_params); every other member exists ONLY because its
+# value has to change per call (thinking on/off is decided per turn) or because it mutates the
+# MESSAGES rather than the payload — anything static belongs in `extra_body` instead.
+REASONING_STYLES = ("auto", "none", "enable_thinking", "openrouter", "openai_effort",
+                    "thinking_type", "prompt_tag")
+
+# Keys `extra_body` may never set. `messages`/`model` are the request's identity; `stream` would
+# return an SSE body that chat()'s resp.json() cannot parse, turning every turn into a ModelError.
+# `tools`/`tool_choice` stay ALLOWED — legitimate advanced use that fails loudly and locally.
+EXTRA_BODY_DENYLIST = ("messages", "model", "stream")
 
 
 def _split_think(content: str) -> tuple[Optional[str], Optional[str]]:
@@ -34,7 +47,8 @@ class ModelClient:
                  timeout: float = 60.0, temperature: Optional[float] = None,
                  max_tokens: int = 1536, top_p: Optional[float] = None,
                  top_k: Optional[int] = None, presence_penalty: Optional[float] = None,
-                 provider: str = "auto", reasoning: str = "auto"):
+                 provider: str = "auto", reasoning: str = "auto",
+                 extra_body: Optional[dict] = None, reasoning_style: str = "auto"):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key
@@ -46,6 +60,14 @@ class ModelClient:
         self.presence_penalty = presence_penalty
         self.provider = self._resolve_provider(provider)
         self.reasoning = (reasoning or "auto").strip().lower()
+        # Per-connection request extras. Both are stored as private COPIES so a caller mutating the
+        # dict it passed (or the store handing out the same object twice) can't reach into a live
+        # client. Never raise on a bad stored value: a hand-edited connections file must degrade to
+        # today's behaviour, not brick every turn — so an unrecognised style becomes "auto" and a
+        # non-object extra_body becomes {}.
+        self.extra_body = copy.deepcopy(extra_body) if isinstance(extra_body, dict) else {}
+        style = reasoning_style.strip().lower() if isinstance(reasoning_style, str) else ""
+        self.reasoning_style = style if style in REASONING_STYLES else "auto"
 
     # Cloud hosts that speak the plain OpenAI wire format — no vLLM-only params, no /tokenize,
     # no vendor headers. Auto-detected so pointing the base URL at one just works; anything not
@@ -79,10 +101,31 @@ class ModelClient:
     def _reasoning_params(self, level: str) -> dict:
         """Translate a normalized reasoning level (auto|off|low|medium|high) into the wire params
         the active backend understands. 'auto' sends nothing, so the model/provider default stands
-        (and the local model behaves exactly as before this existed)."""
+        (and the local model behaves exactly as before this existed).
+
+        `reasoning_style` pins the dialect explicitly when provider inference guesses wrong;
+        "auto" (the default, and the fallback for anything unrecognised) runs the historical
+        provider branch below unchanged."""
         lvl = (level or "auto").strip().lower()
         if lvl in ("", "auto", "default"):
             return {}
+        style = self.reasoning_style
+        if style in ("none", "prompt_tag"):
+            # "none" = say nothing at any level (the per-connection off-switch for a model that
+            # 400s or misbehaves on a thinking toggle). "prompt_tag" expresses the level in the
+            # MESSAGES instead — see _reasoning_messages.
+            return {}
+        if style == "enable_thinking":
+            return {"chat_template_kwargs": {"enable_thinking": lvl != "off"}}
+        if style == "openrouter":
+            if lvl == "off":
+                return {"reasoning": {"enabled": False}}
+            return {"reasoning": {"effort": lvl}}
+        if style == "openai_effort":
+            return {} if lvl == "off" else {"reasoning_effort": lvl}
+        if style == "thinking_type":
+            return {"thinking": {"type": "disabled" if lvl == "off" else "enabled"}}
+        # ---- style "auto": the original provider-inferred branch, untouched ----
         if self.provider == "vllm":
             # The local reasoning model only toggles thinking on/off (no effort levels).
             return {"chat_template_kwargs": {"enable_thinking": lvl != "off"}}
@@ -100,39 +143,108 @@ class ModelClient:
         # so we let the model's own default stand rather than guess a wire format.
         return {}
 
+    def _reasoning_messages(self, level: str, messages: list[dict]) -> list[dict]:
+        """The one reasoning convention no args blob can express: Qwen3's SOFT SWITCH, where
+        thinking is toggled by appending `/think` or `/no_think` to the last user message. Only
+        `reasoning_style="prompt_tag"` does anything here; every other style returns the caller's
+        list unchanged (identity), so nothing is copied on the hot path.
+
+        NEVER mutates the caller's list or its dicts — the loop reuses one message list across the
+        steps of a turn, so an in-place append would accumulate "/no_think /no_think /no_think".
+        Shallow-copies the list and deep-copies only the one message it touches."""
+        if self.reasoning_style != "prompt_tag":
+            return messages
+        lvl = (level or "auto").strip().lower()
+        if lvl in ("", "auto", "default"):
+            return messages
+        tag = " /no_think" if lvl == "off" else " /think"
+        idx = next((i for i in range(len(messages) - 1, -1, -1)
+                    if isinstance(messages[i], dict) and messages[i].get("role") == "user"), None)
+        if idx is None:
+            return messages                       # no user turn to tag — leave it alone
+        out = list(messages)
+        msg = copy.deepcopy(out[idx])
+        content = msg.get("content")
+        if isinstance(content, list):
+            # Multimodal parts: tag the LAST text part (never stringify the parts list); if the
+            # turn is images-only, add a text part carrying just the switch.
+            target = next((p for p in reversed(content)
+                           if isinstance(p, dict) and p.get("type") == "text"), None)
+            if target is not None:
+                target["text"] = f"{target.get('text') or ''}{tag}"
+            else:
+                content.append({"type": "text", "text": tag.strip()})
+        else:
+            msg["content"] = f"{content if isinstance(content, str) else ''}{tag}"
+        out[idx] = msg
+        return out
+
+    def _merge_extra(self, payload: dict) -> dict:
+        """Merge the connection's `extra_body` into the request LAST, so it is the final word on
+        every key it names (sampling, tools, reasoning) — an escape hatch something else can
+        silently beat is not an escape hatch, and the main loop passes an explicit temperature on
+        every call, so anything weaker would leave an extra_body temperature permanently inert.
+
+        Merge rule: key only in extra -> set. Key in both and BOTH values are dicts -> ONE-LEVEL
+        deep merge with extra's inner keys winning (so `{"chat_template_kwargs": {"foo": 1}}`
+        doesn't silently delete an enable_thinking the reasoning style just set). Otherwise extra
+        replaces. The denylist is re-asserted here as well as at write time: a hand-edited JSON
+        file must not be able to hijack the request."""
+        if not self.extra_body:
+            return payload
+        for k, v in self.extra_body.items():
+            if isinstance(k, str) and k.strip().lower() in EXTRA_BODY_DENYLIST:
+                continue
+            cur = payload.get(k)
+            if isinstance(cur, dict) and isinstance(v, dict):
+                merged = dict(cur)
+                merged.update(copy.deepcopy(v))
+                payload[k] = merged
+            else:
+                payload[k] = copy.deepcopy(v) if isinstance(v, (dict, list)) else v
+        return payload
+
     async def chat(self, messages: list[dict], tools: Optional[list[dict]] = None,
                    max_tokens: Optional[int] = None,
                    temperature: Optional[float] = None,
                    think: Optional[bool] = None,
                    reasoning: Optional[str] = None,
                    tool_choice: Optional[str] = None) -> ModelResponse:
+        # Reasoning control, translated to the active backend's wire format. Priority:
+        #  1. an explicit per-call `reasoning` level (the adaptive router sets this per turn),
+        #  2. think=False -> "off" (auxiliary calls; also stops the local model from deliberating
+        #     past its budget into empty content),
+        #  3. otherwise the configured default (self.reasoning).
+        # Computed up front because the "prompt_tag" style expresses the level in the MESSAGES
+        # rather than the payload, and the messages go in on the very next line; every other style
+        # contributes payload params, added further down just before the extras merge.
+        level = reasoning if reasoning else ("off" if think is False else self.reasoning)
         payload: dict = {
             "model": self.model,
-            "messages": messages,
+            "messages": self._reasoning_messages(level, messages),
             "max_tokens": max_tokens if max_tokens is not None else self.max_tokens,
         }
         # Only send sampling params that are explicitly configured. Anything left unset is omitted
         # so the model server (vLLM) applies its OWN default — we don't duplicate the model's tuning
-        # here. A per-call `temperature` still wins (used e.g. to force determinism for a test).
+        # here. A per-call `temperature` beats the configured one (used e.g. to force determinism
+        # for a test); the connection's extra_body beats both — see _merge_extra.
         temp = temperature if temperature is not None else self.temperature
         if temp is not None:
             payload["temperature"] = temp
         if self.top_p is not None:
             payload["top_p"] = self.top_p
-        if self.top_k is not None and self.top_k > 0 and self.provider == "vllm":   # vLLM-only param
+        if (isinstance(self.top_k, int) and self.top_k > 0
+                and self.provider == "vllm"):   # vLLM-only param
             payload["top_k"] = self.top_k
         if self.presence_penalty is not None:
             payload["presence_penalty"] = self.presence_penalty
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = tool_choice or "auto"   # native_finish forces "required"
-        # Reasoning control, translated to the active backend's wire format. Priority:
-        #  1. an explicit per-call `reasoning` level (the adaptive router sets this per turn),
-        #  2. think=False -> "off" (auxiliary calls; also stops the local model from deliberating
-        #     past its budget into empty content),
-        #  3. otherwise the configured default (self.reasoning).
-        level = reasoning if reasoning else ("off" if think is False else self.reasoning)
         payload.update(self._reasoning_params(level))
+        # …and the connection's free-form extras last of all, so they win over sampling, tools and
+        # reasoning alike (denylisted keys stripped inside).
+        payload = self._merge_extra(payload)
 
         url = f"{self.base_url}/chat/completions"
         headers = {"Authorization": f"Bearer {self.api_key}",
@@ -178,7 +290,12 @@ class ModelClient:
         (a max_tokens=1 completion, or a 1-input embedding for embedding connections) so it
         validates base_url + auth + model id in a single tiny, user-initiated call. Returns
         {ok, status, detail, latency_ms, hint?} rather than raising, so the UI can show a
-        specific reason."""
+        specific reason.
+
+        The connection's `extra_body` is merged in exactly as `chat()` does — a green Test is
+        supposed to mean the connection's real request options are accepted by the endpoint, not
+        just its bare base_url/auth/model id. Without this, a user could save an extra_body that
+        400s on the real endpoint, see green, and have every subsequent turn fail."""
         import time
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         if self.provider == "openrouter":
@@ -191,6 +308,7 @@ class ModelClient:
             payload = {"model": self.model, "messages": [{"role": "user", "content": "ping"}],
                        "max_tokens": 1}
             payload.update(self._reasoning_params("off"))   # don't burn reasoning tokens on a ping
+        payload = self._merge_extra(payload)
         t0 = time.perf_counter()
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
