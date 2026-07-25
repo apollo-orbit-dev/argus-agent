@@ -2,19 +2,54 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## 0.13.0
+
+Per-connection request options, Telegram session commands, dashboard responsiveness fixes, and a
+sandbox isolation guard. Also the first tagged release carrying progressive tool disclosure — shipped
+OFF and not yet usable; see the note under Experimental.
 
 ### Added
+- **Per-connection request options.** A connection can now carry `extra_body` (a free-form JSON object
+  merged verbatim into every request), per-model `sampling` overrides, and a `reasoning_style`. The
+  `extra_body` escape hatch means a model whose thinking toggle Argus has never seen — a different
+  `chat_template_kwargs` name, a vendor budget field, guided-decoding params — works without a code
+  change. `messages`, `model` and `stream` are refused. Defaults keep every existing deploy
+  byte-identical.
+- **Telegram `/sessions`, `/session`, `/rename`**, and `/new` relabelled to `/reset` to match the
+  dashboard's reset-vs-new-session distinction. Session ids render tap-to-copy.
+- **Automatic session titles.** A dashboard session's placeholder id is replaced with a generated
+  title after its first completed turn, in the background. Silently skips when no model is configured
+  for the aux call; never overwrites a manual rename.
+- **Live sidebar refresh** via a reserved `__control__` event channel, so an out-of-band rename (an
+  auto-title, another tab, Telegram) updates the session list without a page refresh.
 - Benchmark report gains an `abort` column: the share of runs the loop itself ended on
-  `stuck_repeating` (exact-repeat tool-call thrash). Diagnostic only — does not affect `solved`.
-  Legacy results (no observer data on disk) render `—`; the baseline arm (`enable_observer` off)
-  renders `n/a`.
+  `stuck_repeating`. Diagnostic only — does not affect `solved`. Legacy results render `—`; the
+  baseline arm (observer off) renders `n/a`.
+- `inspect_tool` now describes BUILT-IN tools, not just created ones.
 
 ### Fixed
-- `SUM`/`AVG`/`TOTAL` over a declared-TEXT column now raises `TableError` instead of silently
-  returning `0.0` (SQLite treats non-numeric text as 0 in arithmetic aggregates). Guard is
-  conservative: only the unambiguous bare-column form is refused — CAST, expressions, subqueries,
-  CTEs, and alias-qualified names all pass through untouched.
+- **Sandbox: refuse to adopt another instance's container.** Podman object names are global per OS
+  user, so a second Argus with the sandbox on would reuse the first's workspace container — whose
+  bind mount points at the *first* instance's files. Two instances would have silently shared a
+  workspace. Containers/networks can now be namespaced per instance (`SANDBOX_INSTANCE`), and
+  adoption is refused when the mount does not match.
+- **Console echoes your message immediately** instead of leaving it invisible until the turn finished.
+- `SUM`/`AVG`/`TOTAL` over a declared-TEXT column now raises instead of silently returning `0.0`.
+  Conservative: only the unambiguous bare-column form is refused.
+- `create_tool` no longer reports "created and verified" when its hardcode check could not run —
+  it now says plainly that it could not confirm the tool uses its inputs.
+- The benchmark's `no_observer` predicate was passing vacuously: observer events were never captured,
+  so any battery asserting "the loop never gave up" was told it held regardless.
+- `update_rows` description reworded so a small model reaches for it on "change/set/mark all X".
+- Emoji and other non-BMP characters now round-trip through skill frontmatter.
+
+### Experimental
+- **Progressive tool disclosure** (`TOOL_DISCLOSURE_MODE`, default `off`): advertise only the K most
+  relevant tools per turn instead of the whole catalog. Narrows PRESENTATION only — a hidden tool
+  still executes if the model names it, and `find_tool` retrieves it. **Not usable yet:** at the
+  shipped default (K=12) its coverage pre-flight is red — 21 of 52 benchmark chain tasks lose a tool
+  they need. Enabling it is not recommended until that closes. Off by default, with verified
+  byte-identical behaviour when disabled.
 
 ## 0.12.1
 
