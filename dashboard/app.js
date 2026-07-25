@@ -648,9 +648,16 @@
     return esc(raw);
   }
 
+  // Monotonic counter guarding against out-of-order responses: if the user clicks Transcript
+  // (fetch A in flight), then sends a message (echo appended), and fetch A resolves AFTER a
+  // newer load was issued, applying A's stale (pre-message) snapshot would wipe the echo and
+  // reintroduce the "invisible until reload" bug. Only the most-recently-issued load may render.
+  var transcriptLoadSeq = 0;
   async function loadTranscript(id){
+    var mySeq = ++transcriptLoadSeq;
     try {
       var data = await (await fetch('/sessions/' + encodeURIComponent(id) + '/messages?limit=1000')).json();
+      if (mySeq !== transcriptLoadSeq) return;   // a newer load superseded this one — drop it
       // Drop empty / json-null turns: an assistant tool-call turn is stored with null content and would
       // otherwise render as the literal "null". The raw log keeps them; the chat view hides them.
       var msgs = (data.messages || []).filter(function(m){
@@ -693,6 +700,54 @@
       wireToolClamps();
       viewerBody.scrollTop = viewerBody.scrollHeight;
     } catch(e){ toast('Failed to load transcript: ' + e.message, 'err'); }
+  }
+
+  // Optimistically echo the user's just-sent message into the transcript view, before the server
+  // has recorded (or replied to) the turn — otherwise the message is invisible for the whole run,
+  // which on a small local model can be many seconds. Reconciliation is wholesale: loadTranscript()
+  // replaces viewerBody.innerHTML entirely once the real transcript reloads (see the SSE 'final'
+  // handler above, the unconditional reload runTask() does after every 200-OK /run response — not
+  // every completion path emits 'final', so that response is the only reload guaranteed to fire —
+  // or a manual Transcript click), which naturally wipes this node — no content matching needed,
+  // so sending identical text twice is never mistaken for a dupe.
+  function appendOptimisticUserMessage(text){
+    var chat = viewerBody.querySelector('.chat');
+    if (!chat){
+      // Empty-transcript placeholder (or nothing rendered yet): replace it with a fresh chat list
+      // rather than appending after it, and bring the header/meta count out of "no messages yet"
+      // since the placeholder text is about to be gone.
+      viewerBody.innerHTML = '<div class="chat"></div>';
+      chat = viewerBody.querySelector('.chat');
+      viewerHead.innerHTML =
+        '<span class="vh-id num">transcript</span><span class="vh-sep">·</span>' +
+        '<span class="vh-session">' + esc(SESSION) + '</span><span class="vh-sep">·</span>' +
+        '<span class="vh-steps num">1 message</span>';
+      updateTranscriptMeta(1);
+    }
+    var row = document.createElement('div');
+    row.className = 'chat-row me';
+    row.setAttribute('data-optimistic', '1');   // tags this node as client-only, unconfirmed
+    row.innerHTML = '<div class="chat-bubble me pending">' + esc(text) + '</div>';
+    chat.appendChild(row);
+    viewerBody.scrollTop = viewerBody.scrollHeight;
+    return row;
+  }
+  // Mark an optimistic bubble as failed-to-send rather than removing it: the POST may have failed
+  // before the server ever recorded the message, so silently dropping it would hide that the turn
+  // never happened. If a transcript reload already reconciled (and replaced viewerBody, detaching
+  // this node from the live .chat list) in the meantime, there's nothing left to mark.
+  function markOptimisticFailed(node){
+    if (!node || !viewerBody.contains(node)) return;
+    var bubble = node.querySelector('.chat-bubble');
+    if (bubble){ bubble.classList.remove('pending'); bubble.classList.add('failed'); }
+    var note = document.createElement('div');
+    note.className = 'chat-optimistic-note';
+    // run_loop persists the user message at turn START, before any model call (engine/loop.py) —
+    // so a failed POST does NOT mean the message wasn't sent; it may have been recorded and is
+    // possibly being answered right now. Don't assert either direction (and don't invite a
+    // duplicate resend by claiming "not sent" when it likely was).
+    note.textContent = 'delivery unconfirmed — run failed';
+    node.appendChild(note);
   }
 
   // Tool output in the transcript is clamped to ~5 rows (.clampable). For each block that actually
@@ -883,6 +938,10 @@
     var skillSel = $('skillPicker');
     var skill = (skillSel && !skillSel.disabled && skillSel.value) ? skillSel.value : null;
 
+    // Echo the message into the transcript immediately, before the turn completes — but only when
+    // the transcript is what's on screen; a run trace view must not be yanked away by a send.
+    var optimisticNode = (currentView === 'transcript') ? appendOptimisticUserMessage(text) : null;
+
     runBtn.disabled = true;
     // any clarify-option buttons from a prior turn are now stale — retire them so a scrolled-back
     // old choice can't be sent as this turn's answer.
@@ -903,10 +962,19 @@
       runnerInput.value = '';
       autosizeRunnerInput();
       loadUsage();
+      // Not every 200-OK /run path emits an SSE 'final' event (model-call failure, parse-failure
+      // give-up, max-steps exhausted, or a paused approval that times out all return normally
+      // without one) — so the reconciling reload above can never fire and the optimistic echo is
+      // stuck pending forever. Force a reload here whenever the transcript is on screen; it's a
+      // wholesale viewerBody replace, so a redundant reload (when 'final' DID already fire) is harmless.
+      if (currentView === 'transcript') loadTranscript(SESSION);
     } catch (e) {
       runStatus.textContent = 'run failed';
       runStatus.style.color = 'var(--danger)';
       toast('Run failed: ' + e.message, 'err');
+      // The POST may have failed before the server ever recorded the message — don't imply it was
+      // delivered, but don't silently erase what the user typed either.
+      if (optimisticNode) markOptimisticFailed(optimisticNode);
     } finally {
       runBtn.disabled = false;
     }
