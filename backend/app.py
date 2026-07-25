@@ -214,9 +214,18 @@ def create_app(engine: Engine) -> FastAPI:
         name = (body.get("model_name") or "").strip()
         if not name:
             raise HTTPException(400, "model_name is required")
-        return engine.model_preset_add(name, body.get("base_url", ""), body.get("context_window"),
-                                       body.get("label", ""), body.get("provider", "auto"),
-                                       api_key=body.get("api_key"), capabilities=body.get("capabilities"))
+        try:
+            # sampling / extra_body / reasoning_style are validated in the store; a bad value is a
+            # 400 rather than a saved connection that 400s on every turn from here on.
+            return engine.model_preset_add(name, body.get("base_url", ""), body.get("context_window"),
+                                           body.get("label", ""), body.get("provider", "auto"),
+                                           api_key=body.get("api_key"),
+                                           capabilities=body.get("capabilities"),
+                                           sampling=body.get("sampling"),
+                                           extra_body=body.get("extra_body"),
+                                           reasoning_style=body.get("reasoning_style"))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
 
     # ---- capability roles (chat / embedding / vision / …) mapped to connections ----
     @app.get("/model/roles")

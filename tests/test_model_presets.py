@@ -1,4 +1,6 @@
 """Server-side model presets + the Telegram /model, /models, /reasoning command helpers."""
+import pytest
+
 from backend.telegram_bot import model_command, models_text, reasoning_command
 from engine.model_presets import ModelPresetStore
 
@@ -237,3 +239,72 @@ def test_utility_and_new_roles_in_capabilities(tmp_path):
     r = _real_engine(tmp_path).model_roles()
     for cap in ("utility", "reasoning", "coding"):
         assert cap in r["capabilities"]
+
+
+# ---- per-connection request options: sampling / extra_body / reasoning_style ----
+
+def test_request_options_roundtrip(tmp_path):
+    """14. All three persist and read back, across store instances."""
+    p = str(tmp_path / "mp.json")
+    ModelPresetStore(p).add("qwen", "http://vllm/v1", "qwen3", "vllm",
+                            sampling={"temperature": 0.0, "top_k": "20", "bogus": 1},
+                            extra_body={"chat_template_kwargs": {"thinking": True}},
+                            reasoning_style="  Prompt_Tag ")
+    got = ModelPresetStore(p).resolve("qwen")
+    assert got["sampling"] == {"temperature": 0.0, "top_k": 20}   # unknown key dropped, top_k int
+    assert got["extra_body"] == {"chat_template_kwargs": {"thinking": True}}
+    assert got["reasoning_style"] == "prompt_tag"                 # normalized
+
+
+def test_request_options_preserved_on_update(tmp_path):
+    """15. Correcting a context window must never silently wipe a tuned extra_body — same rule the
+    api_key/capabilities fields already follow. Passing {} is how you actually clear one."""
+    s = ModelPresetStore(str(tmp_path / "mp.json"))
+    s.add("qwen", "http://vllm/v1", "qwen3", "vllm", sampling={"temperature": 0.3},
+          extra_body={"thinking_budget": 4096}, reasoning_style="enable_thinking")
+    s.add("qwen", "http://vllm/v1", "qwen3", "vllm", context_window=131072)   # nothing passed
+    got = s.resolve("qwen")
+    assert got["sampling"] == {"temperature": 0.3}
+    assert got["extra_body"] == {"thinking_budget": 4096}
+    assert got["reasoning_style"] == "enable_thinking"
+    assert got["context_window"] == 131072
+    s.add("qwen", "http://vllm/v1", "qwen3", "vllm", sampling={}, extra_body={},
+          reasoning_style="auto")                                            # explicit clear
+    got = s.resolve("qwen")
+    assert got["sampling"] == {} and got["extra_body"] == {} and got["reasoning_style"] == "auto"
+
+
+def test_request_options_validation_rejects_loudly(tmp_path):
+    """16. Bad values are refused at WRITE time (-> HTTP 400) rather than 400-ing on every turn
+    weeks later. The denylist is the first of its two enforcement points."""
+    s = ModelPresetStore(str(tmp_path / "mp.json"))
+    for bad in ({"messages": []}, {"model": "evil"}, {"stream": True}):
+        with pytest.raises(ValueError):
+            s.add("x", "http://vllm/v1", "m", extra_body=bad)
+    for bad in ([1, 2], "not json", 7):
+        with pytest.raises(ValueError):
+            s.add("x", "http://vllm/v1", "m", extra_body=bad)
+    with pytest.raises(ValueError):
+        s.add("x", "http://vllm/v1", "m", reasoning_style="vendor-x")
+    with pytest.raises(ValueError):
+        s.add("x", "http://vllm/v1", "m", sampling={"temperature": "hot"})
+    with pytest.raises(ValueError):
+        s.add("x", "http://vllm/v1", "m", sampling=["temperature"])
+    assert s.list() == []                                    # nothing was written
+    # tools/tool_choice are deliberately NOT denylisted — legitimate advanced use
+    s.add("ok", "http://vllm/v1", "m", extra_body={"tools": [], "tool_choice": "none"})
+    assert s.resolve("ok")["extra_body"] == {"tools": [], "tool_choice": "none"}
+
+
+def test_legacy_connection_file_loads_with_defaults(tmp_path):
+    """17. Existing files simply lack the keys — no migration, and the engine reads them as unset."""
+    import json
+    p = str(tmp_path / "mp.json")
+    json.dump({"connections": [{"label": "old", "base_url": "http://x/v1", "model_name": "m"}],
+               "roles": {"chat": "old"}}, open(p, "w"))
+    s = ModelPresetStore(p)
+    old = s.resolve("old")
+    assert "sampling" not in old and "extra_body" not in old and "reasoning_style" not in old
+    e = _real_engine(tmp_path)
+    e.model_presets_store = s
+    assert e._conn_client_kwargs(old) == {}                  # reads back as "nothing overridden"

@@ -767,10 +767,38 @@
           <option value="vllm">vllm / ollama</option>
         </select>
       </div>
-      <div class="field" style="margin-bottom:0;">
+      <div class="field">
         <label class="field-label">Powers <span class="field-note">jobs this connection can be assigned</span></label>
         <div class="caps-row" id="cnCaps"></div>
       </div>
+      <details class="conn-advanced" id="cnAdvanced">
+        <summary>Advanced — per-connection request options</summary>
+        <div class="field">
+          <label class="field-label">Sampling <span class="field-note">blank = use the global default; <code>0</code> is a real override</span></label>
+          <div class="grid grid-2">
+            <input type="number" step="any" id="cnTemp" placeholder="temperature — global default">
+            <input type="number" step="any" id="cnTopP" placeholder="top_p — global default">
+            <input type="number" step="1" id="cnTopK" placeholder="top_k — vLLM only">
+            <input type="number" step="any" id="cnPresPen" placeholder="presence_penalty — global default">
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label" for="cnReasoningStyle">Reasoning wire format <span class="field-note">how "think on/off" is said to this model</span></label>
+          <select id="cnReasoningStyle">
+            <option value="auto">auto (infer from provider)</option>
+            <option value="none">none — never send a thinking param</option>
+            <option value="enable_thinking">chat_template_kwargs.enable_thinking (Qwen3, GLM, vLLM)</option>
+            <option value="openrouter">reasoning.enabled / reasoning.effort (OpenRouter)</option>
+            <option value="openai_effort">reasoning_effort (OpenAI)</option>
+            <option value="thinking_type">thinking.type = enabled/disabled (Zhipu, Anthropic-shaped)</option>
+            <option value="prompt_tag">/think · /no_think appended to the last user message (Qwen3 soft switch)</option>
+          </select>
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label class="field-label" for="cnExtraBody">Extra request body <span class="field-note">JSON object, merged last — overrides sampling and reasoning; <code>messages</code>, <code>model</code> and <code>stream</code> are ignored</span></label>
+          <textarea id="cnExtraBody" rows="4" spellcheck="false" placeholder='{"chat_template_kwargs": {"thinking": true}}'></textarea>
+        </div>
+      </details>
     </div>
     <div class="modal-foot">
       <span class="conn-modal-msg" id="connModalMsg"></span>
