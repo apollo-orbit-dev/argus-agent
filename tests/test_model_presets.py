@@ -296,6 +296,16 @@ def test_request_options_validation_rejects_loudly(tmp_path):
     assert s.resolve("ok")["extra_body"] == {"tools": [], "tool_choice": "none"}
 
 
+def test_request_options_denylist_is_case_insensitive(tmp_path):
+    """A JSON key of 'Model' or 'Stream' isn't an actual override (the OpenAI wire is
+    case-sensitive, so it's just an unknown param) — but it should still be refused loudly at
+    write time rather than left to 400 confusingly on the real endpoint."""
+    s = ModelPresetStore(str(tmp_path / "mp.json"))
+    for bad in ({"Model": "evil"}, {"STREAM": True}, {" Messages ": []}):
+        with pytest.raises(ValueError):
+            s.add("x", "http://vllm/v1", "m", extra_body=bad)
+
+
 def test_legacy_connection_file_loads_with_defaults(tmp_path):
     """17. Existing files simply lack the keys — no migration, and the engine reads them as unset."""
     import json

@@ -1005,6 +1005,7 @@ class Engine:
         Note extra_body deliberately sits OUTSIDE this chain — ModelClient merges it last, after
         even a per-call temperature. The main loop passes an explicit temperature on every call, so
         anything weaker would leave an extra_body temperature permanently inert."""
+        from engine.model_presets import SAMPLING_KEYS
         conn = conn if isinstance(conn, dict) else {}
         samp = conn.get("sampling")
         samp = samp if isinstance(samp, dict) else {}
@@ -1013,7 +1014,13 @@ class Engine:
                                ("top_k", "model_top_k"),
                                ("presence_penalty", "model_presence_penalty")):
             if samp.get(key) is not None:
-                out[key] = samp[key]
+                # A hand-edited connections.json isn't validated by ModelPresetStore.add()'s
+                # _clean_sampling — coerce here too, and DROP (never propagate) a value that
+                # can't cast, so a bad stored value degrades instead of crashing every turn.
+                try:
+                    out[key] = SAMPLING_KEYS[key](samp[key])
+                except (TypeError, ValueError):
+                    continue
             elif global_sampling and getattr(self._config, cfg_field) is not None:
                 out[key] = getattr(self._config, cfg_field)
         extra = conn.get("extra_body")

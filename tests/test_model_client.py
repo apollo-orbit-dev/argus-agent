@@ -366,6 +366,22 @@ async def test_extra_body_cannot_clobber_denylisted_keys():
     assert seen["body"]["top_p"] == 0.5              # non-denylisted keys still apply
 
 
+async def test_extra_body_denylist_is_case_insensitive():
+    """A hand-edited connections file could carry 'Model'/'Stream' — different JSON keys on the
+    wire (case-sensitive), so not an actual override, but the merge must still strip them rather
+    than send an unknown param and 400 confusingly."""
+    seen = {}
+    patch_asyncclient.transport = httpx.MockTransport(_capture_handler(seen))
+    c = ModelClient("http://vllm.local/v1", "main",
+                    extra_body={"Model": "evil-model", "STREAM": True, " Messages ": "bogus",
+                                "top_p": 0.5})
+    await c.chat([{"role": "user", "content": "hi"}])
+    assert seen["body"]["model"] == "main"
+    assert "Model" not in seen["body"] and "STREAM" not in seen["body"]
+    assert " Messages " not in seen["body"] and "Messages" not in seen["body"]
+    assert seen["body"]["top_p"] == 0.5
+
+
 async def test_extra_body_not_shared_between_requests():
     """The client keeps a private copy; mutating the caller's dict afterwards must not leak in."""
     src = {"chat_template_kwargs": {"thinking": True}}
@@ -542,6 +558,22 @@ async def test_probe_embedding_uses_embeddings_endpoint():
     patch_asyncclient.transport = httpx.MockTransport(handler)
     r = await ModelClient("http://x/v1", "embed").probe(kind="embedding")
     assert r["ok"] is True and seen["path"].endswith("/embeddings")
+
+
+async def test_probe_merges_extra_body():
+    """A green Test means the connection's real request options are accepted by the endpoint —
+    not just its bare base_url/auth/model id. If a saved extra_body would 400 on the real
+    endpoint, the Test button is the one place a user finds out BEFORE every subsequent turn
+    fails the same way. Same merge, same denylist, as chat()."""
+    seen = {}
+    patch_asyncclient.transport = httpx.MockTransport(_capture_handler(seen))
+    c = ModelClient("http://vllm.local/v1", "main",
+                    extra_body={"guided_json": {"type": "object"}, "max_tokens": 7,
+                                "messages": [{"role": "user", "content": "PWNED"}]})
+    await c.probe()
+    assert seen["body"]["guided_json"] == {"type": "object"}
+    assert seen["body"]["max_tokens"] == 7            # extra_body wins over probe's own max_tokens=1
+    assert seen["body"]["messages"] != [{"role": "user", "content": "PWNED"}]   # denylisted, stripped
 
 
 async def test_chat_captures_reasoning_field():

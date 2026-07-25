@@ -69,7 +69,7 @@ def _clean_extra_body(value) -> dict:
     if not isinstance(value, dict):
         raise ValueError("extra_body must be a JSON object")
     for k in value:
-        if k in EXTRA_BODY_DENYLIST:
+        if isinstance(k, str) and k.strip().lower() in EXTRA_BODY_DENYLIST:
             raise ValueError(f"extra_body may not set '{k}' "
                              f"(reserved: {', '.join(EXTRA_BODY_DENYLIST)})")
     return copy.deepcopy(value)

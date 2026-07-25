@@ -193,7 +193,7 @@ class ModelClient:
         if not self.extra_body:
             return payload
         for k, v in self.extra_body.items():
-            if k in EXTRA_BODY_DENYLIST:
+            if isinstance(k, str) and k.strip().lower() in EXTRA_BODY_DENYLIST:
                 continue
             cur = payload.get(k)
             if isinstance(cur, dict) and isinstance(v, dict):
@@ -233,7 +233,8 @@ class ModelClient:
             payload["temperature"] = temp
         if self.top_p is not None:
             payload["top_p"] = self.top_p
-        if self.top_k is not None and self.top_k > 0 and self.provider == "vllm":   # vLLM-only param
+        if (isinstance(self.top_k, int) and self.top_k > 0
+                and self.provider == "vllm"):   # vLLM-only param
             payload["top_k"] = self.top_k
         if self.presence_penalty is not None:
             payload["presence_penalty"] = self.presence_penalty
@@ -289,7 +290,12 @@ class ModelClient:
         (a max_tokens=1 completion, or a 1-input embedding for embedding connections) so it
         validates base_url + auth + model id in a single tiny, user-initiated call. Returns
         {ok, status, detail, latency_ms, hint?} rather than raising, so the UI can show a
-        specific reason."""
+        specific reason.
+
+        The connection's `extra_body` is merged in exactly as `chat()` does — a green Test is
+        supposed to mean the connection's real request options are accepted by the endpoint, not
+        just its bare base_url/auth/model id. Without this, a user could save an extra_body that
+        400s on the real endpoint, see green, and have every subsequent turn fail."""
         import time
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         if self.provider == "openrouter":
@@ -302,6 +308,7 @@ class ModelClient:
             payload = {"model": self.model, "messages": [{"role": "user", "content": "ping"}],
                        "max_tokens": 1}
             payload.update(self._reasoning_params("off"))   # don't burn reasoning tokens on a ping
+        payload = self._merge_extra(payload)
         t0 = time.perf_counter()
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:

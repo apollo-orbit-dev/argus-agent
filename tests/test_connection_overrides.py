@@ -126,9 +126,10 @@ def test_aux_uses_utility_connections_reasoning_style(tmp_path):
     assert e._model_client().reasoning_style == "enable_thinking"   # chat unaffected
 
 
-def test_test_preset_and_caption_layer_connection_options(tmp_path):
-    """The probe and the caption client resolve their own connection's options too — with no
-    global sampling tier, same as aux."""
+def test_conn_client_kwargs_and_test_preset_use_the_helper(tmp_path):
+    """`_conn_client_kwargs` — the helper `test_preset`/`_caption_image`/`_aux_model_client` all
+    build their clients from — resolves a connection's own options with no global sampling tier,
+    same as aux. `test_preset` itself is exercised just enough to prove it doesn't explode."""
     import asyncio
 
     e = _engine(tmp_path, model_temperature=0.2)
@@ -140,8 +141,11 @@ def test_test_preset_and_caption_layer_connection_options(tmp_path):
     assert kw == {"top_p": 0.3, "extra_body": {"z": 1}, "reasoning_style": "none"}
     assert "temperature" not in kw                    # no global tier off the chat client
     # test_preset builds a client from the same helper; just prove it doesn't explode
-    res = asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
-        e.test_preset("nope-does-not-exist"))
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    try:
+        res = loop.run_until_complete(e.test_preset("nope-does-not-exist"))
+    finally:
+        loop.close()
     assert res["ok"] is False
 
 
@@ -150,7 +154,70 @@ def test_helper_tolerates_garbage_stored_values(tmp_path):
     every turn."""
     e = _engine(tmp_path, model_temperature=0.2)
     for junk in (None, {}, {"sampling": "nope", "extra_body": [], "reasoning_style": 7},
-                 {"sampling": {"temperature": None}, "extra_body": {}, "reasoning_style": "  "}):
+                 {"sampling": {"temperature": None}, "extra_body": {}, "reasoning_style": "  "},
+                 {"sampling": {"top_k": "20"}}):
         kw = e._conn_client_kwargs(junk)
         assert "extra_body" not in kw and "reasoning_style" not in kw
         assert e._conn_client_kwargs(junk, global_sampling=True)["temperature"] == 0.2
+    # a numeric STRING coerces cleanly (ModelClient wants an int, not "20")
+    assert e._conn_client_kwargs({"sampling": {"top_k": "20"}}) == {"top_k": 20}
+    # a non-numeric string can't be cast — dropped, not propagated to crash ModelClient later
+    assert e._conn_client_kwargs({"sampling": {"top_k": "nope"}}) == {}
+
+
+def _run_chat(client, handler):
+    """Drive one client.chat() call through a mock transport, closing the loop it borrows."""
+    import asyncio
+    import unittest.mock as mock
+
+    import httpx
+
+    real_init = httpx.AsyncClient.__init__
+
+    def fake_init(self, *a, **kw):
+        real_init(self, *a, **{**kw, "transport": httpx.MockTransport(handler)})
+
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    try:
+        with mock.patch.object(httpx.AsyncClient, "__init__", fake_init):
+            return loop.run_until_complete(client.chat([{"role": "user", "content": "hi"}]))
+    finally:
+        loop.close()
+
+
+def _ok_handler(seen=None):
+    import json as _j
+
+    import httpx
+
+    def handler(req):
+        if seen is not None:
+            seen["body"] = _j.loads(req.content)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"},
+                                                       "finish_reason": "stop"}], "usage": {}})
+    return handler
+
+
+def test_stored_garbage_top_k_does_not_crash_a_turn(tmp_path):
+    """FIX for the crash a hand-edited connections.json used to cause EVERY turn: `sampling.top_k`
+    stored as the string "20" reached ModelClient unvalidated and blew up at
+    `self.top_k > 0` (str > int -> TypeError), which is not a ModelError, so the loop's
+    `except ModelError` never caught it. `_conn_client_kwargs` must now coerce/drop it instead."""
+    from engine.model_client import ModelClient
+
+    e = _engine(tmp_path)
+    e.model_presets_store.add("chat-conn", "http://vllm/v1", "main", "vllm",
+                              sampling={"top_k": "20"})
+    e.model_presets_store.set_role("chat", "chat-conn")
+    mc = e._model_client()
+    assert mc.top_k == 20 and isinstance(mc.top_k, int)   # coerced, not the raw string
+
+    seen = {}
+    _run_chat(mc, _ok_handler(seen))                       # must not raise
+    assert seen["body"]["top_k"] == 20
+
+    # Belt-and-braces: even if a bad-typed top_k somehow reached ModelClient directly (bypassing
+    # the engine helper entirely — e.g. a caller that builds one by hand), the client itself must
+    # still not crash.
+    bad = ModelClient("http://vllm/v1", "main", top_k="20", provider="vllm")
+    _run_chat(bad, _ok_handler())                           # must not raise
