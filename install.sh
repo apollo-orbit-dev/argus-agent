@@ -52,8 +52,11 @@ else
     # a second Argus instance (e.g. a daily one and a dev one) next to the first easy: each
     # install picks its own folder. Read from /dev/tty so it works even when the script is
     # piped in (curl ... | bash); falls back to the default with no terminal (non-interactive
-    # install).
-    if [ -r /dev/tty ]; then
+    # install). Test that /dev/tty can actually be OPENED, not merely that it looks readable:
+    # [ -r /dev/tty ] can pass in environments where /dev/tty exists but there is no
+    # controlling terminal to attach to (ENXIO — CI, containers), and the write below would
+    # then kill the script under set -e having done nothing.
+    if { : >/dev/tty; } 2>/dev/null; then
         ATTEMPTS=0
         MAX_ATTEMPTS=5
         while :; do
@@ -150,10 +153,11 @@ if [ ! -f ".env" ]; then
     # Dashboard port — Enter keeps the default. Prompting here makes running several Argus
     # instances on one machine easy: each install picks its own port. Read from /dev/tty so it
     # works even when the script is piped in (curl ... | bash); falls back to the default with
-    # no terminal (non-interactive install).
+    # no terminal (non-interactive install). Same actually-openable check as the folder-name
+    # prompt above — see that comment for why [ -r /dev/tty ] alone isn't enough.
     DEFAULT_PORT=8700
     PORT="$DEFAULT_PORT"
-    if [ -r /dev/tty ]; then
+    if { : >/dev/tty; } 2>/dev/null; then
         printf '  Dashboard port [%s]: ' "$DEFAULT_PORT" > /dev/tty
         read -r REPLY_PORT < /dev/tty || REPLY_PORT=""
         if [ -n "$REPLY_PORT" ]; then

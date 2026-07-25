@@ -44,12 +44,32 @@ if ((Test-Path "main.py") -and (Test-Path "pyproject.toml")) {
 } else {
     # Install folder name - Enter keeps the default "argus". Prompting here makes running a
     # second Argus instance (e.g. a daily one and a dev one) next to the first easy: each
-    # install picks its own folder.
+    # install picks its own folder. Read-Host throws a HostException when the host doesn't
+    # support prompting (e.g. pwsh -NonInteractive, or any host with prompting disabled) -
+    # catch that and fall back to the default with no prompt, same no-tty policy as
+    # install.sh's dedicated no-tty branch: no loop, and a collision on the default name is a
+    # hard Fail rather than an interactive retry (there's nobody to re-prompt).
+    $reservedNames = '^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?$'
     $attempts = 0
     $maxAttempts = 5
+    $noTty = $false
     while ($true) {
-        if ($attempts -eq 0) { $reply = Read-Host "  Install folder name [$DefaultDirName]" }
-        else { $reply = Read-Host "  Install folder name (or press Enter/q to cancel)" }
+        if ($noTty) {
+            $candidate = $DefaultDirName
+            if ((Test-Path $candidate -PathType Container) -and ((Test-Path (Join-Path $candidate ".env")) -or (Test-Path (Join-Path $candidate "data") -PathType Container))) {
+                Fail "$(Join-Path (Get-Location).Path $candidate) already looks like an existing Argus install (found .env or data/). Re-run interactively and pick a different folder name."
+            }
+            $DirName = $candidate
+            break
+        }
+
+        try {
+            if ($attempts -eq 0) { $reply = Read-Host "  Install folder name [$DefaultDirName]" }
+            else { $reply = Read-Host "  Install folder name (or press Enter/q to cancel)" }
+        } catch {
+            $noTty = $true
+            continue
+        }
 
         # Empty/q only means "cancel" once we're re-prompting after a collision - on the very
         # first ask it just means "keep the default", same as the port prompt.
@@ -57,16 +77,23 @@ if ((Test-Path "main.py") -and (Test-Path "pyproject.toml")) {
 
         $candidate = $DefaultDirName
         if ($reply) {
-            if ($reply -match '^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$') { $candidate = $reply }
-            else { Warn "'$reply' is not a valid folder name - using $DefaultDirName" }
+            # Reject Windows reserved device names (CON, NUL, COM1, ...) even with a trailing
+            # extension - Test-Path on these is false (no "collision"), so without this check
+            # git clone/Set-Location would fail or misbehave on them mid-install. Also reject
+            # names ending in "." or a space - Win32 silently strips those, so accepting them
+            # would land somewhere other than what was typed even though it isn't a clobber risk.
+            if (($reply -match '^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$') -and ($reply -notmatch $reservedNames) -and ($reply -notmatch '[. ]$')) {
+                $candidate = $reply
+            } else { Warn "'$reply' is not a valid folder name - using $DefaultDirName" }
         }
 
         # Refuse to clobber an existing install. That directory may hold the operator's .env
         # (API keys) and data/ (sessions, tables, memory) - overwriting or half-upgrading it is
         # real data loss, and the whole point of this prompt is installing a second instance
         # NEXT TO a first one, not into it. Re-prompt for a different name rather than aborting
-        # outright - bounded, so it can't spin forever.
-        if ((Test-Path $candidate) -and ((Test-Path (Join-Path $candidate ".env")) -or (Test-Path (Join-Path $candidate "data") -PathType Container))) {
+        # outright - bounded, so it can't spin forever. -PathType Container so a plain FILE
+        # named "argus" isn't mistaken for a directory collision (or non-collision) either way.
+        if ((Test-Path $candidate -PathType Container) -and ((Test-Path (Join-Path $candidate ".env")) -or (Test-Path (Join-Path $candidate "data") -PathType Container))) {
             Warn "$(Join-Path (Get-Location).Path $candidate) already looks like an existing Argus install (found .env or data/) - it will not be touched."
             $attempts++
             if ($attempts -ge $maxAttempts) { Fail "Too many attempts choosing a folder name - re-run and pick one that isn't an existing install." }
@@ -76,7 +103,7 @@ if ((Test-Path "main.py") -and (Test-Path "pyproject.toml")) {
         break
     }
 
-    if (Test-Path $DirName) { Warn "./$DirName already exists - using it instead of cloning again." }
+    if (Test-Path $DirName -PathType Container) { Warn "./$DirName already exists - using it instead of cloning again." }
     else {
         Info "Cloning $RepoUrl ..."; git clone $RepoUrl $DirName; Ok "cloned into ./$DirName"
         # Pin to the latest released version (a stable tag), not the moving main branch.
@@ -108,7 +135,9 @@ if (-not (Test-Path ".env")) {
     # machine, each on its own port.
     $DefaultPort = 8700
     $Port = $DefaultPort
-    $reply = Read-Host "  Dashboard port [$DefaultPort]"
+    # Same Read-Host guard as the folder-name prompt above: catch the HostException a
+    # non-interactive host throws and fall back to the default instead of aborting.
+    try { $reply = Read-Host "  Dashboard port [$DefaultPort]" } catch { $reply = $null }
     if ($reply) {
         $n = 0
         if ([int]::TryParse($reply, [ref]$n) -and $n -ge 1 -and $n -le 65535) { $Port = $n }
