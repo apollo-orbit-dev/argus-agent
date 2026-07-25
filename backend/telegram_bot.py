@@ -313,11 +313,15 @@ async def deliver_new(reply_to, text: str) -> None:
 
 async def reply_html(msg, text: str) -> None:
     """Reply with Telegram-HTML (command replies are otherwise plain text); on a parse error,
-    strip the tags so the reply still lands."""
+    strip the tags and unescape entities so the reply still lands as clean plain text."""
     try:
         await msg.reply_text(text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
     except Exception:
-        await msg.reply_text(re.sub(r"</?(code|b|i)>", "", text))
+        try:
+            stripped = re.sub(r"</?(code|b|i)>", "", text)
+            await msg.reply_text(_html.unescape(stripped))
+        except Exception:
+            log.debug("could not send reply_html fallback", exc_info=True)
 
 
 def split_for_telegram(text: str, limit: int = 3900) -> list[str]:
@@ -554,18 +558,18 @@ def session_text(sessions: list[dict], session_id: str) -> str:
     name_line = "" if name == session_id else f"{_esc(name)}\n"
     return (f"{name_line}<code>{_esc(session_id)}</code>\n"
             f"{s.get('message_count', 0)} msgs · last active {_esc(_when(s))}\n"
-            "Rename it: /rename <name>")
+            "Rename it: /rename &lt;name&gt;")
 
 
 def rename_command(engine: Any, session_id: str, args: list) -> str:
     """/rename <name> — implements the *pure* decision logic so it can be unit-tested
     without a running engine when args is empty (bare /rename)."""
-    name = " ".join(args).strip()[:80]
+    name = " ".join(args).strip()[:80].strip()
     if not name:
         sessions = engine.list_sessions()
         s = _session_row(sessions, session_id)
         cur = s.get("name", session_id) if s else session_id
-        return f"Current name: {_esc(cur)}  ·  id <code>{_esc(session_id)}</code>\nRename: /rename <name>"
+        return f"Current name: {_esc(cur)}  ·  id <code>{_esc(session_id)}</code>\nRename: /rename &lt;name&gt;"
     sessions = engine.list_sessions()
     if _session_row(sessions, session_id) is None:
         return "This chat has no saved session yet — send me a message first, then /rename."

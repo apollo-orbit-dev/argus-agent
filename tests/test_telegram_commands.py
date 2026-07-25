@@ -123,6 +123,32 @@ def test_no_markdownv2_escaping_of_negative_ids():
     assert "\\" not in text2
 
 
+def _assert_no_stray_angle_brackets(text: str) -> None:
+    """Every reply here is sent with parse_mode=HTML. The only tag these helpers may emit is
+    <code>...</code>; any other literal '<' (e.g. an un-escaped '<name>' placeholder) would make
+    Telegram reject the message with "can't parse entities: Unsupported start tag"."""
+    stripped = text.replace("<code>", "").replace("</code>", "")
+    assert "<" not in stripped, f"stray unescaped '<' outside <code> tags: {text!r}"
+
+
+def test_sessions_text_no_stray_html_tags():
+    sessions = [_sess(1)]
+    _assert_no_stray_angle_brackets(sessions_text(sessions, sessions[0]["id"]))
+
+
+def test_session_text_no_stray_html_tags():
+    sessions = [_sess(1)]
+    _assert_no_stray_angle_brackets(session_text(sessions, sessions[0]["id"]))
+    _assert_no_stray_angle_brackets(session_text([], "42"))
+
+
+def test_rename_bare_no_stray_html_tags():
+    eng = _FakeEngine([_sess(1, sid="42")])
+    _assert_no_stray_angle_brackets(rename_command(eng, "42", []))
+    eng_unknown = _FakeEngine([])
+    _assert_no_stray_angle_brackets(rename_command(eng_unknown, "42", []))
+
+
 def test_session_text_omits_name_when_equal_to_id_includes_when_renamed():
     same = session_text([_sess(1)], "ses_0001")
     assert same.count("ses_0001") == 1          # id shown once, no separate (identical) name line
