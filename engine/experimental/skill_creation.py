@@ -12,6 +12,7 @@ schema — the same forward-compat principle as shipped skills) and registered.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 from typing import Optional
@@ -27,8 +28,16 @@ def sanitize_skill_name(name: str) -> str:
 
 
 def render_skill_markdown(name: str, description: str, tools: list[str], procedure: str) -> str:
+    """Render a skill's markdown file with valid, self-quoting YAML frontmatter.
+
+    `name`/`description` are free text (model-generated ones often contain a colon,
+    which would otherwise break unquoted YAML scalars) — quote them with json.dumps()
+    (a JSON double-quoted string is a valid, correctly-escaped YAML double-quoted
+    scalar). `tools` are identifiers, so they stay an inline flow list.
+    """
     tools_line = "[" + ", ".join(tools) + "]"
-    return (f"---\nname: {name}\ndescription: {description}\ntools: {tools_line}\n---\n"
+    return (f"---\nname: {json.dumps(name)}\ndescription: {json.dumps(description)}\n"
+            f"tools: {tools_line}\n---\n"
             f"{procedure.strip()}\n")
 
 
