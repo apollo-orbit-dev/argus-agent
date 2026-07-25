@@ -270,5 +270,37 @@
     "battery_version": "cap-2",
     "date": "2026-07-25T03:46:49+00:00",
     "file": "gemma-4-E2B-it-cap-2-20260725T034649.json"
+  },
+  {
+    "model": "Qwen3.6-35B-A3B-FP8",
+    "params": 35,
+    "mode": "native",
+    "battery_version": "cap-2",
+    "date": "2026-07-25T05:03:06+00:00",
+    "file": "Qwen3.6-35B-A3B-FP8-cap-2-20260725T050306.json"
+  },
+  {
+    "model": "Qwen3.6-35B-A3B-FP8",
+    "params": 35,
+    "mode": "manual",
+    "battery_version": "cap-2",
+    "date": "2026-07-25T06:19:12+00:00",
+    "file": "Qwen3.6-35B-A3B-FP8-cap-2-20260725T061912.json"
+  },
+  {
+    "model": "Qwen3.6-35B-A3B-FP8",
+    "params": 35,
+    "mode": "native",
+    "battery_version": "cap-2",
+    "date": "2026-07-25T06:44:46+00:00",
+    "file": "Qwen3.6-35B-A3B-FP8-cap-2-20260725T064446.json"
+  },
+  {
+    "model": "Qwen3.6-35B-A3B-FP8",
+    "params": 35,
+    "mode": "manual",
+    "battery_version": "cap-2",
+    "date": "2026-07-25T07:49:02+00:00",
+    "file": "Qwen3.6-35B-A3B-FP8-cap-2-20260725T074902.json"
   }
 ]
