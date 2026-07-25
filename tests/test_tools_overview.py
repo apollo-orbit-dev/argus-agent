@@ -76,3 +76,24 @@ def test_tool_creation_requires_native_mode(tmp_path):
                 data_dir=str(tmp_path))
     names2 = {t["name"] for t in e2.tools_overview()["conditional_enabled"]}
     assert {"create_tool", "inspect_tool", "delete_tool"} <= names2
+
+
+def test_tools_overview_is_unchanged_by_disclosure(tmp_path):
+    """Disclosure is a per-TURN presentation change, not a capability change: the dashboard's tool
+    list, builtin_tool_names() and the routine registry must all see exactly what they saw before."""
+    from config import Config
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    base = Engine(Config(tool_disclosure_mode="off"), data_dir=str(tmp_path / "a"))
+    on = Engine(Config(tool_disclosure_mode="hybrid"), data_dir=str(tmp_path / "b"))
+    assert on.tools_overview_names() == base.tools_overview_names()
+    assert on.registry.names() == base.registry.names()
+
+
+def test_find_tool_is_not_on_the_base_registry(tmp_path):
+    """find_tool is a PER-RUN tool (registered inside run_task when disclosure is on). Leaking it
+    onto the engine-wide registry would advertise an escape hatch that does nothing."""
+    from config import Config
+    e = Engine(Config(tool_disclosure_mode="hybrid"), data_dir=str(tmp_path))
+    assert "find_tool" not in e.registry.names()
+    assert "find_tool" not in e.tools_overview_names()

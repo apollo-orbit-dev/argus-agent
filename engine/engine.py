@@ -302,8 +302,13 @@ SKILL_CREATION_DIRECTIVE = (
 # model instead of by Engine. Reserving it keeps create_tool refusing the name in every state
 # (sandboxed-and-up, sandboxed-and-down, unsandboxed), which is fine: when exec_python IS registered,
 # the ordinary built-in guard (not this reserved-name set) is what actually fires.
+#
+# find_tool is here for the same reason as exec_python: it is registered only when
+# tool_disclosure_mode is on, so with disclosure off the name is free — and a create_tool
+# reimplementation under that name would then be treated by the disclosure block as the real escape
+# hatch the moment disclosure is switched on. Reserving it keeps the name ours in every state.
 GATED_BUILTIN_NAMES = {"web_search", "fetch_page", "map_site", "crawl_site", "extract_data",
-                       "exec_python"}
+                       "exec_python", "find_tool"}
 
 
 def _workspace_dir_for(data_dir: Path, config: "Config") -> Path:
@@ -467,6 +472,10 @@ class Engine:
         self._bg_tasks: set = set()   # keep background tasks (autoextract) alive from GC
         self._running: dict = {}      # session_id -> the in-flight run's task (for /stop)
         self._turn_tools: dict = {}   # session_id -> recent turns' tool-sets (repetition detector)
+        # Tool-disclosure ranking: sha1(tool_doc) -> embedding. Content-addressed, so a tool whose
+        # description changes is re-embedded and every stable one is embedded at most once per
+        # process; only the QUERY costs a request per turn.
+        self._tool_doc_embs: dict = {}
         self._system_prompt_file = root / "system_prompt.md"
         self._system_prompt_legacy = root / "system_prompt.txt"   # migrate old .txt
         self.system_prompt = self._load_system_prompt()
@@ -1430,7 +1439,12 @@ class Engine:
         run_registry = self.registry
         if (ctx.extra_tools or tool_creation_on or skill_creation_on or scheduler_on
                 or memory_on or watch_on or c.enable_charts or c.enable_notify or c.enable_routines
-                or c.enable_code_interpreter or c.enable_rules or c.enable_interactive_approvals):
+                or c.enable_code_interpreter or c.enable_rules or c.enable_interactive_approvals
+                # Disclosure registers find_tool and wraps the result in a per-turn VIEW. Both must
+                # act on a clone: the view shares `_tools` by reference, so wrapping the engine-wide
+                # base registry would leak find_tool (and any mid-turn create_tool) into every
+                # later run and into tools_overview().
+                or c.tool_disclosure_mode != "off"):
             run_registry = ToolRegistry()
             for t in self.registry.list():
                 run_registry.register(t)
@@ -1530,6 +1544,54 @@ class Engine:
                 system_prompt = system_prompt + "\n\n" + compose_tool_creation_directive(run_registry)
             if skill_creation_on:
                 system_prompt = system_prompt + "\n\n" + SKILL_CREATION_DIRECTIVE
+
+        # ---- progressive tool disclosure (A/B; off by default) ----
+        # Narrow what this turn ADVERTISES to the K most relevant tools. PRESENTATION ONLY: the
+        # view shares its tool dict with the full registry, so get/validate/names/list still see
+        # every tool and a hidden tool the model names still EXECUTES. Runs here, after EVERY
+        # conditional registration above, so nothing registered later can be invisible — and after
+        # skill selection (which happens further up, at selector.prepare), so the active skill's
+        # declared tools and ctx.extra_tools are already known and can be PINNED.
+        if c.tool_disclosure_mode != "off":
+            from engine.tools.disclosure import (DisclosedRegistry, FindToolTool,
+                                                 embed_tool_docs, select_visible)
+            core_names = [n.strip() for n in c.tool_disclosure_core.split(",") if n.strip()]
+            skill_tools: set[str] = set()
+            if ctx.active_skill:
+                _active = self.skill_registry.get(ctx.active_skill)
+                if _active is not None:
+                    skill_tools = set(_active.tools or ())
+            # find_tool is force-pinned regardless of the configured core: it is the escape hatch,
+            # so an operator-set TOOL_DISCLOSURE_CORE that omits it must not leave it rankable —
+            # the one turn that most needs find_tool is exactly the one where it could otherwise
+            # be ranked out of the view.
+            pinned = set(core_names) | skill_tools | {t.name for t in ctx.extra_tools} | {"find_tool"}
+            run_registry.register(FindToolTool())     # BEFORE selection, so it is a real tool
+            doc_embs = query_emb = None
+            if c.tool_disclosure_mode in ("embedding", "hybrid"):
+                # Never raises and never blocks: on any failure this returns (None, None) and
+                # ranking falls back to keyword for THIS turn.
+                doc_embs, query_emb = await embed_tool_docs(
+                    self.memory.embedder, run_registry, text, self._tool_doc_embs)
+            visible = select_visible(run_registry, text, mode=c.tool_disclosure_mode,
+                                     k=c.tool_disclosure_k, core=core_names, pinned=pinned,
+                                     doc_embs=doc_embs, query_emb=query_emb)
+            full_registry = run_registry
+            run_registry = DisclosedRegistry(full_registry, visible)
+            # Same rebinding pattern the created-tool block uses above, so tools that hold a
+            # registry reference act on the VIEW — that is what makes create_tool's register()
+            # auto-reveal, and what gives find_tool/load_skill something to reveal INTO. Guarded on
+            # isinstance because LoadSkillTool's `.registry` is a SkillRegistry, not a tool one.
+            for t in run_registry.list():
+                if isinstance(getattr(t, "registry", None), ToolRegistry):
+                    t.registry = run_registry
+                if hasattr(t, "disclosure"):
+                    t.disclosure = run_registry
+            await self.emit(run_id, session_id, 0, "disclosure",
+                            {"mode": c.tool_disclosure_mode, "k": c.tool_disclosure_k,
+                             "visible": sorted(visible),
+                             "hidden": len(full_registry.names()) - len(visible),
+                             "pinned": sorted(pinned & set(full_registry.names()))})
 
         # Cross-turn repetition nudge: the model can't reliably notice from history that it's
         # doing the same task repeatedly, so surface it. If a non-trivial tool has recurred across
@@ -1649,6 +1711,13 @@ class Engine:
             return answer
         # Finish the remaining removals in a BOUNDED, creation-disabled loop: repeating a
         # delete/cancel never needs to build tools, and the tight step cap prevents any flail.
+        # NOTE: `deps.registry.list()` is UNFILTERED even when disclosure is on — DisclosedRegistry's
+        # list()/names() deliberately see every tool (dispatch is never narrowed, see
+        # engine/tools/disclosure.py). So `lean` is rebuilt from the FULL catalog, not the turn's
+        # advertised subset, and this follow-up turn's tool list (and its own "disclosure" event, if
+        # any) does not reflect the K-limited view the ORIGINAL turn had. Widening here is the safe
+        # direction — it is a plain ToolRegistry, not a view, so this bounded follow-up sees more,
+        # never fewer, tools than the turn it's completing.
         import dataclasses
         lean = ToolRegistry()
         for t in deps.registry.list():

@@ -254,8 +254,9 @@ def test_render_report_has_abort_column():
     assert len(body_lines) == len(results)
     for line, r in zip(body_lines, results):
         cells = [c.strip() for c in line.split("|")]
-        # abort is the 7th cell: | model | params | mode | scaffold | max_tok | solved | abort | ...
-        abort_cell = cells[7]
+        # abort is the 8th cell: | model | params | mode | scaffold | disclosure | max_tok |
+        # solved | abort | ...   (`disclosure` was added when progressive tool disclosure landed)
+        abort_cell = cells[8]
         has_observer_data = r.get("scaffold") != "off" and any(
             "aborted" in run or "observer" in run
             for t in r.get("tasks", []) for run in t.get("runs", []))
@@ -282,3 +283,40 @@ def test_fixtures_resolve_beside_the_battery():
     assert (Path("benchmark/cap-1/battery.json").parent / "fixtures").resolve() == FIXTURES.resolve()
     assert (Path("benchmark/cap-2/battery.json").parent / "fixtures") == Path("benchmark/cap-2/fixtures")
     assert Path("benchmark/cap-2/battery.json").parent / "fixtures" != FIXTURES
+
+
+# ---- progressive tool disclosure arm ----
+
+def test_resolve_config_sets_the_disclosure_mode():
+    assert resolve_config("main", None, disclosure="hybrid").tool_disclosure_mode == "hybrid"
+    assert resolve_config("main", None, disclosure="off").tool_disclosure_mode == "off"
+
+
+def test_resolve_config_leaves_disclosure_alone_by_default():
+    from config import Config
+    assert resolve_config("main", None).tool_disclosure_mode == Config().tool_disclosure_mode
+
+
+def test_disclosure_is_its_own_axis_not_scaffolding():
+    """--baseline must not move the disclosure arm: they are independent axes, so a baseline run
+    and a disclosure run stay comparable."""
+    from engine.eval.benchmark import BASELINE_OVERRIDES
+    assert "tool_disclosure_mode" not in BASELINE_OVERRIDES
+    assert resolve_config("main", None, baseline=True, disclosure="keyword").tool_disclosure_mode == "keyword"
+
+
+def test_report_renders_the_disclosure_column():
+    row = {"model": "m", "params": 3, "mode": "native", "scaffold": "on", "disclosure": "hybrid",
+           "battery_version": "cap-2-test", "date": "2026-01-01T00:00:00+00:00",
+           "per_tier": {}, "overall": {"solved": 1.0}, "tasks": []}
+    out = _write_result(row)
+    try:
+        md, _ = render_report("cap-2-test")
+        assert "disclosure" in md and "hybrid" in md
+    finally:
+        out.unlink(missing_ok=True)
+        idx = out.parent / "index.json"
+        if idx.exists():
+            import json as _json
+            keep = [e for e in _json.loads(idx.read_text()) if e.get("file") != out.name]
+            idx.write_text(_json.dumps(keep, indent=2))

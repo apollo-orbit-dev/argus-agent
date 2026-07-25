@@ -121,3 +121,44 @@ def test_trace_keep_runs_per_session_rejects_zero():
     c = _mk()
     with pytest.raises(Exception):
         c.patch({"trace_keep_runs_per_session": 0})
+
+
+def test_tool_disclosure_defaults_are_off():
+    """Default OFF is the safety property: a hidden tool the turn needs is unrecoverable in a way
+    today's system cannot fail, so no existing deploy changes behavior until it opts in."""
+    c = _mk()
+    assert c.tool_disclosure_mode == "off"
+    assert c.tool_disclosure_k == 12
+    assert c.tool_disclosure_core == "find_tool,ask_user,calculator,get_current_time,about_argus"
+
+
+def test_tool_disclosure_fields_round_trip_through_env():
+    c = _mk()
+    for f in ("tool_disclosure_mode", "tool_disclosure_k", "tool_disclosure_core"):
+        assert f in c._ENV_FIELDS
+    pairs = dict(c.env_pairs())
+    assert pairs["TOOL_DISCLOSURE_MODE"] == "off"
+    assert pairs["TOOL_DISCLOSURE_K"] == "12"
+    assert "find_tool" in pairs["TOOL_DISCLOSURE_CORE"]
+
+
+def test_tool_disclosure_mode_accepts_every_arm():
+    for m in ("off", "keyword", "embedding", "hybrid"):
+        assert _mk(tool_disclosure_mode=m).tool_disclosure_mode == m
+
+
+def test_tool_disclosure_mode_rejects_invalid():
+    with pytest.raises(Exception):
+        _mk(tool_disclosure_mode="magic")
+
+
+def test_tool_disclosure_k_rejects_zero():
+    """k=0 would advertise nothing at all — an empty tool list, silently. ge=1 is the backstop for
+    a dashboard number field PATCHing an emptied textbox as 0."""
+    with pytest.raises(Exception):
+        _mk(tool_disclosure_k=0)
+
+
+def test_tool_disclosure_mode_is_patchable():
+    c = _mk().patch({"tool_disclosure_mode": "hybrid", "tool_disclosure_k": 8})
+    assert c.tool_disclosure_mode == "hybrid" and c.tool_disclosure_k == 8

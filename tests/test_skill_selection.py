@@ -157,3 +157,79 @@ def test_hybrid_falls_back_to_model_driven_when_no_trigger():
     from engine.skills.selection.model_driven import LoadSkillTool
     assert any(isinstance(t, LoadSkillTool) for t in ctx.extra_tools)
     assert "load_skill" in ctx.system_additions
+
+
+# ---- progressive tool disclosure x skills ----
+# Skill activation happens BEFORE the per-turn tool view is computed (selector.prepare runs earlier
+# in run_task than the registry block), so a trigger-activated skill's declared tools can be PINNED
+# and never compete for K. A skill loaded MID-turn via load_skill can't be — hence reveal().
+
+def _tool_registry_with(*names):
+    from pydantic import BaseModel
+    from engine.tools.base import Tool, ToolRegistry
+    reg = ToolRegistry()
+    for n in names:
+        reg.register(type(n, (Tool,), {
+            "name": n, "description": f"the {n} tool",
+            "Params": type("P", (BaseModel,), {}),
+            "run": lambda self, args: None})())
+    return reg
+
+
+def test_skill_declared_tools_are_pinned_despite_zero_lexical_overlap():
+    from engine.tools.disclosure import select_visible
+    skill = registry_with_research().get("research")
+    # fillers first, so insertion order (the tiebreak) puts the skill's tools LAST — without
+    # pinning they lose the cut outright.
+    reg = _tool_registry_with(*[f"filler{i}" for i in range(10)], "web_search", "fetch_page")
+    prompt = "zzz qqq"                     # nothing whatsoever matches web_search / fetch_page
+    assert not (set(skill.tools) & select_visible(reg, prompt, k=4))
+    pinned = select_visible(reg, prompt, k=4, pinned=skill.tools)
+    assert set(skill.tools) <= pinned
+
+
+def test_load_skill_reveals_its_declared_tools():
+    from engine.tools.disclosure import DisclosedRegistry
+    full = _tool_registry_with("web_search", "fetch_page", "other")
+    view = DisclosedRegistry(full, ["other"])
+    tool = LoadSkillTool(registry_with_research())
+    tool.disclosure = view
+    out = asyncio.run(tool.run(tool.Params(name="research")))
+    assert "1. Search." in out
+    assert set(view.visible_names()) == {"web_search", "fetch_page", "other"}
+
+
+def test_load_skill_without_disclosure_is_unchanged():
+    tool = LoadSkillTool(registry_with_research())
+    assert tool.disclosure is None
+    out = asyncio.run(tool.run(tool.Params(name="research")))
+    assert "1. Search." in out
+
+
+def test_inspect_skill_reveals_its_declared_tools():
+    from engine.experimental.skill_creation import InspectSkillTool
+    from engine.tools.disclosure import DisclosedRegistry
+    full = _tool_registry_with("web_search", "fetch_page", "other")
+    view = DisclosedRegistry(full, ["other"])
+    tool = InspectSkillTool(registry_with_research())
+    tool.disclosure = view
+    out = asyncio.run(tool.run(tool.Params(name="research")))
+    assert "1. Search." in out
+    assert set(view.visible_names()) == {"web_search", "fetch_page", "other"}
+
+
+def test_reveal_skill_tools_is_a_silent_noop_without_a_view():
+    from engine.skills.base import reveal_skill_tools
+    skill = registry_with_research().get("research")
+    assert reveal_skill_tools(None, skill) == []
+    assert reveal_skill_tools(object(), skill) == []
+
+
+def test_tokenizer_moved_but_stays_bound_in_explicit():
+    """The layering fix: _STOP/_tokens now live in engine/textmatch.py so engine/tools/ can share
+    them without importing from engine/skills/. Both names stay bound here, unchanged."""
+    from engine.skills.selection import explicit
+    from engine import textmatch
+    assert explicit._tokens is textmatch.tokens
+    assert explicit._STOP is textmatch.STOP_WORDS
+    assert explicit._tokens("Please research the World population") == {"please", "research", "world", "population"}

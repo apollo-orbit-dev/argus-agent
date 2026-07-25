@@ -19,7 +19,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from engine.skills.base import Skill, SkillRegistry
+from engine.skills.base import Skill, SkillRegistry, reveal_skill_tools
 from engine.tools.base import Tool, ToolRegistry
 
 
@@ -119,6 +119,10 @@ class InspectSkillTool(Tool):
         "with the same name to update). Argument: name."
     )
 
+    # Rebound to this run's tool-registry VIEW when progressive tool disclosure is on, so a
+    # procedure read mid-turn never names tools the model can't see (same reason as LoadSkillTool).
+    disclosure = None
+
     class Params(BaseModel):
         name: str = Field(..., description="skill name to inspect")
 
@@ -130,6 +134,7 @@ class InspectSkillTool(Tool):
         if sk is None:
             names = ", ".join(s.name for s in self.skill_registry.list()) or "(none)"
             return f"inspect_skill: no skill named '{args.name}'. Existing skills: {names}."
+        reveal_skill_tools(self.disclosure, sk)
         tools = ", ".join(sk.tools) or "(none)"
         return (f"Skill '{sk.name}'\ndescription: {sk.description}\ntools: {tools}\n"
                 f"procedure:\n{sk.procedure}")
