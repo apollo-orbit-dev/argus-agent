@@ -134,6 +134,10 @@ _DATE_RE = re.compile(r"^\s*\d{4}-\d{2}-\d{2}\s*$")
 _PERTURB_DATES = ("2001-09-09", "2001-09-11")
 _PERTURB_DELTAS = (100, 37)
 
+# _ignores_input verdicts. UNKNOWN is NOT "clean": it means the check could not run, and the
+# caller must say so rather than claim the tool was verified.
+_IGNORES_YES, _IGNORES_NO, _IGNORES_UNKNOWN = "yes", "no", "unknown"
+
 
 def _perturbations(args_dict: dict) -> list:
     """Up to two args copies with date/number values changed to clearly-different ones. Empty
@@ -605,22 +609,27 @@ class CreateToolTool(Tool):
             self.created_sink[:] = [t for t in self.created_sink if t.name != tool.name]
             self.created_sink.append(tool)
 
-    async def _ignores_input(self, tool, params_model, test_args: dict, baseline: str) -> bool:
-        """True if the tool returns baseline for TWO clearly-different inputs — the tell-tale sign
-        it ignores its arguments (hardcoded data). Conservative: only perturbs date/number args
-        (where 'different' is unambiguous); needs both perturbed runs to succeed and match, so a
-        legit small-output tool (e.g. day-of-week) that collides on one won't be falsely flagged."""
-        variants = _perturbations(test_args or {})
+    async def _ignores_input(self, tool, params_model, test_args: dict, baseline: str) -> str:
+        """Tri-state: _IGNORES_YES if the tool returns baseline for TWO clearly-different inputs —
+        the tell-tale sign it ignores its arguments (hardcoded data); _IGNORES_NO if it responded
+        to input (or errored, or takes no arguments at all); _IGNORES_UNKNOWN if the check could
+        not run at all (nothing safely perturbable) — NOT the same as clean, and callers must not
+        report it as verified. Conservative: only perturbs date/number args (where 'different' is
+        unambiguous); needs both perturbed runs to succeed and match, so a legit small-output tool
+        (e.g. day-of-week) that collides on one won't be falsely flagged."""
+        if not test_args:                           # takes no arguments -> can't ignore them
+            return _IGNORES_NO
+        variants = _perturbations(test_args)
         if len(variants) < 2:                       # nothing safely perturbable — can't conclude
-            return False
+            return _IGNORES_UNKNOWN
         for pv in variants:
             try:
                 other = await tool.run(params_model(**pv))
             except Exception:
-                return False
+                return _IGNORES_NO
             if other.strip().startswith(f"{tool.name} error") or other != baseline:
-                return False                        # responds to input (or errored) -> not hardcoded
-        return True                                 # identical output for 2 different inputs
+                return _IGNORES_NO                  # responds to input (or errored) -> not hardcoded
+        return _IGNORES_YES                         # identical output for 2 different inputs
 
     def _stdlib_block_message(self, module: str) -> str:
         """A disallowed stdlib import (os/sys/...) — not installable, restricted for safety.
@@ -879,13 +888,28 @@ class CreateToolTool(Tool):
             # Hardcode detector: re-run with a clearly-different input (a different date/number).
             # Identical output for genuinely different input means the tool IGNORES its arguments —
             # the signature of baked-in / fabricated data (the fake report tool did exactly this).
-            if await self._ignores_input(tool, params_model, args.test_args, test_result):
+            # Only date/number args are perturbable, so when a tool's test_args are neither, the
+            # check comes back UNKNOWN — and that must NOT be reported to the model as "verified".
+            verdict = await self._ignores_input(tool, params_model, args.test_args, test_result)
+            record["input_check"] = verdict          # telemetry: which of the three outcomes this run got
+            if verdict == _IGNORES_YES:
                 return (f"create_tool: '{args.name}' was created, but it returned the SAME output for "
                         "two DIFFERENT inputs — a strong sign it IGNORES its arguments and has HARDCODED "
                         "data baked in (a fake tool that returns canned values forever). A tool must FETCH "
                         "live data using its arguments. Rewrite it to actually use its inputs against a real "
                         "source — call an API, or use CALL_TOOL('other_tool', {...}) to reuse an existing "
                         "tool's real data — then re-create with the same name.")
+            if verdict == _IGNORES_UNKNOWN:
+                return (f"create_tool: '{args.name}' was created and its test run returned output, but it was "
+                        "NOT possible to confirm the tool actually USES its arguments — the hardcode check only "
+                        "varies dates and numbers, and none of the test values were of that kind, so the check "
+                        f"was skipped:\n  {test_result.strip()[:400]}\n"
+                        "⚠️ Running without an error is NOT proof the tool reads its inputs — a tool with data "
+                        f"baked into the code looks exactly like this. CALL {args.name} now with DIFFERENT "
+                        "arguments than the test values and check that the output CHANGES. If it returns the "
+                        "same thing whatever you pass, the data is hardcoded: rewrite it to fetch live data "
+                        "from its arguments and re-create with the same name. Base your answer ONLY on the "
+                        "tool's real output — never invent data.")
             return (f"create_tool: '{args.name}' created and verified — the test run returned real "
                     f"output:\n  {test_result.strip()[:400]}\n"
                     f"If that answers the user, CALL {args.name} now (or just report that result). "
@@ -905,30 +929,68 @@ class InspectToolTool(Tool):
         "Show the source code, parameters, and description of a tool you (or a past session) "
         "created. Use this BEFORE revising or extending a tool: read how it fetches its data — "
         "which library, how it authenticates — then call create_tool with the SAME name and code "
-        "that keeps that working pattern and adds what you need. Argument: name."
+        "that keeps that working pattern and adds what you need. Also works on BUILT-IN tools: "
+        "shows their name, description and argument schema so you know exactly how to call them "
+        "(from a turn, or from inside created-tool code). Argument: name."
     )
 
     class Params(BaseModel):
         name: str = Field(..., description="the created tool's name")
 
-    def __init__(self, persist_dir: Optional[str]):
+    def __init__(self, registry: ToolRegistry, persist_dir: Optional[str] = None):
+        self.registry = registry
         self.persist_dir = persist_dir
 
     async def run(self, args: "InspectToolTool.Params") -> str:
-        if not self.persist_dir or not os.path.isdir(self.persist_dir):
-            return "inspect_tool: no created tools are available."
-        safe = re.sub(r"[^a-z0-9_]+", "_", (args.name or "").lower()).strip("_")
-        path = os.path.join(self.persist_dir, f"{safe}.json")
-        if not os.path.exists(path):
-            avail = [f[:-5] for f in sorted(os.listdir(self.persist_dir)) if f.endswith(".json")]
-            return f"inspect_tool: no created tool named '{args.name}'. Created tools: {', '.join(avail) or '(none)'}."
-        try:
-            m = json.load(open(path, encoding="utf-8"))
-        except Exception as e:
-            return f"inspect_tool: could not read '{args.name}': {e}"
-        return (f"Tool '{m['name']}' — {m.get('description', '')}\n"
-                f"parameters: {json.dumps(m.get('parameters', {}))}\n"
-                f"code:\n{m['code']}")
+        name = args.name
+        safe = re.sub(r"[^a-z0-9_]+", "_", (name or "").lower()).strip("_")
+
+        # 1. Created tool (persisted) — describe the stored source.
+        if self.persist_dir and os.path.isdir(self.persist_dir):
+            path = os.path.join(self.persist_dir, f"{safe}.json")
+            if os.path.exists(path):
+                try:
+                    m = json.load(open(path, encoding="utf-8"))
+                except Exception as e:
+                    return f"inspect_tool: could not read '{name}': {e}"
+                return (f"Tool '{m['name']}' (created) — {m.get('description', '')}\n"
+                        f"parameters: {json.dumps(m.get('parameters', {}))}\n"
+                        f"code:\n{m['code']}")
+
+        # 2. Registry hit — created-but-unpersisted DynamicTool, or a built-in.
+        tool = self.registry.get(name) or self.registry.get(safe)
+        if tool is not None:
+            if isinstance(tool, DynamicTool):
+                label = "(created — source not persisted)"
+            else:
+                label = "(built-in)"
+            sch = tool.Params.model_json_schema()
+            out = (f"Tool '{tool.name}' {label} — {tool.description}\n"
+                   f"parameters: {json.dumps(sch.get('properties', {}))}\n"
+                   f"required: {', '.join(sch.get('required', [])) or '(none)'}\n")
+            if "$defs" in sch:
+                out += f"definitions: {json.dumps(sch['$defs'])}\n"
+            if not isinstance(tool, DynamicTool):
+                arg_example = next(iter(sch.get("properties", {})), "...")
+                out += (
+                    "This is a BUILT-IN tool — it has no editable source and cannot be revised or "
+                    "deleted. You CAN call it directly. You can usually also call it from inside "
+                    f"created-tool code as a plain function: {tool.name}({{\"{arg_example}\": ...}}) "
+                    "returns its output as a STRING (json.loads() it if it returns JSON) — if that "
+                    "comes back 'tool composition is unavailable in this context', composition is "
+                    "off on this server, so call the tool directly in your turn instead."
+                )
+            return out
+
+        # 3. Miss — list what IS available, both created and built-in.
+        created = set()
+        if self.persist_dir and os.path.isdir(self.persist_dir):
+            created |= {f[:-5] for f in os.listdir(self.persist_dir) if f.endswith(".json")}
+        created |= {t.name for t in self.registry.list() if isinstance(t, DynamicTool)}
+        builtins = sorted(t.name for t in self.registry.list() if not isinstance(t, DynamicTool))
+        return (f"inspect_tool: no tool named '{name}'. "
+                f"Created tools: {', '.join(sorted(created)) or '(none)'}. "
+                f"Built-in tools: {', '.join(builtins) or '(none)'}.")
 
 
 class DeleteToolTool(Tool):
