@@ -238,5 +238,37 @@
     "battery_version": "cap-2",
     "date": "2026-07-24T22:20:54+00:00",
     "file": "gemma-4-E4B-it-cap-2-20260724T222054.json"
+  },
+  {
+    "model": "gemma-4-E2B-it",
+    "params": 2,
+    "mode": "native",
+    "battery_version": "cap-2",
+    "date": "2026-07-25T02:34:52+00:00",
+    "file": "gemma-4-E2B-it-cap-2-20260725T023452.json"
+  },
+  {
+    "model": "gemma-4-E2B-it",
+    "params": 2,
+    "mode": "manual",
+    "battery_version": "cap-2",
+    "date": "2026-07-25T02:58:54+00:00",
+    "file": "gemma-4-E2B-it-cap-2-20260725T025854.json"
+  },
+  {
+    "model": "gemma-4-E2B-it",
+    "params": 2,
+    "mode": "native",
+    "battery_version": "cap-2",
+    "date": "2026-07-25T03:21:03+00:00",
+    "file": "gemma-4-E2B-it-cap-2-20260725T032103.json"
+  },
+  {
+    "model": "gemma-4-E2B-it",
+    "params": 2,
+    "mode": "manual",
+    "battery_version": "cap-2",
+    "date": "2026-07-25T03:46:49+00:00",
+    "file": "gemma-4-E2B-it-cap-2-20260725T034649.json"
   }
 ]
