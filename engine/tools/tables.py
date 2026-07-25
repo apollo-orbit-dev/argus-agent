@@ -27,10 +27,28 @@ log = logging.getLogger(__name__)
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _TYPES = {"text": "TEXT", "string": "TEXT", "str": "TEXT", "integer": "INTEGER", "int": "INTEGER",
           "real": "REAL", "number": "REAL", "float": "REAL", "date": "TEXT",
+          # numeric aliases -> REAL/INTEGER affinity so these behave like real/integer, not the TEXT
+          # fallback (a declared-numeric column must be summable; only a model-declared TEXT column
+          # is the accepted risk for the text-aggregate guard below).
+          "numeric": "REAL", "decimal": "REAL", "double": "REAL", "money": "REAL", "bigint": "INTEGER",
           # A list/nested value: stored as JSON text (insert coerces a list/dict automatically) and
           # queryable with json_extract()/json_each(). Aliases so a schema can self-document the intent.
           "json": "TEXT", "list": "TEXT", "array": "TEXT", "object": "TEXT"}
 _MAX_ROWS = 500
+
+# --- text-aggregate guard (argus-u6u) ---
+# SUM/AVG/TOTAL over TEXT returns 0.0 in SQLite instead of erroring, so a wrong answer looks like a
+# right one. Refuse ONLY the unambiguous bare-column form; anything else (expressions, CAST,
+# subqueries, CTEs, alias-qualified names) passes through. A false negative is fine; refusing a
+# valid query is not.
+_AGG_FNS = ("sum", "avg", "total")   # COUNT/MIN/MAX over text are legitimate; not guarded
+_AGG_RE = re.compile(
+    r"\b(" + "|".join(_AGG_FNS) + r")\s*\(\s*(?:distinct\s+)?(?:([A-Za-z_]\w*)\s*\.\s*)?([A-Za-z_]\w*)\s*\)",
+    re.I)
+_FROM_RE = re.compile(r"\b(?:from|join)\s+([A-Za-z_]\w*)", re.I)
+_SUBQ_RE = re.compile(r"\b(?:from|join)\s*\(", re.I)
+_STRLIT_RE = re.compile(r"'[^']*'")  # blank literals first so 'SUM(notes)' as DATA can't match
+_COMMENT_RE = re.compile(r"--[^\n]*|/\*.*?\*/", re.S)  # scrub AFTER literals: a -- inside a string isn't a comment
 
 
 class TableError(Exception):
@@ -63,6 +81,13 @@ def _parse_col_spec(spec) -> tuple[str, str, bool]:
     sqltype = _TYPES.get(ct, "TEXT")
     is_key = len(parts) > 2 and parts[2].strip().lower() in ("key", "pk", "primary", "primary_key")
     return name, sqltype, is_key
+
+
+def _text_agg_msg(fn: str, col: str, table: str) -> str:
+    return (f"{fn}({col}) is not a meaningful aggregate: '{col}' is a TEXT column on '{table}', "
+            f"so SQLite would silently return 0.0 rather than an error. If that column really "
+            f"holds numbers, store it as a numeric column (integer/real) — see add_column — or "
+            f"cast it explicitly: {fn}(CAST({col} AS REAL)). To count rows instead, use COUNT({col}).")
 
 
 class TableStore:
@@ -116,6 +141,11 @@ class TableStore:
 
     def _columns(self, t: str) -> list[str]:
         return [r["name"] for r in self._rw.execute(f"PRAGMA table_info({t})")]
+
+    def _column_types(self, t: str) -> dict[str, str]:
+        """column name (lowercased) -> declared SQL type, uppercased. Same PRAGMA `_columns` makes."""
+        return {r["name"].lower(): (r["type"] or "").strip().upper()
+                for r in self._ro.execute(f"PRAGMA table_info({t})")}
 
     def add_column(self, table: str, column: str) -> str:
         t = _ident(table)
@@ -282,6 +312,55 @@ class TableStore:
             self._rw.commit()
             return cur.rowcount
 
+    def _reject_text_aggregate(self, s: str) -> None:
+        """Refuse SUM/AVG/TOTAL(bare_column) only when it unambiguously resolves to a declared-TEXT
+        column of a real table in this statement's FROM/JOIN list. Never blocks a valid query: CTEs,
+        subqueries, alias-qualified names, and any table/column this can't cleanly resolve are all
+        left to pass through untouched (argus-u6u)."""
+        low = s.lstrip().lower()
+        if low.startswith("with"):
+            return  # CTE: column provenance not statically resolvable here — pass through
+        # blank string literals first (so a -- or /* inside a string isn't mistaken for a comment,
+        # and 'SUM(notes)' as DATA can't match), THEN scrub comments — order matters both ways.
+        scrubbed = _COMMENT_RE.sub(" ", _STRLIT_RE.sub("''", s))
+        if _SUBQ_RE.search(scrubbed):
+            return  # derived table (FROM/JOIN a subquery) — same reasoning
+        matches = list(_AGG_RE.finditer(scrubbed))
+        if not matches:
+            return
+        from_names = [m.group(1) for m in _FROM_RE.finditer(scrubbed)]
+        if not from_names:
+            return
+        existing = {r["name"].lower(): r["name"] for r in self._ro.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
+        real_tables = []
+        for n in from_names:
+            real = existing.get(n.lower())
+            if real is None:
+                return  # a FROM/JOIN target isn't a real table — likely alias confusion, bail entirely
+            real_tables.append(real)
+        types_by_table = {t: self._column_types(t) for t in real_tables}
+        for m in matches:
+            fn, qualifier, col = m.group(1).lower(), m.group(2), m.group(3)
+            col_l = col.lower()
+            if qualifier:
+                real_q = existing.get(qualifier.lower())
+                if real_q is None or real_q not in types_by_table:
+                    continue  # qualifier is an alias, not a real table here — ambiguous, skip
+                decl = types_by_table[real_q].get(col_l)
+                table_name = real_q
+            else:
+                resolved = {t: ts[col_l] for t, ts in types_by_table.items() if col_l in ts}
+                if not resolved:
+                    continue
+                decls = set(resolved.values())
+                if len(decls) != 1:
+                    continue  # ambiguous — same column name, different declared types — skip
+                decl = next(iter(decls))
+                table_name = next(iter(resolved))
+            if decl == "TEXT":
+                raise TableError(_text_agg_msg(fn.upper(), col, table_name))
+
     def query(self, sql: str) -> list[dict]:
         s = (sql or "").strip().rstrip(";").strip()
         low = s.lower()
@@ -289,6 +368,7 @@ class TableStore:
             raise TableError("only read-only SELECT queries are allowed here")
         if ";" in s:
             raise TableError("only a single SELECT statement is allowed")
+        self._reject_text_aggregate(s)   # SUM/AVG/TOTAL over TEXT: 0.0 is worse than an error
         rows = self._ro.execute(s).fetchmany(_MAX_ROWS)   # ro connection: any write would error
         return [dict(r) for r in rows]
 

@@ -56,6 +56,104 @@ def test_query_rejects_non_select(tmp_path):
             s.query(bad)
 
 
+def _expenses(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("expenses", ["date:date", "category:text", "amount:real", "notes:text"])
+    for d, c, a, n in [("2026-07-01", "food", 20, "lunch"), ("2026-07-02", "food", 30, "dinner"),
+                        ("2026-07-03", "gas", 45, "fillup")]:
+        s.insert("expenses", {"date": d, "category": c, "amount": a, "notes": n})
+    return s
+
+
+def test_sum_over_text_column_errors(tmp_path):
+    s = _expenses(tmp_path)
+    with pytest.raises(TableError) as ei:
+        s.query("SELECT SUM(notes) FROM expenses")
+    msg = str(ei.value)
+    assert "TEXT column" in msg
+    assert "CAST(notes AS REAL)" in msg
+
+
+def test_avg_and_total_over_text_error(tmp_path):
+    s = _expenses(tmp_path)
+    with pytest.raises(TableError):
+        s.query("SELECT AVG(notes) FROM expenses")
+    with pytest.raises(TableError):
+        s.query("SELECT TOTAL(notes) FROM expenses")
+    with pytest.raises(TableError):
+        s.query("SELECT SUM(DISTINCT notes) FROM expenses")
+
+
+def test_sum_over_date_and_json_columns_error(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["day:date", "tags:json"])
+    s.insert("t", {"day": "2026-07-01", "tags": ["a", "b"]})
+    with pytest.raises(TableError):
+        s.query("SELECT SUM(day) FROM t")
+    with pytest.raises(TableError):
+        s.query("SELECT SUM(tags) FROM t")
+
+
+def test_sum_over_numeric_column_still_works(tmp_path):
+    s = _expenses(tmp_path)
+    rows = s.query("SELECT SUM(amount) AS total FROM expenses")
+    assert rows[0]["total"] == 95
+    rows2 = s.query("SELECT AVG(amount) AS avg_amt FROM expenses")
+    assert rows2[0]["avg_amt"] is not None
+
+
+def test_sum_over_numeric_declared_column_still_works(tmp_path):
+    # 'numeric' isn't in the type alias table by name -- it must resolve to REAL affinity, not fall
+    # back to the TEXT default (which would wrongly trip the text-aggregate guard on a real number).
+    s = _store(tmp_path)
+    s.create_table("t", ["amount:numeric"])
+    s.insert("t", {"amount": 12.5})
+    s.insert("t", {"amount": 7.5})
+    rows = s.query("SELECT SUM(amount) AS total FROM t")
+    assert rows[0]["total"] == 20
+
+
+def test_sql_comments_do_not_trip_the_guard(tmp_path):
+    # comments are scrubbed AFTER string literals, so a valid query with a trailing -- or /* */
+    # comment (even one that mentions a text column) must still execute, not raise.
+    s = _expenses(tmp_path)
+    rows = s.query("SELECT SUM(amount) AS total FROM expenses -- was SUM(notes), fixed")
+    assert rows[0]["total"] == 95
+    rows2 = s.query("SELECT SUM(amount) AS total FROM expenses /* not SUM(notes) */")
+    assert rows2[0]["total"] == 95
+
+
+def test_count_over_text_still_works(tmp_path):
+    s = _expenses(tmp_path)
+    assert s.query("SELECT COUNT(notes) AS n FROM expenses")[0]["n"] == 3
+    assert s.query("SELECT COUNT(*) AS n FROM expenses")[0]["n"] == 3
+    assert s.query("SELECT MIN(category) AS c FROM expenses")[0]["c"] == "food"
+    assert s.query("SELECT MAX(category) AS c FROM expenses")[0]["c"] == "gas"
+
+
+def test_cast_and_expression_forms_pass_through(tmp_path):
+    s = _expenses(tmp_path)
+    s.query("SELECT SUM(CAST(notes AS REAL)) AS total FROM expenses")
+    s.query("SELECT SUM(amount * 2) AS total FROM expenses")
+    rows = s.query("SELECT 'SUM(notes)' AS s FROM expenses")
+    assert rows[0]["s"] == "SUM(notes)"
+
+
+def test_guard_passes_ambiguous_forms_through(tmp_path):
+    s = _expenses(tmp_path)
+    # alias-qualified: the qualifier is an alias, not the real table name -> guard skips it
+    s.query("SELECT SUM(e.notes) AS total FROM expenses e")
+    # subquery: derived table, provenance not statically resolvable -> guard bails entirely. Uses a
+    # genuine TEXT column (notes) inside the derived table so this would raise if the bail didn't work.
+    s.query("SELECT SUM(notes) FROM (SELECT CAST(notes AS REAL) AS notes FROM expenses)")
+    # CTE: genuinely exercises the startswith('with') guard. The final SELECT's FROM references the
+    # real 'expenses' table and a real TEXT column, so if the with-guard were removed this would fall
+    # through to the sqlite_master resolution and WOULD raise — only the with-check saves it, unlike
+    # a CTE-alias FROM (e.g. 'FROM c'), which would bail at the alias-isn't-a-real-table check instead
+    # and mask a missing with-guard.
+    s.query("WITH c AS (SELECT 1 AS t) SELECT SUM(notes) AS total FROM expenses")
+
+
 def test_query_readonly_connection_blocks_writes(tmp_path):
     """Even a SELECT that sneaks a write-ish form can't mutate — the ro connection errors."""
     import sqlite3

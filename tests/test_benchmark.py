@@ -2,7 +2,7 @@
 import importlib.util
 
 from engine.eval.benchmark import (_backfill_solved, aggregate, build_series, render_report,
-                                    resolve_config, task_verdict, _write_result)
+                                    resolve_config, run_aborted, task_verdict, _write_result)
 
 
 def _load_validator():
@@ -144,6 +144,62 @@ def test_aggregate_rolls_up_solved():
     assert agg["per_tier"]["1"]["solved"] == 0.5 and agg["overall"]["solved"] == 0.5
 
 
+def test_run_aborted_only_on_stuck_repeating():
+    assert run_aborted(["repeat_nudge", "stuck_repeating"]) is True
+    assert run_aborted(["repeat_nudge"]) is False
+    assert run_aborted(["fuzzy_repeat_nudge", "create_without_verify"]) is False
+    assert run_aborted([]) is False
+    assert run_aborted(None) is False
+
+
+def test_task_verdict_abort_rate_is_fraction_of_k():
+    runs = [{"chain_correct": True, "judge_score": 3, "observer": ["stuck_repeating"], "aborted": True},
+            {"chain_correct": True, "judge_score": 3, "observer": [], "aborted": False},
+            {"chain_correct": True, "judge_score": 3, "observer": [], "aborted": False}]
+    assert task_verdict(runs, 3)["abort_rate"] == 1 / 3
+
+    clean_runs = [{"chain_correct": True, "judge_score": 3, "observer": ["repeat_nudge"], "aborted": False}] * 3
+    v = task_verdict(clean_runs, 3)
+    assert v["abort_rate"] == 0.0    # measured clean, distinct from None (no data)
+
+
+def test_task_verdict_abort_rate_observer_only_fallback():
+    # no "aborted" key at all -- must fall back to deriving it from "observer" (benchmark.py:66-67)
+    runs = [{"chain_correct": True, "judge_score": 3, "observer": ["stuck_repeating"]},
+            {"chain_correct": True, "judge_score": 3, "observer": []},
+            {"chain_correct": True, "judge_score": 3, "observer": []}]
+    assert task_verdict(runs, 3)["abort_rate"] == 1 / 3
+
+
+def test_abort_rate_none_when_no_observer_data():
+    # legacy-shaped runs: no "observer" and no "aborted" key at all
+    runs = [{"chain_correct": True, "judge_score": 3}] * 3
+    assert task_verdict(runs, 3)["abort_rate"] is None
+
+
+def test_abort_does_not_affect_solved():
+    runs = [{"chain_correct": True, "judge_score": 3, "observer": ["stuck_repeating"], "aborted": True}] * 3
+    v = task_verdict(runs, 3)
+    assert v["solved"] is True and v["chain_pass"] is True
+    assert v["abort_rate"] == 1.0
+
+
+def test_aggregate_rolls_up_abort_rate():
+    tasks = [{"tier": 1, "chain_pass": True, "judge_mean": 3.0, "solved": True, "abort_rate": 1.0, "skipped": False},
+             {"tier": 1, "chain_pass": True, "judge_mean": 3.0, "solved": True, "abort_rate": 0.0, "skipped": False}]
+    agg = aggregate(tasks)
+    assert agg["per_tier"]["1"]["abort_rate"] == 0.5
+
+    all_none = [{"tier": 2, "chain_pass": True, "judge_mean": 3.0, "solved": True, "abort_rate": None, "skipped": False}]
+    agg2 = aggregate(all_none)
+    assert agg2["per_tier"]["2"]["abort_rate"] is None
+
+    with_skipped = tasks + [{"tier": 1, "chain_pass": None, "judge_mean": None, "solved": None,
+                              "abort_rate": None, "skipped": True}]
+    agg3 = aggregate(with_skipped)
+    assert agg3["per_tier"]["1"]["abort_rate"] == 0.5   # skipped task excluded, not counted as 0
+
+
 def _fake_result(model, params, per_tier_solved):
     # a minimal result with runs so solved is derivable; one task per tier
     tasks = []
@@ -165,12 +221,48 @@ def test_backfill_solved_derives_from_runs_when_missing():
     assert out["overall"]["solved"] == 0.5
 
 
+def test_backfill_solved_leaves_abort_rate_none():
+    # _fake_result's runs are legacy-shaped (no observer/aborted key) -> nothing to derive abort_rate from
+    r = _fake_result("m", 3, {1: True, 2: False})
+    out = _backfill_solved(r)
+    assert out["overall"]["abort_rate"] is None
+
+
 def test_render_report_has_solved_column():
     # render on a battery version present via _load_results is integration-heavy; test the string builder
     # by monkeypatching _load_results through a written file is overkill — assert the header names solved.
     from engine.eval import benchmark as B
     md, ok = B.render_report("cap-1")  # cap-1 results exist in the repo
     assert ok and "solved" in md.splitlines()[4].lower()  # header row includes the column
+
+
+def test_render_report_has_abort_column():
+    from engine.eval import benchmark as B
+    md, ok = B.render_report("cap-1")  # cap-1 results exist in the repo (all pre-argus-92a: legacy)
+    assert ok
+    header = md.splitlines()[4].lower()
+    assert "abort" in header
+    body_lines = [l for l in md.splitlines()[6:] if l.startswith("|")]
+    assert body_lines, "expected at least one result row"
+    # render_report emits one row per result, in the same params-sorted order _load_results/render_report
+    # use internally -- zip them up so we can tell which rows are legacy (no observer data ever
+    # recorded) vs. a future post-argus-92a result, and only apply the strict —/n/a assertion to the
+    # legacy ones. Asserting it for EVERY row is a time bomb: it breaks the moment a real abort-rate
+    # result (a genuine percentage, not — or n/a) is committed to benchmark/results/.
+    results = [r for r in B._load_results() if r.get("battery_version") == "cap-1"]
+    results.sort(key=lambda r: r.get("params", 0))
+    assert len(body_lines) == len(results)
+    for line, r in zip(body_lines, results):
+        cells = [c.strip() for c in line.split("|")]
+        # abort is the 7th cell: | model | params | mode | scaffold | max_tok | solved | abort | ...
+        abort_cell = cells[7]
+        has_observer_data = r.get("scaffold") != "off" and any(
+            "aborted" in run or "observer" in run
+            for t in r.get("tasks", []) for run in t.get("runs", []))
+        assert abort_cell != "0%" or has_observer_data, \
+            f"legacy row must not show a fabricated 0%: {line}"
+        if not has_observer_data:
+            assert abort_cell in ("—", "n/a"), f"legacy row should render — or n/a, got {abort_cell!r}: {line}"
 
 
 def test_build_series_metric_solved():

@@ -27,14 +27,25 @@ FIXTURES = BENCH / "cap-1" / "fixtures"     # the default battery's fixtures (ca
 RESULTS = BENCH / "results"                 # shared across batteries — filenames are keyed by battery_version
 PASS_FRACTION = 0.6
 JUDGE_SOLVED_MIN = 2          # a run is "solved" iff it chained correctly AND judge_score >= this
+ABORT_ISSUES = ("stuck_repeating",)   # observer issues that END the turn (v1: exact-repeat only)
 
 # ------------------------------- pure helpers (unit-tested) -------------------------------
 
 
+def run_aborted(observer) -> bool:
+    """True if this run's observer issue list contains an issue that ends the turn (loop.py returns
+    instead of continuing). Nudge-only issues (repeat_nudge, fuzzy_repeat_nudge, create_without_verify)
+    don't count — the loop kept going after those. Pure so it's unit-testable without an engine."""
+    return any(i in ABORT_ISSUES for i in (observer or []))
+
+
 def task_verdict(runs: list, k: int) -> dict:
-    """Collapse a task's k runs into {chain_pass, judge_mean, solved}. chain_pass is None when the
-    task has no `expect` (judge-only). solved = chained-correctly (vacuous if no chain) AND judge >=
-    JUDGE_SOLVED_MIN (vacuous if unjudged), per run, then collapsed like chain_pass (>=ceil(k*frac))."""
+    """Collapse a task's k runs into {chain_pass, judge_mean, solved, abort_rate}. chain_pass is None
+    when the task has no `expect` (judge-only). solved = chained-correctly (vacuous if no chain) AND
+    judge >= JUDGE_SOLVED_MIN (vacuous if unjudged), per run, then collapsed like chain_pass
+    (>=ceil(k*frac)). abort_rate is the fraction of runs the loop itself gave up on (stuck_repeating);
+    it does NOT enter solved/chain_pass — it's diagnostic only. None when no run carries observer
+    data (legacy runs), never fabricated as 0.0."""
     thr = math.ceil(k * PASS_FRACTION)
     chained = [r for r in runs if r.get("chain_correct") is not None]
     chain_pass = (sum(1 for r in chained if r["chain_correct"]) >= thr) if chained else None
@@ -47,21 +58,33 @@ def task_verdict(runs: list, k: int) -> dict:
         judge_ok = True if j is None else (j >= JUDGE_SOLVED_MIN)
         return chain_ok and judge_ok
     solved = (sum(1 for r in runs if _run_solved(r)) >= thr) if runs else None
-    return {"chain_pass": chain_pass, "judge_mean": judge_mean, "solved": solved}
+
+    aborts = []
+    for r in runs:
+        if "aborted" in r:
+            aborts.append(bool(r["aborted"]))
+        elif "observer" in r:
+            aborts.append(run_aborted(r["observer"]))
+    abort_rate = (sum(1 for a in aborts if a) / len(aborts)) if aborts else None
+    return {"chain_pass": chain_pass, "judge_mean": judge_mean, "solved": solved, "abort_rate": abort_rate}
 
 
 def aggregate(tasks: list) -> dict:
-    """tasks: [{tier, chain_pass: bool|None, judge_mean: float|None, skipped: bool}]. Returns per-tier
-    and overall {chain_pass: rate over tasks-with-a-chain-verdict, judge_mean: mean over judged
-    tasks, solved: rate of chain-AND-judge>=2 over tasks with a solved verdict, n, skipped}."""
+    """tasks: [{tier, chain_pass: bool|None, judge_mean: float|None, abort_rate: float|None, skipped:
+    bool}]. Returns per-tier and overall {chain_pass: rate over tasks-with-a-chain-verdict, judge_mean:
+    mean over judged tasks, solved: rate of chain-AND-judge>=2 over tasks with a solved verdict,
+    abort_rate: MEAN (not thresholded) of non-None task abort_rates — a rate stays a rate, unlike the
+    binary chain_pass/solved collapse, n, skipped}."""
     def roll(items):
         active = [t for t in items if not t.get("skipped")]
         cp = [t["chain_pass"] for t in active if t.get("chain_pass") is not None]
         jm = [t["judge_mean"] for t in active if t.get("judge_mean") is not None]
         sv = [t["solved"] for t in active if t.get("solved") is not None]
+        ar = [t["abort_rate"] for t in active if t.get("abort_rate") is not None]
         return {"chain_pass": (sum(1 for x in cp if x) / len(cp)) if cp else None,
                 "judge_mean": (sum(jm) / len(jm)) if jm else None,
                 "solved": (sum(1 for x in sv if x) / len(sv)) if sv else None,
+                "abort_rate": (sum(ar) / len(ar)) if ar else None,
                 "n": len(active), "skipped": sum(1 for t in items if t.get("skipped"))}
     per_tier = {}
     for tier in sorted({t["tier"] for t in tasks}):
@@ -71,7 +94,12 @@ def aggregate(tasks: list) -> dict:
 
 def _backfill_solved(result: dict) -> dict:
     """Ensure per_tier/overall carry a `solved` rate. Fresh runs already do (Task 1); older results
-    predate the metric, so recompute it from each task's stored per-run chain_correct/judge_score."""
+    predate the metric, so recompute it from each task's stored per-run chain_correct/judge_score.
+
+    abort-rate is NOT backfillable: unlike chain_correct/judge_score, no observer data was ever
+    written to disk for pre-argus-92a results (_run_task dropped it before serialization), so there
+    is nothing here to recompute from. This early-returns for every committed result (they all have
+    a non-None overall.solved), so legacy files simply keep abort_rate absent -> None at render time."""
     if result.get("overall", {}).get("solved") is not None:
         return result
     k = result.get("k", 3)
@@ -80,6 +108,7 @@ def _backfill_solved(result: dict) -> dict:
         v = task_verdict(t.get("runs", []), k) if t.get("runs") else {}
         tasks.append({"tier": t["tier"], "chain_pass": t.get("chain_pass"),
                       "judge_mean": t.get("judge_mean"), "solved": v.get("solved"),
+                      "abort_rate": v.get("abort_rate"),
                       "skipped": t.get("skipped", False)})
     agg = aggregate(tasks)
     result["per_tier"], result["overall"] = agg["per_tier"], agg["overall"]
@@ -194,7 +223,8 @@ async def _run_task(cfg, judge_fn, task: dict, k: int, timeout: float, fixtures_
                 dst.mkdir(parents=True, exist_ok=True)
                 shutil.copy(fixtures_dir / src, dst / src)
             cap = await run_and_capture(engine, f"bench-{task['id']}-{i}", task["prompt"], timeout)
-            r = {"tools": cap["tools"], "error": cap["error"], "final": cap["final"]}
+            r = {"tools": cap["tools"], "error": cap["error"], "final": cap["final"],
+                 "observer": cap["observer"], "aborted": run_aborted(cap["observer"])}
             if "expect" in task:
                 r["chain_correct"] = score_case(task["expect"], cap)["chain_correct"]
             if task.get("rubric") and not cap["error"] and judge_fn is not None:
@@ -209,7 +239,7 @@ async def _run_task(cfg, judge_fn, task: dict, k: int, timeout: float, fixtures_
                   f"{r.get('chain_correct', '-')!s:<5} judge={js if js is not None else '-'} {cap['tools']}"
                   + (f" ERR {cap['error']}" if cap["error"] else ""), flush=True)
         except Exception as e:              # noqa: BLE001 - a bad build must not abort the run
-            cell = {"error": f"{type(e).__name__}: {e}", "tools": []}
+            cell = {"error": f"{type(e).__name__}: {e}", "tools": [], "aborted": False, "observer": []}
             if "expect" in task:            # a crashed cell is a real chain failure, not a silent drop
                 cell["chain_correct"] = False
             runs.append(cell)
@@ -273,8 +303,8 @@ def render_report(battery_version: str) -> tuple[str, bool]:
     lines = [f"# Model-Capability Benchmark — `{battery_version}`", "",
              f"{len(results)} model(s), by param count. Chain = deterministic tool-chain pass-rate; "
              "Judge = Opus quality mean (0–3). A tier's line falling off below some size is the shelf.", "",
-             "| model | params (B) | mode | scaffold | max_tok | solved | " + " | ".join(f"T{t} chain / judge" for t in tiers) + " | overall |",
-             "|---|---|---|---|---|---|" + "|".join(["---"] * (len(tiers) + 1)) + "|"]
+             "| model | params (B) | mode | scaffold | max_tok | solved | abort | " + " | ".join(f"T{t} chain / judge" for t in tiers) + " | overall |",
+             "|---|---|---|---|---|---|---|" + "|".join(["---"] * (len(tiers) + 1)) + "|"]
     def _pct(x):
         return "—" if x is None else f"{x:.0%}"
 
@@ -290,13 +320,20 @@ def render_report(battery_version: str) -> tuple[str, bool]:
         cells.append(f"{_pct(ov.get('chain_pass'))} / {_q(ov.get('judge_mean'))}")
         mt = r.get("max_tokens")
         solved = ov.get("solved")
+        # baseline arm runs with enable_observer=False (BASELINE_OVERRIDES) -- the observer physically
+        # cannot fire, so an abort_rate of 0% there would be a misleading artifact, not a real measurement.
+        abort_cell = "n/a" if r.get("scaffold") == "off" else _pct(ov.get("abort_rate"))
         lines.append(f"| {r['model']} | {r['params']} | {r.get('mode', '?')} | {r.get('scaffold', 'on')} | "
-                     f"{mt if mt is not None else '—'} | {_pct(solved)} | " + " | ".join(cells) + " |")
+                     f"{mt if mt is not None else '—'} | {_pct(solved)} | {abort_cell} | " + " | ".join(cells) + " |")
     lines += ["",
               "`max_tok` = the completion-token cap for the run. `—` = not recorded (runs predating this "
               "field; the standard-config default is 2048). Runs at different caps are not strictly "
               "comparable — a reasoning model can exhaust a low cap mid-thought, so a higher cap is a "
-              "fairer read of its capability but a looser comparison across sizes."]
+              "fairer read of its capability but a looser comparison across sizes.",
+              "`abort` = share of runs the loop itself ended on `stuck_repeating` (an exact-repeat "
+              "tool-call thrash); diagnostic only, not part of `solved`. `—` = predates the metric "
+              "(no observer data was ever recorded for that result). `n/a` = observer disabled "
+              "(baseline arm — `--baseline` turns `enable_observer` off, so it can't fire)."]
     return "\n".join(lines) + "\n", True
 
 

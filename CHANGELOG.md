@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+- Benchmark report gains an `abort` column: the share of runs the loop itself ended on
+  `stuck_repeating` (exact-repeat tool-call thrash). Diagnostic only — does not affect `solved`.
+  Legacy results (no observer data on disk) render `—`; the baseline arm (`enable_observer` off)
+  renders `n/a`.
+
+### Fixed
+- `SUM`/`AVG`/`TOTAL` over a declared-TEXT column now raises `TableError` instead of silently
+  returning `0.0` (SQLite treats non-numeric text as 0 in arithmetic aggregates). Guard is
+  conservative: only the unambiguous bare-column form is refused — CAST, expressions, subqueries,
+  CTEs, and alias-qualified names all pass through untouched.
+
 ## 0.12.1
 
 Hardening from an external code review.
