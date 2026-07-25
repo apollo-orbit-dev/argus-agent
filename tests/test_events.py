@@ -81,14 +81,21 @@ async def test_history_capped():
     assert [e.step for e in bus.recent("s1")] == [2, 3, 4]
 
 
-async def test_control_channel_does_not_reach_renamed_session_subscriber():
-    # Pins the per-session scoping the "__control__" control-channel design depends on (see
-    # engine.py's _emit_session_changed): a subscriber on the "__control__" pseudo-session gets the
-    # session_changed event, but a subscriber on the RENAMED session's own id does NOT — publish()
-    # only fans out where session_filter is None or matches ev.session_id exactly. This is the
+async def test_control_channel_does_not_reach_renamed_session_subscriber(tmp_path):
+    # Pins the per-session scoping the "__control__" control-channel design depends on, driven
+    # through the REAL Engine._emit_session_changed (not a hand-built StepEvent): a subscriber on
+    # the "__control__" pseudo-session gets the session_changed event, but a subscriber on the
+    # RENAMED session's own id does NOT — publish() only fans out where session_filter is None or
+    # matches ev.session_id exactly. Because this goes through the actual emit call, it is a real
     # guardrail against someone later "fixing" the emit back onto the session's own stream (which
-    # would break the other-tab/Telegram case, per the bead's design doc).
-    bus = EventBus(maxlen=100)
+    # would break the other-tab/Telegram case, per the bead's design doc): moving the emit's
+    # session_id from "__control__" to the renamed session would make this test fail.
+    from config import Config
+    from engine.engine import Engine
+
+    eng = Engine(Config(model_base_url="http://x/v1", model_name="m", telegram_bot_token=""),
+                 data_dir=str(tmp_path))
+    bus = eng.events
     control_got, session_got = [], []
 
     async def control_reader():
@@ -105,13 +112,17 @@ async def test_control_channel_does_not_reach_renamed_session_subscriber():
     session_task = asyncio.create_task(session_reader())
     await asyncio.sleep(0.01)  # let both subscribers register
 
-    await bus.publish(StepEvent(run_id="control", session_id="__control__", step=0,
-                                kind="session_changed",
-                                data={"session_id": "renamed-sid", "action": "renamed",
-                                      "name": "New Title"},
-                                ts=time.time()))
+    eng._emit_session_changed("renamed-sid", "renamed", "New Title")
     await asyncio.wait_for(control_task, 1.0)
 
     assert len(control_got) == 1 and control_got[0].kind == "session_changed"
+    assert control_got[0].session_id == "__control__"
+    assert control_got[0].data == {"session_id": "renamed-sid", "action": "renamed",
+                                    "name": "New Title"}
     assert session_got == []                 # never delivered — different subscription session_id
+
     session_task.cancel()
+    try:
+        await session_task
+    except asyncio.CancelledError:
+        pass

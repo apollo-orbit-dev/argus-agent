@@ -634,12 +634,17 @@
      new run, so a control event would spawn a phantom run that never completes. Opened once at page
      load and never reopened per-session (see openControlEvents() call near the end of this file). */
   var ces = null;
+  var cesPendingRender = null;
   function openControlEvents(){
     if (ces) return;
     ces = new EventSource("/events?session_id=__control__");
     ces.onmessage = function(m){
       var ev; try { ev = JSON.parse(m.data); } catch(e){ return; }
-      if (ev.kind === 'session_changed') renderSessionList();
+      if (ev.kind !== 'session_changed') return;
+      // Coalesce bursts (e.g. a replayed ring of many renames on connect) into one render instead
+      // of one fetch('/sessions') + innerHTML rewrite (and sidebar scroll reset) per event.
+      clearTimeout(cesPendingRender);
+      cesPendingRender = setTimeout(renderSessionList, 50);
     };
     ces.onerror = function(){ /* EventSource auto-reconnects */ };
   }

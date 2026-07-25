@@ -58,6 +58,7 @@ async def test_no_model_configured_skips_silently(tmp_path):
     e._aux_model_client = _boom
 
     title = await e.auto_title_session(sid)
+    await asyncio.sleep(0)                           # let any fire-and-forget publish task run
 
     assert title is None
     assert built["n"] == 0                          # the aux client is never even constructed
@@ -81,6 +82,7 @@ async def test_no_model_configured_via_missing_name_only(tmp_path):
     e._aux_model_client = _boom
 
     title = await e.auto_title_session(sid)
+    await asyncio.sleep(0)      # let any fire-and-forget publish task run
 
     assert title is None
     # without this, a real ModelClient would be built and fired at http://x/v1 — a live HTTP
@@ -226,6 +228,7 @@ async def test_aux_call_raising_is_nonfatal(tmp_path):
     e._aux_model_client = lambda: _FakeAux(exc=TimeoutError("boom"))
 
     title = await e.auto_title_session(sid)          # must not raise
+    await asyncio.sleep(0)      # let any fire-and-forget publish task run
 
     assert title is None
     assert e.store.session_name(sid) == sid
@@ -243,6 +246,7 @@ async def test_empty_response_is_not_stored_as_title(tmp_path):
     e._aux_model_client = lambda: _FakeAux(content="   \n\t  ")
 
     title = await e.auto_title_session(sid)
+    await asyncio.sleep(0)      # let any fire-and-forget publish task run
 
     assert title is None
     assert e.store.session_name(sid) == sid
@@ -302,6 +306,7 @@ async def test_telegram_session_not_titled(tmp_path):
     e._aux_model_client = _boom
 
     title = await e.auto_title_session(sid)
+    await asyncio.sleep(0)      # let any fire-and-forget publish task run
 
     assert title is None
     assert built["n"] == 0                              # the "ses_" gate blocks before any model call
@@ -330,6 +335,7 @@ async def test_ephemeral_session_skipped(tmp_path):
     e._aux_model_client = _boom
 
     title = await e.auto_title_session(sid)
+    await asyncio.sleep(0)      # let any fire-and-forget publish task run
 
     assert title is None
     assert built["n"] == 0                              # ephemeral sessions never reach the model
