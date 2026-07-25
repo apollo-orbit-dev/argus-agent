@@ -45,7 +45,7 @@ point it at a 3B model on your own GPU and the harness is what keeps it honest.
 
 ## Contents
 
-[Features](#features) · [Small-model scaffolding](#small-model-scaffolding) · [Measuring it](#measuring-it) · [Quickstart](#quickstart) · [CLI](#cli) · [Updating](#updating) · [Configuration](#configuration) · [Models](#models) · [Requirements](#requirements) · [Container sandbox](#container-sandbox) · [Security](#security) · [License](#license)
+[Features](#features) · [Architecture](#architecture) · [Skills](#skills) · [Small-model scaffolding](#small-model-scaffolding) · [Measuring it](#measuring-it) · [Quickstart](#quickstart) · [CLI](#cli) · [Updating](#updating) · [Configuration](#configuration) · [Models](#models) · [Requirements](#requirements) · [Container sandbox](#container-sandbox) · [Security](#security) · [License](#license)
 
 ## Features
 
@@ -93,6 +93,101 @@ point it at a 3B model on your own GPU and the harness is what keeps it honest.
 - **Built for tuning small models** — a loop-health observer, switchable tool-calling, deterministic
   execution paths, and a passive reliability instrument. See [Small-model scaffolding](#small-model-scaffolding)
   below, and [Measuring it](#measuring-it) for the harnesses that tell you whether any of it helped.
+
+## Architecture
+
+There's one `Engine` instance per process. The FastAPI backend, the dashboard, and the Telegram
+bot are all clients of that single `Engine` — none of them hold agent state of their own. `main.py`
+is the entrypoint: it builds the one `Engine`, then wires the backend and the bot around it inside
+a single asyncio event loop.
+
+```mermaid
+graph TD
+    main["main.py (entrypoint)"]
+    engine["Engine (engine/)"]
+    backend["Backend — FastAPI (backend/app.py)"]
+    dashboard["Dashboard (dashboard/)"]
+    telegram["Telegram bot (backend/telegram_bot.py)"]
+
+    main -->|"creates one instance"| engine
+    main -->|"create_app(engine)"| backend
+    main -->|"build_telegram_app(engine)"| telegram
+    dashboard -->|"HTTP fetch + SSE"| backend
+    backend -->|"hosts + calls public API"| engine
+    telegram -->|"public API (run_task / reset / get_status)"| engine
+    engine -.->|"delivery + approval callback"| telegram
+```
+
+## Skills
+
+A skill is a Markdown file in `engine/skills/library/`, loaded as data — never hardcoded into the
+loop. YAML frontmatter declares `name`, `description`, `tools`, and `triggers`; the body below it is
+the procedure, written as prose the model follows. A skill can optionally include a fenced `steps`
+block — a JSON array that lets the procedure run deterministically through the routines engine
+instead of relying on free-form generation every time. The layering is loop < tools < skills: skills
+orchestrate tools, they never replace them.
+
+Here's `summarize_url.md`, reproduced exactly as shipped:
+
+```markdown
+---
+name: summarize_url
+description: Summarize the main points of a web page the user gives you by fetching it and producing a short bullet summary. Use when the user pastes a URL and wants the gist.
+tools: [fetch_page]
+triggers: [summarize, summarise, tldr, tl;dr, sum up this, what does this page say]
+---
+You are summarizing a single web page for the user. Do NOT summarize from memory
+or from the URL text alone — you must fetch it. Follow these steps in order:
+
+1. Find the URL in the user's request. If there is no URL, ASK the user for one
+   and stop.
+2. Call `fetch_page` with that URL.
+3. If `fetch_page` FAILED or returned no usable content, tell the user plainly
+   that you could not read the page. Do NOT make up a summary.
+4. If it succeeded, read the content and identify the main points.
+5. Respond with a concise summary of 3 to 6 bullet points covering the key ideas.
+
+Rules of thumb:
+- Only call `fetch_page` once unless it clearly failed.
+- Stick to what the page actually says — no added facts or opinions.
+- Keep each bullet short and to the point.
+
+**If `fetch_page` isn't in your tool list:** it's a BUILT-IN tool — its absence just means its
+dependency (Firecrawl) isn't configured on this server yet. Do NOT `create_tool` a replacement.
+Tell the user you can't read the page because the fetch tool isn't set up (they can enable it by
+setting `FIRECRAWL_BASE_URL` in the server's `.env`).
+```
+
+The frontmatter fields, in order:
+
+- **`name`** — the skill's snake_case id, matching the filename stem (`summarize_url.md` →
+  `summarize_url`).
+- **`description`** — what the skill does and when to use it; this is what model-driven skill
+  selection reads to decide whether the skill applies.
+- **`tools`** — the built-in tools the procedure expects to call (here, real `fetch_page`); a tool
+  named here that isn't configured on the server degrades gracefully rather than hard-failing.
+- **`triggers`** — phrases matched deterministically by explicit-first selection, before any model
+  fallback is used to pick a skill.
+
+### Optional: a `steps` block
+
+`summarize_url` ships prose-only — its procedure isn't pinned to a `steps` block. The example below
+is illustrative, showing what a deterministic version of the same fetch→summarize procedure would
+look like:
+
+```steps
+[
+  {"type": "tool", "tool": "fetch_page", "args": {"url": "{{input}}"}},
+  {"type": "model", "id": "summarize",
+   "prompt": "Summarize this page in 3-6 bullets. Use only what it says:\n\n{{fetch_page}}"}
+]
+```
+
+The tool step runs without a model call at all; `{{input}}` is the user's original message, and
+`{{fetch_page}}` in the model step's prompt references the tool step's output by id (which defaults
+to the tool name when no `id` is given). This is the same mechanism behind the **~5× fewer model
+calls** figure cited in [Small-model scaffolding](#small-model-scaffolding) below — routines and
+skill `steps` blocks skip re-deriving a plan the harness already knows.
 
 ## Small-model scaffolding
 
@@ -319,6 +414,11 @@ machine.
 | `proxy` *(default)* | The public internet **only**, through a policy-enforcing proxy — public APIs work, but your LAN, your model server, and cloud-metadata endpoints do not. |
 | `none` | Nothing — fully air-gapped. |
 | `lan` | The full network, including your LAN. The deliberate escape hatch; it gives up the boundary. |
+
+> **⚠️ `lan` reopens your LAN.** It routes the sandbox onto your local network — reachable hosts
+> include your self-hosted model server, router, NAS, and cloud-metadata endpoints. The `proxy`
+> default blocks all of these on purpose. Only choose `lan` when a task genuinely needs to reach
+> something on your LAN, and treat any code the model runs as if it can hit those hosts.
 
 **Your files are safe across the toggle.** The workspace is the same host directory whether the
 sandbox is on or off, so you can switch it on and off freely without losing anything the agent has
