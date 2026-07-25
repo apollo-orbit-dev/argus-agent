@@ -89,7 +89,7 @@ class Config(BaseSettings):
     # OFF by default: a hidden tool the turn needs is unrecoverable in a way today's system
     # cannot fail, so no existing deploy changes behavior until opted in.
     tool_disclosure_mode: ToolDisclosureMode = "off"
-    tool_disclosure_k: int = Field(12, ge=1)     # TOTAL in view: core + pinned + retrieved
+    tool_disclosure_k: int = Field(40, ge=1)     # TOTAL in view: core + pinned + retrieved
     tool_disclosure_core: str = "find_tool,ask_user,calculator,get_current_time,about_argus"
 
     # Tool infrastructure. These are EXTERNAL DEPENDENCIES — empty by default, and the tools that

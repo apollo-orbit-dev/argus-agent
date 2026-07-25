@@ -128,7 +128,7 @@ def test_tool_disclosure_defaults_are_off():
     today's system cannot fail, so no existing deploy changes behavior until it opts in."""
     c = _mk()
     assert c.tool_disclosure_mode == "off"
-    assert c.tool_disclosure_k == 12
+    assert c.tool_disclosure_k == 40
     assert c.tool_disclosure_core == "find_tool,ask_user,calculator,get_current_time,about_argus"
 
 
@@ -138,7 +138,7 @@ def test_tool_disclosure_fields_round_trip_through_env():
         assert f in c._ENV_FIELDS
     pairs = dict(c.env_pairs())
     assert pairs["TOOL_DISCLOSURE_MODE"] == "off"
-    assert pairs["TOOL_DISCLOSURE_K"] == "12"
+    assert pairs["TOOL_DISCLOSURE_K"] == "40"
     assert "find_tool" in pairs["TOOL_DISCLOSURE_CORE"]
 
 
