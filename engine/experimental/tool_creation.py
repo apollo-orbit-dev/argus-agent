@@ -974,9 +974,11 @@ class InspectToolTool(Tool):
                 arg_example = next(iter(sch.get("properties", {})), "...")
                 out += (
                     "This is a BUILT-IN tool — it has no editable source and cannot be revised or "
-                    "deleted. You CAN call it directly, and you can call it from inside created-tool "
-                    f"code as a plain function: {tool.name}({{\"{arg_example}\": ...}}) returns its "
-                    "output as a STRING (json.loads() it if it returns JSON)."
+                    "deleted. You CAN call it directly. You can usually also call it from inside "
+                    f"created-tool code as a plain function: {tool.name}({{\"{arg_example}\": ...}}) "
+                    "returns its output as a STRING (json.loads() it if it returns JSON) — if that "
+                    "comes back 'tool composition is unavailable in this context', composition is "
+                    "off on this server, so call the tool directly in your turn instead."
                 )
             return out
 

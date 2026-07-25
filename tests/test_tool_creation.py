@@ -36,7 +36,8 @@ def test_call_tool_composition():
     code = "def run(args):\n    return 'got ' + CALL_TOOL('echo', {'x': args['v']})\n"
     out = asyncio.run(ct.run(ct.Params(name="wrap", description="d",
         parameters={"v": {"type": "string"}}, code=code, test_args={"v": "hi"})))
-    assert "created" in out.lower() and "verified" not in out.lower()
+    assert "not possible to confirm" in out.lower()   # UNKNOWN path: args aren't perturbable
+    assert "verified" not in out.lower()
     tool = reg.get("wrap")
     assert asyncio.run(tool.run(tool.Params(v="hi"))) == "got ECHO:hi"
 
@@ -65,7 +66,8 @@ def test_create_tool_with_list_of_dicts():
         name="avg_by_key", description="average v per k",
         parameters={"data": {"type": "array"}}, code=code,
         test_args={"data": [{"k": "A", "v": 90}, {"k": "A", "v": 92}, {"k": "B", "v": 88}]})))
-    assert "created" in out.lower() and "verified" not in out.lower()
+    assert "not possible to confirm" in out.lower()   # UNKNOWN path: args aren't perturbable
+    assert "verified" not in out.lower()
     tool = reg.get("avg_by_key")
     res = asyncio.run(tool.run(tool.Params(data=[{"k": "A", "v": 10}, {"k": "A", "v": 20}])))
     assert "15.0" in res
@@ -90,7 +92,8 @@ def test_bare_tool_name_composition():
     code = "def run(args):\n    return 'got ' + echo({'x': args['v']})\n"   # bare name, not CALL_TOOL
     out = asyncio.run(ct.run(ct.Params(name="wrap2", description="d",
         parameters={"v": {"type": "string"}}, code=code, test_args={"v": "hi"})))
-    assert "created" in out.lower() and "verified" not in out.lower()
+    assert "not possible to confirm" in out.lower()   # UNKNOWN path: args aren't perturbable
+    assert "verified" not in out.lower()
     tool = reg.get("wrap2")
     assert asyncio.run(tool.run(tool.Params(v="hi"))) == "got ECHO:hi"
 
