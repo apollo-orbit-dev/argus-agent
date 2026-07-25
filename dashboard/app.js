@@ -114,7 +114,7 @@
     confirmPending = opts;
     confirmTitleEl.textContent = opts.title || 'Delete';
     confirmMessageEl.textContent = opts.message || "Are you sure? This can't be undone.";
-    var danger = opts.danger !== false; // non-destructive callers (e.g. "New session") pass danger:false
+    var danger = opts.danger !== false; // non-destructive callers (e.g. "Reset conversation") pass danger:false
     confirmDeleteBtn.classList.toggle('btn-danger', danger);
     confirmDeleteBtn.textContent = opts.confirmLabel || (danger ? 'Delete' : 'Confirm');
     if (opts.requireText){
@@ -925,13 +925,13 @@
     runTask();
   });
 
-  /* ---- new session: reset the engine-side session and the local trace state ---- */
+  /* ---- reset conversation: reset the engine-side session and the local trace state ---- */
   var newSessionBtn = $('newSessionBtn');
   if (newSessionBtn) newSessionBtn.addEventListener('click', function(){
     confirmDelete({
-      title: 'New session',
-      message: 'Start a new session? This clears the current conversation and trace.',
-      confirmLabel: 'New session',
+      title: 'Reset conversation',
+      message: 'Reset the conversation? This clears the model\'s working context and trace but keeps the transcript. You stay in the same session.',
+      confirmLabel: 'Reset',
       danger: false,
       onConfirm: async function(){
         try {
@@ -940,12 +940,12 @@
             body: JSON.stringify({ session_id: SESSION })
           });
           if (!res.ok) throw new Error('HTTP ' + res.status);
-        } catch(e){ toast('Failed to start new session: ' + e.message, 'err'); return; }
+        } catch(e){ toast('Failed to reset conversation: ' + e.message, 'err'); return; }
         runs.clear(); seen.clear(); liveRunId = null; selectedRunId = null; followingLive = true;
         renderRunsList();
         showTranscript();        // back to the (now context-cleared) conversation view
         loadUsage();
-        toast('New session started', 'ok');
+        toast('Conversation reset', 'ok');
       }
     });
   });
