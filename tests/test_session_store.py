@@ -103,3 +103,32 @@ def test_list_excludes_ephemeral(tmp_path):
     s.append_message("__routine__:x", {"role": "user", "content": "scratch"})
     ids = {r["id"] for r in s.list_sessions()}
     assert "dashboard" in ids and "__routine__:x" not in ids
+
+
+def test_rename_if_placeholder_only_when_still_placeholder(tmp_path):
+    s = SessionStore(str(tmp_path / "sessions.db"))
+    sid = s.create_session()                               # name defaults to sid (placeholder)
+    assert s.rename_if_placeholder(sid, "Generated Title") is True
+    assert s.session_name(sid) == "Generated Title"
+    # second call: name is no longer the placeholder, so it must refuse to overwrite
+    assert s.rename_if_placeholder(sid, "Another Title") is False
+    assert s.session_name(sid) == "Generated Title"
+
+
+def test_rename_if_placeholder_closes_the_toctou_race(tmp_path):
+    # Exactly the failure this method exists to prevent: an auto-title caller reads the placeholder
+    # name, then (during some await, e.g. an in-flight aux model call) a manual rename lands on the
+    # SAME row before the caller's write happens. The write must be conditioned on the CURRENT db
+    # state at write time, not on what was true when the caller last checked.
+    s = SessionStore(str(tmp_path / "sessions.db"))
+    sid = s.create_session()
+    assert s.session_name(sid) == sid                       # still the placeholder at "read time"
+    s.rename_session(sid, "Tax stuff")                      # manual rename lands mid-flight
+    renamed = s.rename_if_placeholder(sid, "Generated Title")   # caller's write, using its stale read
+    assert renamed is False                                 # refused: name no longer matched id
+    assert s.session_name(sid) == "Tax stuff"                # manual rename survives
+
+
+def test_rename_if_placeholder_no_row_returns_false(tmp_path):
+    s = SessionStore(str(tmp_path / "sessions.db"))
+    assert s.rename_if_placeholder("never-created", "Some Title") is False
