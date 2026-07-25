@@ -599,10 +599,14 @@ class UpdateRowsTool(Tool):
 
 class InsertRowTool(Tool):
     name = "insert_row"
-    description = ("Insert one row into a table. Args: table, and values (a dict of column -> value). "
+    description = ("Add one row to an existing table — log today's weight or steps, record an expense, "
+                  "add a contact, append a reading or a task. Args: table, and values (a dict of "
+                  "column -> value). "
                   "Example: insert_row('expenses', {'date':'2026-07-13','category':'food','amount':24.5}). "
                   "If the table has a ':key' column, inserting an existing key UPDATES that row (upsert) "
-                  "and only overwrites the columns you pass — so re-logging a date is safe and idempotent.")
+                  "and only overwrites the columns you pass — so re-logging a date is safe and idempotent. "
+                  "To change rows that already exist use update_rows; to bring many rows over from "
+                  "another table use copy_table.")
 
     class Params(BaseModel):
         table: str = Field(..., description="table name")
@@ -623,10 +627,13 @@ class QueryTableTool(Tool):
     name = "query_table"
     description = (
         "Run a READ-ONLY SQL SELECT over your tables — this is how you FILTER and AGGREGATE "
-        "(WHERE, SUM/AVG/COUNT, GROUP BY, ORDER BY, date ranges). Only SELECT is allowed. "
+        "(WHERE, SUM/AVG/COUNT, GROUP BY, ORDER BY, date ranges). Reach for it to answer a "
+        "question about data you've logged: how much was spent on something, an average or total "
+        "over a period, the highest or most recent entries, or just the rows that match. Only "
+        "SELECT is allowed. "
         "Example: query_table(\"SELECT category, SUM(amount) AS total FROM expenses WHERE date >= "
         "'2026-07-01' GROUP BY category ORDER BY total DESC\"). Use the results to answer or to "
-        "feed make_chart. Arg: sql."
+        "feed make_chart; see list_tables if you're unsure of the table or column names. Arg: sql."
     )
 
     class Params(BaseModel):
