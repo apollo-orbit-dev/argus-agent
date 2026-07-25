@@ -56,6 +56,78 @@ def test_query_rejects_non_select(tmp_path):
             s.query(bad)
 
 
+def _expenses(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("expenses", ["date:date", "category:text", "amount:real", "notes:text"])
+    for d, c, a, n in [("2026-07-01", "food", 20, "lunch"), ("2026-07-02", "food", 30, "dinner"),
+                        ("2026-07-03", "gas", 45, "fillup")]:
+        s.insert("expenses", {"date": d, "category": c, "amount": a, "notes": n})
+    return s
+
+
+def test_sum_over_text_column_errors(tmp_path):
+    s = _expenses(tmp_path)
+    with pytest.raises(TableError) as ei:
+        s.query("SELECT SUM(notes) FROM expenses")
+    msg = str(ei.value)
+    assert "TEXT column" in msg
+    assert "CAST(notes AS REAL)" in msg
+
+
+def test_avg_and_total_over_text_error(tmp_path):
+    s = _expenses(tmp_path)
+    with pytest.raises(TableError):
+        s.query("SELECT AVG(notes) FROM expenses")
+    with pytest.raises(TableError):
+        s.query("SELECT TOTAL(notes) FROM expenses")
+    with pytest.raises(TableError):
+        s.query("SELECT SUM(DISTINCT notes) FROM expenses")
+
+
+def test_sum_over_date_and_json_columns_error(tmp_path):
+    s = _store(tmp_path)
+    s.create_table("t", ["day:date", "tags:json"])
+    s.insert("t", {"day": "2026-07-01", "tags": ["a", "b"]})
+    with pytest.raises(TableError):
+        s.query("SELECT SUM(day) FROM t")
+    with pytest.raises(TableError):
+        s.query("SELECT SUM(tags) FROM t")
+
+
+def test_sum_over_numeric_column_still_works(tmp_path):
+    s = _expenses(tmp_path)
+    rows = s.query("SELECT SUM(amount) AS total FROM expenses")
+    assert rows[0]["total"] == 95
+    rows2 = s.query("SELECT AVG(amount) AS avg_amt FROM expenses")
+    assert rows2[0]["avg_amt"] is not None
+
+
+def test_count_over_text_still_works(tmp_path):
+    s = _expenses(tmp_path)
+    assert s.query("SELECT COUNT(notes) AS n FROM expenses")[0]["n"] == 3
+    assert s.query("SELECT COUNT(*) AS n FROM expenses")[0]["n"] == 3
+    assert s.query("SELECT MIN(category) AS c FROM expenses")[0]["c"] == "food"
+    assert s.query("SELECT MAX(category) AS c FROM expenses")[0]["c"] == "gas"
+
+
+def test_cast_and_expression_forms_pass_through(tmp_path):
+    s = _expenses(tmp_path)
+    s.query("SELECT SUM(CAST(notes AS REAL)) AS total FROM expenses")
+    s.query("SELECT SUM(amount * 2) AS total FROM expenses")
+    rows = s.query("SELECT 'SUM(notes)' AS s")
+    assert rows[0]["s"] == "SUM(notes)"
+
+
+def test_guard_passes_ambiguous_forms_through(tmp_path):
+    s = _expenses(tmp_path)
+    # alias-qualified: the qualifier is an alias, not the real table name -> guard skips it
+    s.query("SELECT SUM(e.notes) AS total FROM expenses e")
+    # subquery: derived table, provenance not statically resolvable -> guard bails entirely
+    s.query("SELECT SUM(t) AS total FROM (SELECT 1 AS t) sub")
+    # CTE: same reasoning
+    s.query("WITH c AS (SELECT 1 AS t) SELECT SUM(t) AS total FROM c")
+
+
 def test_query_readonly_connection_blocks_writes(tmp_path):
     """Even a SELECT that sneaks a write-ish form can't mutate — the ro connection errors."""
     import sqlite3

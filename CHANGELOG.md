@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Fixed
+- `SUM`/`AVG`/`TOTAL` over a declared-TEXT column now raises `TableError` instead of silently
+  returning `0.0` (SQLite treats non-numeric text as 0 in arithmetic aggregates). Guard is
+  conservative: only the unambiguous bare-column form is refused — CAST, expressions, subqueries,
+  CTEs, and alias-qualified names all pass through untouched.
+
 ## 0.12.1
 
 Hardening from an external code review.
