@@ -492,11 +492,13 @@ class CopyTableTool(Tool):
 class UpdateRowsTool(Tool):
     name = "update_rows"
     description = (
-        "Change column values on EXISTING rows that match a filter — updates every row matching "
-        "ALL of `match` at once. Args: table, set (a dict of column -> new value), and match (a "
-        "dict of column -> value; only rows matching ALL pairs are changed). An empty match is "
-        "refused (it would rewrite every row). Example: "
-        "update_rows('tasks', {'status':'archived'}, {'year':2025})."
+        "Use this to change / set / mark ALL the rows where something is true — e.g. 'mark all my "
+        "2025 tasks as archived', 'set every open item to done', 'change all food expenses to "
+        "groceries'. Updates every row matching your filter in ONE call, so do NOT ask which rows, "
+        "query first, or loop row-by-row — just call it. Example: to archive all 2025 tasks, "
+        "update_rows('tasks', set={'status':'archived'}, match={'year':2025}). Args: table; set "
+        "(dict of column -> new value); match (dict of column -> value — only rows matching ALL "
+        "pairs are changed). An empty match is refused (it would rewrite every row)."
     )
 
     class Params(BaseModel):
