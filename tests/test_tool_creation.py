@@ -8,6 +8,7 @@ from config import Config
 from engine.engine import Engine, builtin_tool_names, compose_tool_creation_directive
 from engine.experimental.tool_creation import (
     CreateToolTool, DynamicTool, ToolValidationError, _compile_run, _perturbations,
+    _IGNORES_NO, _IGNORES_UNKNOWN, _IGNORES_YES,
     build_params_model, scan_ast,
 )
 from engine.protocol import ModelResponse
@@ -35,7 +36,7 @@ def test_call_tool_composition():
     code = "def run(args):\n    return 'got ' + CALL_TOOL('echo', {'x': args['v']})\n"
     out = asyncio.run(ct.run(ct.Params(name="wrap", description="d",
         parameters={"v": {"type": "string"}}, code=code, test_args={"v": "hi"})))
-    assert "verified" in out.lower()
+    assert "created" in out.lower() and "verified" not in out.lower()
     tool = reg.get("wrap")
     assert asyncio.run(tool.run(tool.Params(v="hi"))) == "got ECHO:hi"
 
@@ -64,7 +65,7 @@ def test_create_tool_with_list_of_dicts():
         name="avg_by_key", description="average v per k",
         parameters={"data": {"type": "array"}}, code=code,
         test_args={"data": [{"k": "A", "v": 90}, {"k": "A", "v": 92}, {"k": "B", "v": 88}]})))
-    assert "verified" in out.lower()
+    assert "created" in out.lower() and "verified" not in out.lower()
     tool = reg.get("avg_by_key")
     res = asyncio.run(tool.run(tool.Params(data=[{"k": "A", "v": 10}, {"k": "A", "v": 20}])))
     assert "15.0" in res
@@ -89,7 +90,7 @@ def test_bare_tool_name_composition():
     code = "def run(args):\n    return 'got ' + echo({'x': args['v']})\n"   # bare name, not CALL_TOOL
     out = asyncio.run(ct.run(ct.Params(name="wrap2", description="d",
         parameters={"v": {"type": "string"}}, code=code, test_args={"v": "hi"})))
-    assert "verified" in out.lower()
+    assert "created" in out.lower() and "verified" not in out.lower()
     tool = reg.get("wrap2")
     assert asyncio.run(tool.run(tool.Params(v="hi"))) == "got ECHO:hi"
 
@@ -198,6 +199,100 @@ def test_perturbations():
     assert _perturbations({"n": 5})[0]["n"] == 105
     assert _perturbations({"city": "Paris"}) == []   # no date/number -> nothing safe to perturb
     assert _perturbations({}) == []
+
+
+def test_string_arg_tool_gets_honest_could_not_confirm_message():
+    """A string arg ('Miami') isn't perturbable, so the hardcode check can't run — the model must
+    be told that honestly, not congratulated with 'created and verified'."""
+    reg = ToolRegistry()
+    ct = CreateToolTool(reg, allow_network=False)
+    code = "def run(args):\n    return 'Weather for ' + args['location']\n"
+    out = asyncio.run(ct.run(ct.Params(name="weather", description="d",
+        parameters={"location": {"type": "string"}}, code=code,
+        test_args={"location": "Miami"})))
+    assert "verified" not in out.lower()
+    assert "not possible to confirm" in out.lower()
+    assert "different arguments" in out.lower()
+    assert reg.get("weather") is not None   # still registered — this is not a rejection
+
+
+def test_numeric_arg_tool_still_gets_full_verified_message():
+    """Numeric args ARE perturbable and the tool responds to them -> unchanged full verification."""
+    reg = ToolRegistry()
+    ct = CreateToolTool(reg, allow_network=False)
+    code = "def run(args):\n    return 'Total: ' + str(args['n'] * 2)\n"
+    out = asyncio.run(ct.run(ct.Params(name="doubler", description="d",
+        parameters={"n": {"type": "integer"}}, code=code, test_args={"n": 3})))
+    assert "verified" in out.lower()
+    assert "confirm" not in out.lower()
+
+
+def test_zero_arg_tool_still_verified():
+    """A tool that takes NO arguments can't 'ignore its arguments' — pin the deliberate choice
+    that this stays on the full 'verified' message rather than the honest-unknown one."""
+    reg = ToolRegistry()
+    ct = CreateToolTool(reg, allow_network=False)
+    code = "def run(args):\n    return 'always the same'\n"
+    out = asyncio.run(ct.run(ct.Params(name="static", description="d",
+        parameters={}, code=code, test_args={})))
+    assert "verified" in out.lower()
+
+
+def test_ignores_input_tristate():
+    """Direct unit coverage of the tri-state contract: UNKNOWN when nothing is perturbable, YES
+    for a genuinely hardcoded tool, NO for a tool that uses its input, NO for no-args."""
+    reg = ToolRegistry()
+    ct = CreateToolTool(reg, allow_network=False)
+
+    class UsesCity(BaseModel):
+        city: str
+
+    class Hardcoded:
+        name = "hardcoded"
+
+        async def run(self, args):
+            return "same every time"
+
+    assert asyncio.run(
+        ct._ignores_input(Hardcoded(), UsesCity, {"city": "Paris"}, "same every time")
+    ) == _IGNORES_UNKNOWN
+
+    class UsesDate(BaseModel):
+        date: str
+
+    class HardcodedDate:
+        name = "hardcoded_date"
+
+        async def run(self, args):
+            return "same every time"
+
+    assert asyncio.run(
+        ct._ignores_input(HardcodedDate(), UsesDate, {"date": "2026-07-11"}, "same every time")
+    ) == _IGNORES_YES
+
+    class UsesDateForReal:
+        name = "uses_date"
+
+        async def run(self, args):
+            return "Report for " + args.date
+
+    assert asyncio.run(
+        ct._ignores_input(UsesDateForReal(), UsesDate, {"date": "2026-07-11"},
+                          "Report for 2026-07-11")
+    ) == _IGNORES_NO
+
+    class NoArgs(BaseModel):
+        pass
+
+    class NoArgsTool:
+        name = "no_args"
+
+        async def run(self, args):
+            return "x"
+
+    assert asyncio.run(
+        ct._ignores_input(NoArgsTool(), NoArgs, {}, "x")
+    ) == _IGNORES_NO
 
 
 def test_delete_tool(tmp_path):
