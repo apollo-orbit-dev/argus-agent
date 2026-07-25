@@ -626,6 +626,23 @@
     es = new EventSource("/events?session_id=" + encodeURIComponent(SESSION));
     wireEventHandlers(es);
   }
+
+  /* ---- control channel: a SEPARATE, session-independent EventSource on the reserved pseudo-session
+     "__control__", carrying server-side state-change notifications that are NOT run steps (e.g. an
+     out-of-band session rename from another tab, Telegram, or background auto-title). Deliberately
+     NOT routed through wireEventHandlers/processEvent: processEvent registers any unseen run_id as a
+     new run, so a control event would spawn a phantom run that never completes. Opened once at page
+     load and never reopened per-session (see openControlEvents() call near the end of this file). */
+  var ces = null;
+  function openControlEvents(){
+    if (ces) return;
+    ces = new EventSource("/events?session_id=__control__");
+    ces.onmessage = function(m){
+      var ev; try { ev = JSON.parse(m.data); } catch(e){ return; }
+      if (ev.kind === 'session_changed') renderSessionList();
+    };
+    ces.onerror = function(){ /* EventSource auto-reconnects */ };
+  }
   renderRunsList();
 
   /* ---- session switching: create/rename/delete/list durable sessions (Task 4's /sessions
@@ -3061,6 +3078,7 @@
   switchPage(startPage);
 
   reopenEvents();
+  openControlEvents();
   loadTranscript(SESSION);   // restore the persisted transcript for whichever session was active on last visit
   renderSessionList();
   loadConfig();

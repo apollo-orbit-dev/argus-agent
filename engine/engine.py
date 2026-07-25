@@ -750,6 +750,30 @@ class Engine:
         except RuntimeError:
             asyncio.run(self.events.publish(ev))
 
+    def _emit_session_changed(self, session_id: str, action: str, name: str) -> None:
+        """Publish a session-level state-change notification on the reserved control pseudo-session
+        "__control__" — NOT on the affected session's own stream, since the dashboard's SSE
+        subscription is per-session (see reopenEvents in dashboard/app.js) and would miss renames
+        made from another tab or Telegram. A single session-independent channel, open for the page's
+        lifetime, lets one client subscription cover all of that. Unlike _emit_routine_result this is
+        NOT gated on self._reliability — sidebar refresh must work whether or not the reliability
+        harness is enabled. Must never raise into its caller (mirrors _emit_routine_result's
+        create_task/_bg_tasks/RuntimeError->asyncio.run shape, plus a broad except as a last resort)."""
+        try:
+            import time as _t
+            ev = StepEvent(run_id="control", session_id="__control__", step=0,
+                           kind="session_changed",
+                           data={"session_id": session_id, "action": action, "name": name},
+                           ts=_t.time())
+            try:
+                t = asyncio.get_running_loop().create_task(self.events.publish(ev))
+                self._bg_tasks.add(t)
+                t.add_done_callback(self._bg_tasks.discard)
+            except RuntimeError:
+                asyncio.run(self.events.publish(ev))
+        except Exception:
+            log.debug("_emit_session_changed failed", exc_info=True)
+
     def _routine_registry(self, session_id: str):
         """A tool registry for routine tool-steps: base vetted tools + charts/notify + all created
         tools (with their CALL_TOOL wired to THIS registry, so composed created tools resolve)."""
@@ -1775,6 +1799,7 @@ class Engine:
 
     def rename_session(self, session_id: str, name: str) -> None:
         self.store.rename_session(session_id, name)
+        self._emit_session_changed(session_id, "renamed", name)
 
     def delete_session(self, session_id: str) -> None:
         self.store.delete_session(session_id)
@@ -1998,6 +2023,8 @@ class Engine:
         except Exception:
             log.debug("auto_title_session: rename write failed", exc_info=True)
             return None
+        if renamed:
+            self._emit_session_changed(session_id, "renamed", title)
         return title if renamed else None
 
     # ---- context usage + compaction ----

@@ -33,3 +33,61 @@ def test_engine_session_crud_wrappers(tmp_path):
     e.rename_session(sid, "work2")
     e.delete_session(sid)
     assert sid not in {r["id"] for r in e.list_sessions()}
+
+
+def test_engine_rename_session_emits_session_changed(tmp_path):
+    # Engine.rename_session is the choke point for out-of-band renames (PATCH /sessions/{id},
+    # Telegram, any internal caller) — it must publish on the "__control__" pseudo-session so a
+    # dashboard tab on a DIFFERENT session's SSE stream still learns about the rename.
+    e = _engine(tmp_path)
+    sid = e.create_session("work")
+    seen = []
+    e.events.add_sink(seen.append)
+
+    e.rename_session(sid, "work2")
+
+    assert len(seen) == 1
+    ev = seen[0]
+    assert ev.session_id == "__control__"
+    assert ev.kind == "session_changed"
+    assert ev.data == {"session_id": sid, "action": "renamed", "name": "work2"}
+
+
+def test_emit_session_changed_no_running_loop_falls_back_to_asyncio_run(tmp_path):
+    # Called synchronously (no event loop running) — must fall back to asyncio.run(...) rather than
+    # raising RuntimeError from asyncio.get_running_loop(), mirroring _emit_routine_result's shape.
+    e = _engine(tmp_path)
+    sid = e.create_session("work")
+    seen = []
+    e.events.add_sink(seen.append)
+
+    e._emit_session_changed(sid, "renamed", "New Title")     # must not raise
+
+    assert len(seen) == 1 and seen[0].session_id == "__control__"
+
+
+def test_emit_session_changed_never_raises_if_publish_throws(tmp_path):
+    # Even if something inside the publish pipeline blows up, _emit_session_changed must swallow it
+    # (log.debug only) rather than propagate into its caller (auto_title_session / rename_session).
+    e = _engine(tmp_path)
+    sid = e.create_session("work")
+
+    def _boom(ev):
+        raise RuntimeError("publish exploded")
+    e.events.publish = _boom
+
+    e._emit_session_changed(sid, "renamed", "New Title")     # must not raise
+
+
+def test_raw_store_rename_session_does_not_emit(tmp_path):
+    # The raw SessionStore.rename_session call (no Engine involved) must NOT emit anything — the
+    # emit lives at the Engine choke point, not inside the store. Distinguishes "Engine wraps the
+    # store call with an emit" from "the store itself grew event-bus awareness".
+    e = _engine(tmp_path)
+    sid = e.create_session("work")
+    seen = []
+    e.events.add_sink(seen.append)
+
+    e.store.rename_session(sid, "work2")
+
+    assert seen == []

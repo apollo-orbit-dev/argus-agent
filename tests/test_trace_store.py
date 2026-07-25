@@ -65,6 +65,16 @@ def test_record_skips_ephemeral_session(tmp_path):
     assert s.recent("__routine__") == []
 
 
+def test_record_skips_control_channel_session_changed(tmp_path):
+    # The "__control__" pseudo-session (engine.py's _emit_session_changed) is covered by the same
+    # "__"-prefix ephemeral guard as "__routine__" — session_changed events must never be persisted,
+    # since __control__ is a synthetic broadcast channel, not a real session with a transcript.
+    s = TraceStore(str(tmp_path / "events.db"))
+    s.record(_ev("__control__", "control", 0, "session_changed",
+                {"session_id": "ses_abc", "action": "renamed", "name": "New Title"}))
+    assert s.recent("__control__") == []
+
+
 def test_delete_session_drops_only_that_session(tmp_path):
     s = TraceStore(str(tmp_path / "events.db"))
     s.record(_ev("a", "run1", 0, "final", {"answer": "a"}))
