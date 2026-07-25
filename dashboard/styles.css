@@ -427,6 +427,13 @@
     border-bottom-right-radius:5px; }
   .chat-bubble.them{ background:var(--panel-2); border:1px solid var(--border); color:var(--ink);
     border-bottom-left-radius:5px; }
+  /* Optimistic echo of a just-sent message (app.js appendOptimisticUserMessage): shown the instant
+     the user hits send, before the server-recorded transcript reloads and replaces it. Muted until
+     confirmed; a failed /run leaves it visible but flagged, never silently removed. */
+  .chat-bubble.pending{ opacity:.55; }
+  .chat-bubble.failed{ background:rgba(242,92,110,.1); border-color:rgba(242,92,110,.4); opacity:1; }
+  .chat-optimistic-note{ margin-top:3px; font-family:var(--font-mono); font-size:10px;
+    letter-spacing:.2px; color:var(--danger); text-align:right; }
   /* A harness-injected steering note. Stored with role:"user" (the model has no mid-conversation
      system slot), so without this it renders as a bubble on the owner's side and reads as if they
      wrote it. Centred, dashed, and narrower than a bubble so it's obviously not part of the

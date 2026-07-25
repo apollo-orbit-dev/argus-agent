@@ -695,6 +695,42 @@
     } catch(e){ toast('Failed to load transcript: ' + e.message, 'err'); }
   }
 
+  // Optimistically echo the user's just-sent message into the transcript view, before the server
+  // has recorded (or replied to) the turn — otherwise the message is invisible for the whole run,
+  // which on a small local model can be many seconds. Reconciliation is wholesale: loadTranscript()
+  // replaces viewerBody.innerHTML entirely once the real transcript reloads (see the 'final' event
+  // handler above, or a manual Transcript click), which naturally wipes this node — no content
+  // matching needed, so sending identical text twice is never mistaken for a dupe.
+  function appendOptimisticUserMessage(text){
+    var chat = viewerBody.querySelector('.chat');
+    if (!chat){
+      // Empty-transcript placeholder (or nothing rendered yet): replace it with a fresh chat list
+      // rather than appending after it.
+      viewerBody.innerHTML = '<div class="chat"></div>';
+      chat = viewerBody.querySelector('.chat');
+    }
+    var row = document.createElement('div');
+    row.className = 'chat-row me';
+    row.setAttribute('data-optimistic', '1');   // tags this node as client-only, unconfirmed
+    row.innerHTML = '<div class="chat-bubble me pending">' + esc(text) + '</div>';
+    chat.appendChild(row);
+    viewerBody.scrollTop = viewerBody.scrollHeight;
+    return row;
+  }
+  // Mark an optimistic bubble as failed-to-send rather than removing it: the POST may have failed
+  // before the server ever recorded the message, so silently dropping it would hide that the turn
+  // never happened. If a transcript reload already reconciled (and removed) the node in the
+  // meantime, there's nothing left to mark.
+  function markOptimisticFailed(node){
+    if (!node || !node.parentNode) return;
+    var bubble = node.querySelector('.chat-bubble');
+    if (bubble){ bubble.classList.remove('pending'); bubble.classList.add('failed'); }
+    var note = document.createElement('div');
+    note.className = 'chat-optimistic-note';
+    note.textContent = 'not sent — run failed';
+    node.appendChild(note);
+  }
+
   // Tool output in the transcript is clamped to ~5 rows (.clampable). For each block that actually
   // overflows, add a Show more/less toggle; for blocks that fit, drop the clamp so there's no toggle.
   function wireToolClamps(){
@@ -883,6 +919,10 @@
     var skillSel = $('skillPicker');
     var skill = (skillSel && !skillSel.disabled && skillSel.value) ? skillSel.value : null;
 
+    // Echo the message into the transcript immediately, before the turn completes — but only when
+    // the transcript is what's on screen; a run trace view must not be yanked away by a send.
+    var optimisticNode = (currentView === 'transcript') ? appendOptimisticUserMessage(text) : null;
+
     runBtn.disabled = true;
     // any clarify-option buttons from a prior turn are now stale — retire them so a scrolled-back
     // old choice can't be sent as this turn's answer.
@@ -907,6 +947,9 @@
       runStatus.textContent = 'run failed';
       runStatus.style.color = 'var(--danger)';
       toast('Run failed: ' + e.message, 'err');
+      // The POST may have failed before the server ever recorded the message — don't imply it was
+      // delivered, but don't silently erase what the user typed either.
+      if (optimisticNode) markOptimisticFailed(optimisticNode);
     } finally {
       runBtn.disabled = false;
     }
