@@ -208,8 +208,12 @@ class FileWorkspace:
 
 class WriteFileTool(Tool):
     name = "write_file"
-    description = ("Save text to a file in your workspace (a report, notes, extracted data, CSV, "
-                   "etc.). Overwrites a file of the same name. Args: name, content.")
+    description = ("Save text to a file in your workspace — a report or summary you've written, "
+                   "notes, a draft, extracted data, CSV, JSON, HTML. Use it whenever something "
+                   "should be kept for later or handed back as a file rather than only said in "
+                   "chat. Overwrites a file of the same name; the name may include subdirectories, "
+                   "e.g. 'reports/july.md'. For rows you'll later filter or total up, use "
+                   "create_table instead. Args: name, content.")
 
     class Params(BaseModel):
         name: str = Field(..., description="file name, e.g. report.md")
@@ -228,8 +232,11 @@ class WriteFileTool(Tool):
 
 class ReadFileTool(Tool):
     name = "read_file"
-    description = ("Read a text file from your workspace by name. For PDFs/Word/Excel or scanned "
-                   "documents, use read_document instead. Arg: name.")
+    description = ("Read a text file from your workspace by name — plain text, Markdown, CSV/TSV, "
+                   "JSON, YAML, logs, source code. Use it to look at something saved or uploaded "
+                   "earlier: check a note, inspect a CSV before loading it into a table, or quote "
+                   "from a report you wrote. Very long files come back truncated. For PDFs/Word/"
+                   "Excel or scanned documents, use read_document instead. Arg: name.")
 
     class Params(BaseModel):
         name: str = Field(..., description="file name to read")
@@ -249,7 +256,9 @@ class ReadFileTool(Tool):
 
 class ListFilesTool(Tool):
     name = "list_files"
-    description = ("List the files in your workspace (path, size). Paths may include "
+    description = ("List the files in your workspace, newest first, with their sizes. Use it to "
+                   "see what you have saved, or to find the exact name of an uploaded or "
+                   "previously written file before read_file / read_document. Paths may include "
                    "subdirectories, e.g. 'reports/july.md'. No arguments.")
 
     class Params(BaseModel):
