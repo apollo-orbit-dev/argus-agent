@@ -2385,6 +2385,35 @@ class Engine:
             "conditional_enabled": conditional,
         }
 
+    def runtime_tool_total(self) -> int:
+        """The size of the registry a turn would ACTUALLY build right now — what progressive
+        disclosure's K is really cut against — for the dashboard's "K of N" hint (Task: dashboard
+        disclosure controls review fix). `tools_overview()` intentionally omits two names that
+        run_task's per-run registry adds on top of builtin+created+conditional:
+
+        - find_tool: only registered when tool_disclosure_mode != "off" (engine.py, the
+          "progressive tool disclosure" block) — it would be a dead name otherwise.
+        - load_skill: added via ctx.extra_tools by ModelDrivenSelector.prepare() whenever
+          skill_selection_mode is "model_driven" or "hybrid" (hybrid falls through to it when no
+          explicit trigger fires) AND at least one skill is registered — omitted entirely when
+          there are no skills to load.
+
+        Summing tools_overview()'s three groups and then adding these two back is deliberately
+        computed here, engine-side, rather than reconstructed from the dashboard's /library panel
+        counts: the dashboard has no visibility into tool_disclosure_mode/skill_selection_mode
+        interactions, and a client-side reconstruction that misses these two names understates the
+        real registry — which is silently wrong exactly when disclosure is on, the only time
+        anyone reads this number.
+        """
+        c = self._config
+        ov = self.tools_overview()
+        total = len(ov["builtin"]) + len(ov["created"]) + len(ov["conditional_enabled"])
+        if c.tool_disclosure_mode != "off":
+            total += 1  # find_tool
+        if c.skill_selection_mode in ("model_driven", "hybrid") and self.skill_registry.list():
+            total += 1  # load_skill
+        return total
+
     def skills_overview(self) -> dict:
         builtin, created = [], []
         for s in self.skill_registry.list():

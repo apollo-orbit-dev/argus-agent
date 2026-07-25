@@ -1186,8 +1186,10 @@
 
   var lastConfig = {};
   // Live registry size for the "K of N tools" hint next to Disclosure K — populated by loadLibrary()
-  // (same counts the Tools panel shows: builtin + conditional-enabled + created), so a bare K box
-  // never ships without the operator being able to see what it's hiding. null until first loaded.
+  // from the server's /library `runtime_total` (engine.runtime_tool_total()), which is the actual
+  // count a turn would build (including find_tool / load_skill), not a reconstruction from the Tools
+  // panel counts. null until first loaded, or if the server didn't send it — the hint stays blank
+  // rather than show an approximate/wrong number.
   var toolRegistryTotal = null;
   function updateDiscKHint(){
     var el = $('discKHint'); if (!el) return;
@@ -1282,12 +1284,27 @@
     catch(e){ toast('Failed to set ' + knob, 'err'); loadConfig(); }
     finally { seg.querySelectorAll('button').forEach(function(b){ b.disabled = false; }); }
   }
-  function wireNumberField(id, key){
+  // `min` (optional) must match the field's own `Field(ge=...)` constraint in config.py — only pass
+  // it for fields that actually declare one (tool_disclosure_k, trace_retention_days,
+  // trace_keep_runs_per_session, sandbox_idle_minutes are all ge=1). Fields with no server-side
+  // floor (e.g. auto_compact_tokens, where 0 is the documented "off" value) must NOT get a client
+  // min, or the dashboard would block a legitimate value the server has always accepted.
+  function wireNumberField(id, key, min){
     var el = $(id); if (!el) return;
     el.addEventListener('change', function(){
       var n = Number(el.value);
-      if (!Number.isFinite(n)) { toast(key + ': not a number', 'err'); return; }
-      patchConfigKey(key, Math.trunc(n)).catch(function(e){ toast('Failed to set ' + key, 'err'); });
+      // Number('') === 0, so an emptied box would otherwise PATCH 0 straight through to the
+      // server. For fields with a ge=1 validator (e.g. tool_disclosure_k) that raises a
+      // ValidationError -> unhandled HTTP 500 (backend/app.py's PATCH /config has no handler for
+      // it) — and previously the box was left showing the invalid value with no resync, so the
+      // operator could no longer tell what the server actually held. Reject client-side and
+      // resync from server truth on ANY failure (validation or network), not just this one.
+      if (!Number.isFinite(n) || (min !== undefined && n < min)) {
+        toast(key + ': must be a number' + (min !== undefined ? ' >= ' + min : ''), 'err');
+        loadConfig();
+        return;
+      }
+      patchConfigKey(key, Math.trunc(n)).catch(function(e){ toast('Failed to set ' + key, 'err'); loadConfig(); });
     });
   }
   wireNumberField('inMaxTokens', 'model_max_tokens');
@@ -1299,7 +1316,7 @@
       patchConfigKey(key, el.value.trim()).catch(function(e){ toast('Failed to set ' + key, 'err'); });
     });
   }
-  wireNumberField('inDiscK', 'tool_disclosure_k');
+  wireNumberField('inDiscK', 'tool_disclosure_k', 1);
   wireTextField('inDiscCore', 'tool_disclosure_core');
   function wireBoolSwitch(id, key){
     var el = $(id); if (!el) return;
@@ -1313,8 +1330,8 @@
   (function(){
     var m = $('selTraceMode'); if (m) m.addEventListener('change', function(){ patchConfigKey('trace_retention_mode', m.value).catch(function(){ toast('Failed to set trace_retention_mode', 'err'); loadConfig(); }); });
   })();
-  wireNumberField('inTraceDays', 'trace_retention_days');
-  wireNumberField('inTraceKeep', 'trace_keep_runs_per_session');
+  wireNumberField('inTraceDays', 'trace_retention_days', 1);
+  wireNumberField('inTraceKeep', 'trace_keep_runs_per_session', 1);
   $('observerThreshold').addEventListener('change', function(){
     var n = Number($('observerThreshold').value);
     if (Number.isFinite(n)) patchConfigKey('observer_repeat_threshold', Math.trunc(n)).catch(function(){ toast('Failed to set threshold', 'err'); });
@@ -1325,7 +1342,7 @@
   $('cfgSandboxRuntime').addEventListener('change', function(){
     patchConfigKey('sandbox_runtime', this.value).catch(function(){ toast('Failed to set sandbox_runtime', 'err'); loadConfig(); });
   });
-  wireNumberField('cfgSandboxIdleMinutes', 'sandbox_idle_minutes');
+  wireNumberField('cfgSandboxIdleMinutes', 'sandbox_idle_minutes', 1);
   $('cfgSandboxNetwork').addEventListener('change', function(){
     var v = this.value;
     patchConfigKey('sandbox_network', v)
@@ -2307,9 +2324,13 @@
       var totalSkills = (s.builtin||[]).length + (s.created||[]).length;
       $('toolsCountBadge').textContent = totalTools + ' total';
       $('skillsCountBadge').textContent = totalSkills + ' total';
-      // The live registry size for the Disclosure K hint — builtin + conditional-enabled + created is
-      // the full set a turn could see (mirrors Engine.tools_overview / tools_overview_names).
-      toolRegistryTotal = totalTools + cond.length;
+      // The live registry size for the Disclosure K hint. Server-computed (engine.runtime_tool_total()),
+      // NOT summed from the panel counts above: those three groups (builtin/created/conditional) miss
+      // find_tool (only registered when disclosure is on) and load_skill (added by model_driven/hybrid
+      // skill selection when skills exist) — exactly the two names that matter most, since they're the
+      // ones added BECAUSE disclosure or skill selection is active. Absent (null) if the server didn't
+      // send it, rather than guessing — see updateDiscKHint().
+      toolRegistryTotal = (typeof lib.runtime_total === 'number') ? lib.runtime_total : null;
       updateDiscKHint();
       document.querySelectorAll('[data-lib-delete]').forEach(function(b){
         b.addEventListener('click', function(){

@@ -6,9 +6,12 @@ and the benchmark would surface it only as a mysterious per-task regression afte
 Here, every cap-2 task's required tool chain is checked against the tool set `select_visible` would
 actually hand the model for that task's prompt.
 
-K and CORE are read from `Config()` defaults rather than hardcoded, so this test can never drift from
-what actually ships — a future default change is measured here automatically instead of silently
-going stale.
+K and CORE are read from `Config`'s FIELD DEFAULTS (`Config.model_fields[...].default`), not from a
+`Config()` instance — an instance resolves .env -> OS env -> default, so it reads whatever THIS
+machine happens to have configured (e.g. an operator's uncommented `TOOL_DISCLOSURE_K` in their own
+.env), not what actually ships. Reading the field default is what makes this test immune to drift:
+a future default change in config.py is measured here automatically, and a local/deployed override
+can never turn this suite red.
 
 HISTORY: at K=12 (the original shipped default, pre enriched-descriptions), 30 of the 56 cap-2 tasks
 lost a tool their chain needed — read_file in all 30. That was a strict xfail here (see argus-89t):
@@ -32,8 +35,8 @@ from engine.tools.base import ToolRegistry
 from engine.tools.disclosure import select_visible
 
 BATTERY = Path("benchmark/cap-2/battery.json")
-K = Config().tool_disclosure_k
-CORE = Config().tool_disclosure_core.split(",")
+K = Config.model_fields["tool_disclosure_k"].default
+CORE = Config.model_fields["tool_disclosure_core"].default.split(",")
 
 # The measured state of the world at the shipped default (K=40, enriched descriptions): zero cap-2
 # tasks lose a required tool. Recorded as a set (not just a count) so a regression that swaps WHICH
@@ -144,8 +147,16 @@ async def test_view_is_actually_a_cut(tmp_path):
     registry = await _full_run_registry(tmp_path)
     total = len(registry.names())
     # At the shipped default (K=40 of ~70), the cut is real (~43% hidden) but no longer a 2x margin
-    # the way K=12 was — assert the view is genuinely smaller, not an arbitrary multiple of K.
-    assert total > K, f"expected the full registry ({total}) to be larger than K={K}"
+    # the way K=12 was (2*K=80 > 70 tools is unsatisfiable) — assert the view hides a MEANINGFUL
+    # fraction of the registry instead. `total > K` alone only guarantees one tool is hidden: it
+    # would happily pass if someone raised K to 69 specifically to make a future coverage miss
+    # disappear, and the suite would report "zero coverage misses" for a view one tool narrower
+    # than the full registry, proving nothing. Requiring >=25% hidden keeps that regression caught
+    # while still being satisfiable at the shipped default (30/70 = 43%).
+    hidden = total - K
+    assert hidden >= 0.25 * total, (
+        f"K={K} of {total} hides only {hidden} tools ({100*hidden/total:.0f}%) — "
+        f"coverage numbers measured against a view this close to the full registry prove nothing")
     for task in _tasks()[:10]:
         visible = select_visible(registry, task["prompt"], mode="keyword", k=K, core=CORE, pinned=())
         assert len(visible) == K

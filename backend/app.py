@@ -301,7 +301,8 @@ def create_app(engine: Engine) -> FastAPI:
 
     @app.get("/library")
     async def library():
-        return {"tools": engine.tools_overview(), "skills": engine.skills_overview()}
+        return {"tools": engine.tools_overview(), "skills": engine.skills_overview(),
+                "runtime_total": engine.runtime_tool_total()}
 
     # ---- web artifacts (build_web_page output) ----
     @app.get("/artifacts")
