@@ -210,6 +210,22 @@ class SessionStore:
                                  (name, _now(), session_id))
                 self._db.commit()
 
+    def rename_if_placeholder(self, session_id: str, name: str) -> bool:
+        """Rename ONLY if the session still has its placeholder id-name (name == id) — i.e. the
+        write itself is the guard, not just the read. Used by auto-title so a manual rename that
+        lands anywhere between auto_title_session's pre-call read and this write always wins: the
+        UPDATE's WHERE clause re-checks the condition atomically at write time under self._lock, so
+        no interleaving with a concurrent rename_session call can lose the race. Returns whether a
+        row was actually renamed (False if there was no row, or it had already been renamed)."""
+        if self._db is None:
+            return False
+        with self._lock:
+            cur = self._db.execute(
+                "UPDATE sessions SET name=?, updated=? WHERE id=? AND name=?",
+                (name, _now(), session_id, session_id))
+            self._db.commit()
+            return cur.rowcount > 0
+
     def delete_session(self, session_id: str) -> None:
         with self._lock:
             self._sessions.pop(session_id, None)

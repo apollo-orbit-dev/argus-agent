@@ -66,8 +66,20 @@ async def test_no_model_configured_via_missing_name_only(tmp_path):
     e = Engine(cfg, data_dir=str(tmp_path))
     sid = e.create_session()
     _seed_first_turn(e, sid)
+    built = {"n": 0}
+
+    def _boom():
+        built["n"] += 1
+        return _FakeAux(content="Should never be reached")
+    e._aux_model_client = _boom
+
     title = await e.auto_title_session(sid)
+
     assert title is None
+    # without this, a real ModelClient would be built and fired at http://x/v1 — a live HTTP
+    # request in CI — and the guard being removed would still coincidentally pass via the
+    # resulting connection error being caught, same as its sibling test above.
+    assert built["n"] == 0
     assert e.store.session_name(sid) == sid
 
 
@@ -96,6 +108,23 @@ async def test_title_is_sanitized_quotes_and_length(tmp_path):
     assert title == "Planning a Japan Trip"          # quotes stripped, whitespace collapsed
 
 
+async def test_title_is_capped_at_max_length(tmp_path):
+    from engine.engine import _TITLE_MAX_LEN
+
+    e = _engine(tmp_path)
+    sid = e.create_session()
+    _seed_first_turn(e, sid)
+    long_title = "Word" * 30                          # 120 chars, well past the 60-char cap
+    assert len(long_title) > _TITLE_MAX_LEN
+    e._aux_model_client = lambda: _FakeAux(content=long_title)
+
+    title = await e.auto_title_session(sid)
+
+    assert len(title) == _TITLE_MAX_LEN
+    assert title == long_title[:_TITLE_MAX_LEN]
+    assert e.store.session_name(sid) == title
+
+
 async def test_already_renamed_session_is_not_overwritten(tmp_path):
     e = _engine(tmp_path)
     sid = e.create_session()
@@ -113,6 +142,33 @@ async def test_already_renamed_session_is_not_overwritten(tmp_path):
     assert title is None
     assert built["n"] == 0                           # never even calls the model
     assert e.store.session_name(sid) == "My custom title"
+
+
+async def test_manual_rename_during_aux_call_wins_the_race(tmp_path):
+    # The TOCTOU this fix closes: auto_title_session reads the placeholder name (still in place),
+    # then awaits the aux call — up to request_timeout (engine/model_client.py) later, a manual
+    # rename can land on this exact session in the meantime. The generated title must NOT clobber
+    # it. Simulated here by having the fake aux client itself perform the "concurrent" rename
+    # WHILE the coroutine under test is suspended awaiting `chat(...)` — i.e. genuinely between the
+    # pre-call read (already done) and the post-call write (about to happen), not just before/after
+    # the whole call.
+    e = _engine(tmp_path)
+    sid = e.create_session()
+    _seed_first_turn(e, sid)
+    assert e.store.session_name(sid) == sid              # placeholder still in place at read time
+
+    class _RacingAux:
+        async def chat(self, messages, tools=None, max_tokens=None, temperature=None,
+                       think=None, reasoning=None):
+            e.rename_session(sid, "Tax stuff")            # the user's manual rename, mid-flight
+            return ModelResponse(content="Generated Title", finish_reason="stop")
+
+    e._aux_model_client = lambda: _RacingAux()
+
+    title = await e.auto_title_session(sid)
+
+    assert title is None                     # generated title was discarded, not applied
+    assert e.store.session_name(sid) == "Tax stuff"       # the manual rename survives
 
 
 async def test_aux_call_raising_is_nonfatal(tmp_path):
@@ -172,12 +228,102 @@ async def test_no_history_yet_skips_without_calling_model(tmp_path):
     assert e.store.session_name(sid) == sid
 
 
-async def test_ephemeral_session_skipped(tmp_path):
+async def test_telegram_session_not_titled(tmp_path):
+    # Telegram sessions use the bare chat id as session_id (backend/telegram_bot.py's
+    # `str(chat_id)`) and are permanent, one-per-chat. _persist gives them name == id, same
+    # placeholder shape as a fresh dashboard session — so without the "ses_" prefix gate this would
+    # get auto-titled too, permanently hiding the chat id from the dashboard sidebar (which renders
+    # only the name; see dashboard/app.js). Unlike an ephemeral id, this IS a real persisted row, so
+    # this test is non-vacuous: removing the "ses_" check would make session_name read back the
+    # placeholder, the model would actually get called, and the row would actually get renamed.
     e = _engine(tmp_path)
-    sid = "__routine__:x"
-    e.store.append_message(sid, {"role": "user", "content": "hi"})
-    e._aux_model_client = lambda: _FakeAux(content="Title")
+    sid = "987654321"                                  # telegram-shaped: bare numeric chat id
+    _seed_first_turn(e, sid)
+    assert e.store.session_name(sid) == sid             # placeholder precondition really holds
+    built = {"n": 0}
+
+    def _boom():
+        built["n"] += 1
+        return _FakeAux(content="Should never be reached")
+    e._aux_model_client = _boom
 
     title = await e.auto_title_session(sid)
 
-    assert title is None                              # ephemeral sessions have no persisted name
+    assert title is None
+    assert built["n"] == 0                              # the "ses_" gate blocks before any model call
+    assert e.store.session_name(sid) == sid
+
+
+async def test_ephemeral_session_skipped(tmp_path):
+    # Ephemeral ids ("__routine__:...") are scratch: SessionStore never persists a row for them
+    # (append_message's _persist/_log no-op for ids starting with '__', see engine/state.py), so
+    # session_name() returns None here and auto_title_session skips via the `current is None`
+    # path — the same outcome the "ses_" prefix gate above produces (an ephemeral id never starts
+    # with "ses_" either). There is deliberately no dedicated ephemeral guard in auto_title_session
+    # itself: one would be unreachable in practice, since state.py's own ephemeral protections
+    # already make session_name()/conversation() return None/[] no matter what is checked here.
+    e = _engine(tmp_path)
+    sid = "__routine__:x"
+    e.store.append_message(sid, {"role": "user", "content": "hi"})
+    built = {"n": 0}
+
+    def _boom():
+        built["n"] += 1
+        return _FakeAux(content="Title")
+    e._aux_model_client = _boom
+
+    title = await e.auto_title_session(sid)
+
+    assert title is None
+    assert built["n"] == 0                              # ephemeral sessions never reach the model
+
+
+async def test_enable_auto_title_session_false_skips_the_feature(tmp_path):
+    # The feature is opt-out via config; run_task's tail must not even schedule the background
+    # task when it's off — checked at the run_task call site (`if c.enable_auto_title_session:`),
+    # not inside auto_title_session itself.
+    import asyncio
+
+    cfg = Config(model_base_url="http://x/v1", model_name="main", telegram_bot_token="",
+                enable_auto_title_session=False)
+    e = Engine(cfg, data_dir=str(tmp_path))
+    e._model_client = lambda: _FakeAux(content="ok")
+
+    called = {"n": 0}
+
+    async def _spy(sid):
+        called["n"] += 1
+        return None
+    e.auto_title_session = _spy
+
+    sid = e.create_session()
+    await e.run_task(sid, "hello there")
+    await asyncio.sleep(0)          # let any scheduled background task actually run
+
+    assert called["n"] == 0
+
+
+async def test_aux_model_configured_via_utility_role(tmp_path):
+    # _aux_model_configured has two branches: the fallback to the main chat model (covered by every
+    # other test here) and the `utility` role mapping, which this exercises directly — a connection
+    # mapped to `utility` with blank fields must still read as "not configured" (silent skip), and a
+    # fully-populated one as "configured".
+    e = _engine(tmp_path)
+    sid = e.create_session()
+    _seed_first_turn(e, sid)
+
+    e.model_presets_store.get_role = lambda role: "my-util" if role == "utility" else None
+    e.model_presets_store.resolve = lambda label: {"base_url": "", "model_name": ""}
+    assert e._aux_model_configured() is False
+    built = {"n": 0}
+
+    def _boom():
+        built["n"] += 1
+        return _FakeAux(content="unused")
+    e._aux_model_client = _boom
+    title = await e.auto_title_session(sid)
+    assert title is None
+    assert built["n"] == 0
+
+    e.model_presets_store.resolve = lambda label: {"base_url": "http://util/v1", "model_name": "u"}
+    assert e._aux_model_configured() is True

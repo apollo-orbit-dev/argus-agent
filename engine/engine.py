@@ -28,7 +28,7 @@ from engine.modes.base import get_mode
 from engine.rules.detect import RULE_EXTRACT_PROMPT, has_rule_cue
 from engine.scheduler import Scheduler
 from engine.skills.base import SkillRegistry, get_selector
-from engine.state import SessionStore, _is_ephemeral
+from engine.state import SessionStore
 from engine.tools.base import ToolRegistry
 from engine.tools.about import AboutArgusTool
 from engine.tools.clarify import AskUserTool
@@ -1939,18 +1939,35 @@ class Engine:
         forever. Fired from run_task's tail (same shape as autoextract/autodetect_rule), so it never
         adds latency to the turn itself.
 
-        Only takes effect while the session STILL has its placeholder name (name == id) — a manual
-        rename always wins and this never overwrites it (checkable via SessionStore.session_name,
-        no new flag needed).
+        Scoped to dashboard-created sessions (id starts with 'ses_', see SessionStore.create_session)
+        — a Telegram session id is the bare chat id (backend/telegram_bot.py's `str(chat_id)`), and
+        that permanent per-chat session must NOT be silently renamed away from something the user can
+        recognize; the dashboard's `ses_<hex>` placeholder is the only thing this feature targets.
+
+        The "manual rename always wins" requirement is enforced at WRITE time, not read time:
+        SessionStore.rename_if_placeholder does `UPDATE ... WHERE name=id` under its lock, so even if
+        a manual rename lands in the window between this coroutine's pre-call check and the aux call
+        returning (up to request_timeout later), the write below is a no-op instead of clobbering it.
+        The read via session_name here is just a cheap short-circuit to skip the model call entirely
+        when a rename has obviously already happened.
 
         Silently does nothing — never raises, never blocks, never logs above debug — when: there's
         no chat model configured at all (see _aux_model_configured; THE acceptance requirement for
-        this feature), the aux call raises or times out, or the model returns empty/whitespace (the
-        signature of a reasoning model left with thinking ON — see the think=False note below). Any
-        of those simply leaves the id-name in place."""
-        if _is_ephemeral(session_id):
+        this feature), the aux call raises or times out, the model returns empty/whitespace (the
+        signature of a reasoning model left with thinking ON — see the think=False note below), or a
+        sqlite error occurs on either the read or the write (locked/corrupt db). Any of those simply
+        leaves the id-name in place."""
+        if not session_id.startswith("ses_"):
+            # Not a dashboard-created session — covers both Telegram (bare chat-id, e.g. "123456")
+            # and ephemeral ids ("__routine__:..."), since neither ever starts with "ses_". A
+            # separate _is_ephemeral check is redundant here: SessionStore.create_session is the only
+            # place that mints "ses_"-prefixed ids, so this one prefix test subsumes it.
             return None
-        current = self.store.session_name(session_id)
+        try:
+            current = self.store.session_name(session_id)
+        except Exception:
+            log.debug("auto_title_session: session_name lookup failed", exc_info=True)
+            return None
         if current is None or current != session_id:
             return None                        # no row yet, or already given a real name — skip
         if not self._aux_model_configured():
@@ -1976,8 +1993,12 @@ class Engine:
             return None
         if not title:
             return None                        # empty/whitespace response -> leave id-name in place
-        self.store.rename_session(session_id, title)
-        return title
+        try:
+            renamed = self.store.rename_if_placeholder(session_id, title)
+        except Exception:
+            log.debug("auto_title_session: rename write failed", exc_info=True)
+            return None
+        return title if renamed else None
 
     # ---- context usage + compaction ----
     async def usage(self, session_id: str) -> dict:
