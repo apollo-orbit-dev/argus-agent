@@ -11,7 +11,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from engine.skills.base import SkillContext, SkillRegistry, SkillSelector
+from engine.skills.base import (SkillContext, SkillRegistry, SkillSelector,
+                                 reveal_skill_tools as _reveal_skill_tools)
 from engine.tools.base import Tool
 
 
@@ -20,6 +21,11 @@ class LoadSkillTool(Tool):
     description = ("Load the step-by-step procedure for a named skill. Call this when a "
                    "skill listed as available fits the user's request, then follow the "
                    "returned procedure.")
+
+    # Set to this run's tool registry VIEW when progressive tool disclosure is on (run_task rebinds
+    # it). Without it, model_driven selection + disclosure would print a procedure that names tools
+    # the model cannot see: the skill is chosen mid-turn, after the per-turn view was computed.
+    disclosure = None
 
     class Params(BaseModel):
         name: str = Field(..., description="The exact name of the skill to load")
@@ -32,6 +38,7 @@ class LoadSkillTool(Tool):
         if skill is None:
             available = ", ".join(s.name for s in self.registry.list()) or "(none)"
             return f"load_skill error: no skill named {args.name!r}. Available: {available}"
+        _reveal_skill_tools(self.disclosure, skill)
         tools = ", ".join(skill.tools) if skill.tools else "(none)"
         return (f"Procedure for skill '{skill.name}' (tools: {tools}):\n\n{skill.procedure}\n\n"
                 f"Now follow this procedure to answer the user, using the tools as directed.")

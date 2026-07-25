@@ -60,6 +60,25 @@ def _extract_steps(body: str, name: str) -> list:
         return []
 
 
+def reveal_skill_tools(disclosure, skill) -> list[str]:
+    """Make a skill's declared tools VISIBLE when progressive tool disclosure is on.
+
+    A skill loaded MID-TURN (model_driven selection via load_skill, or inspect_skill) hands the
+    model a procedure that names tools by hand. If disclosure narrowed the advertised set before
+    that skill was chosen, those names would be missing from the schema block — a procedure
+    pointing at tools the model cannot see. Revealing them closes that gap. Duck-typed and
+    defensive: no disclosure view (the default — disclosure off), or any failure, is a silent
+    no-op. Returns the names actually revealed."""
+    names = list(getattr(skill, "tools", None) or ())
+    if not names or disclosure is None or not hasattr(disclosure, "reveal"):
+        return []
+    try:
+        return disclosure.reveal(names)
+    except Exception:
+        log.debug("reveal_skill_tools failed for %r", getattr(skill, "name", "?"), exc_info=True)
+        return []
+
+
 @dataclass
 class Skill:
     name: str

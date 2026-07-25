@@ -10,14 +10,13 @@ import re
 from typing import Optional
 
 from engine.skills.base import Skill, SkillContext, SkillSelector
+from engine.textmatch import STOP_WORDS, tokens
 
-_STOP = {"the", "and", "for", "with", "that", "this", "from", "into", "your", "you",
-         "use", "using", "when", "what", "how", "a", "an", "to", "of", "in", "on",
-         "it", "is", "are", "then", "by", "or", "as", "at", "be"}
-
-
-def _tokens(text: str) -> set[str]:
-    return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) > 2 and w not in _STOP}
+# The tokenizer moved to engine/textmatch.py so the tool-disclosure ranker can share it without
+# engine/tools/ importing from engine/skills/ (which would invert the layering skills/base.py
+# declares). The two module-local names stay bound: this file's behavior is unchanged.
+_STOP = STOP_WORDS
+_tokens = tokens
 
 
 _URL_RE = re.compile(r"https?://\S+")

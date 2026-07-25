@@ -165,3 +165,93 @@ async def test_truncated_twice_gives_concise_message():
     d = deps_with(FakeModel([bad, bad]), NativeMode())
     out = await run_loop(d, "s", "r", "write a long thing")
     assert "cut off" in out.lower() and "concise" in out.lower()
+
+
+# ---- progressive tool disclosure ----
+# The whole point of the design: disclosure narrows PRESENTATION only. A tool the model names but
+# that wasn't advertised this turn must still run — same step, no validation error, no reprompt.
+
+def _named_tool_call(name, args="{}", cid="c1"):
+    return ModelResponse(content=None, tool_calls=[
+        {"id": cid, "function": {"name": name, "arguments": args}}])
+
+
+def _disclosed_deps(model, visible, bus=None):
+    from engine.tools.disclosure import DisclosedRegistry
+    full = ToolRegistry()
+    full.register(CalculatorTool())
+    full.register(BoomTool())
+    view = DisclosedRegistry(full, visible)
+    return LoopDeps(mode=NativeMode(), registry=view, model_client=model,
+                    store=SessionStore(), events=bus or EventBus())
+
+
+async def test_hidden_tool_still_executes_with_no_wasted_step():
+    bus = EventBus()
+    model = FakeModel([_named_tool_call("calculator", '{"expression": "47 * 89"}'),
+                       ModelResponse(content="4183")])
+    deps = _disclosed_deps(model, visible=["boom"], bus=bus)   # calculator is HIDDEN
+    out = await run_loop(deps, "s", "r", "compute 47*89")
+
+    assert out == "4183"
+    # the schema really did hide it — this is not a no-op view
+    assert {f["function"]["name"] for f in model.requests[0]["tools"]} == {"boom"}
+    events = bus.recent("s")
+    assert [e.data["ok"] for e in events if e.kind == "validation"] == [True]
+    assert [e.data["ok"] for e in events if e.kind == "tool_result"] == [True]
+    assert len([e for e in events if e.kind == "tool_call"]) == 1     # no retry, no reprompt
+    assert not [e for e in events if e.kind == "reprompt"]
+
+
+async def test_genuinely_unknown_tool_still_errors_and_lists_the_full_set():
+    """The unknown-tool message must keep telling the truth about what exists — listing only the
+    ADVERTISED tools would teach the model that the hidden ones aren't real."""
+    bus = EventBus()
+    model = FakeModel([_named_tool_call("frobnicate"), ModelResponse(content="sorry")])
+    deps = _disclosed_deps(model, visible=["boom"], bus=bus)
+    await run_loop(deps, "s", "r", "do something")
+
+    err = next(e.data["result"] for e in bus.recent("s") if e.kind == "tool_result")
+    assert "unknown tool" in err
+    assert "calculator" in err and "boom" in err
+
+
+async def test_unknown_tool_that_exists_is_revealed_and_revalidated():
+    """The safety net for a registry that ever DOES narrow lookup: if validate says 'unknown tool'
+    while get() can still find it, reveal it and re-validate rather than lying to the model."""
+    from engine.tools.disclosure import DisclosedRegistry
+
+    class NarrowingRegistry(DisclosedRegistry):
+        """A deliberately WRONG registry (validate filtered too) — the exact shape the loop's
+        auto-reveal exists to rescue."""
+        def validate(self, name, raw_args):
+            if name not in self._visible:
+                from engine.tools.base import ValidationResult
+                return ValidationResult(ok=False, error=f"unknown tool '{name}'.")
+            return super().validate(name, raw_args)
+
+    bus = EventBus()
+    full = ToolRegistry()
+    full.register(CalculatorTool())
+    full.register(BoomTool())
+    view = NarrowingRegistry(full, ["boom"])
+    model = FakeModel([_named_tool_call("calculator", '{"expression": "2+2"}'),
+                       ModelResponse(content="4")])
+    deps = LoopDeps(mode=NativeMode(), registry=view, model_client=model,
+                    store=SessionStore(), events=bus)
+    out = await run_loop(deps, "s", "r", "two plus two")
+
+    assert out == "4"
+    revealed = [e for e in bus.recent("s") if e.kind == "disclosure_reveal"]
+    assert revealed and revealed[0].data["tools"] == ["calculator"]
+    assert [e.data["ok"] for e in bus.recent("s") if e.kind == "validation"] == [True]
+
+
+async def test_reveal_is_not_attempted_on_a_plain_registry():
+    """Parity: a registry with no reveal() (every deploy today) is untouched by the new branch."""
+    bus = EventBus()
+    model = FakeModel([_named_tool_call("frobnicate"), ModelResponse(content="sorry")])
+    deps = deps_with(model, NativeMode())
+    deps.events = bus
+    await run_loop(deps, "s", "r", "do something")
+    assert not [e for e in bus.recent("s") if e.kind == "disclosure_reveal"]

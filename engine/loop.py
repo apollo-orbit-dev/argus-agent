@@ -299,6 +299,18 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
                                 "window": deps.fuzzy_repeat_window, "mean_jaccard": round(mean_j, 3)})
 
         v = deps.registry.validate(call.tool, call.args)
+        # Progressive tool disclosure: a tool that wasn't ADVERTISED this turn (e.g. the model
+        # remembered it from earlier in the conversation) is still real and still executable —
+        # `validate`/`get` are deliberately not filtered. If a registry ever does narrow lookup,
+        # reveal the tool and re-validate rather than telling the model a real tool is unknown.
+        if (not v.ok and hasattr(deps.registry, "reveal")
+                and (v.error or "").startswith("unknown tool")
+                and deps.registry.get(call.tool) is not None):
+            revealed = deps.registry.reveal([call.tool])
+            if revealed:
+                await emit(step, "disclosure_reveal",
+                           {"tools": revealed, "reason": "unknown_tool"})
+            v = deps.registry.validate(call.tool, call.args)
         await emit(step, "validation", {"tool": call.tool, "ok": v.ok, "error": v.error})
 
         if not v.ok:

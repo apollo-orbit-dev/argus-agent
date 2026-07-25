@@ -13,6 +13,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 ToolCallingMode = Literal["native", "manual", "native_finish"]
 SkillSelectionMode = Literal["model_driven", "explicit", "hybrid"]
+ToolDisclosureMode = Literal["off", "keyword", "embedding", "hybrid"]
 SemanticRecall = Literal["auto", "on", "off"]
 # The container sandbox execs this value directly as argv[0] of a subprocess (see
 # scripts/setup-sandbox.sh and engine/sandbox/podman.py) — it must never be able to hold an
@@ -84,6 +85,12 @@ class Config(BaseSettings):
     # A/B switches
     tool_calling_mode: ToolCallingMode = "native"
     skill_selection_mode: SkillSelectionMode = "hybrid"
+    # Progressive tool disclosure — show only the K most relevant tools instead of all ~35.
+    # OFF by default: a hidden tool the turn needs is unrecoverable in a way today's system
+    # cannot fail, so no existing deploy changes behavior until opted in.
+    tool_disclosure_mode: ToolDisclosureMode = "off"
+    tool_disclosure_k: int = Field(12, ge=1)     # TOTAL in view: core + pinned + retrieved
+    tool_disclosure_core: str = "find_tool,ask_user,calculator,get_current_time,about_argus"
 
     # Tool infrastructure. These are EXTERNAL DEPENDENCIES — empty by default, and the tools that
     # need them are only registered when the URL is set (in .env). So "configured" = the operator
@@ -310,6 +317,7 @@ class Config(BaseSettings):
         "model_temperature", "model_top_p", "model_top_k", "model_presence_penalty",
         "model_provider", "model_context_window", "model_reasoning",
         "tool_calling_mode", "skill_selection_mode",
+        "tool_disclosure_mode", "tool_disclosure_k", "tool_disclosure_core",
         "searxng_base_url", "firecrawl_base_url", "search_cache_ttl", "search_max_per_min",
         "max_steps", "auto_compact_tokens", "request_timeout",
         "enable_tool_creation", "tool_creation_allow_network", "created_tool_timeout",

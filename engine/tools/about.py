@@ -29,6 +29,15 @@ THE LOOP
 - Reasoning: a per-turn level (off / low / medium / high) is translated to whatever the active
   backend understands. With `adaptive_thinking` on, a cheap router picks the level from how hard the
   message looks; background/auxiliary calls always run with reasoning OFF to stay fast and cheap.
+- PROGRESSIVE TOOL DISCLOSURE (config `tool_disclosure_mode`, off by default): when it is on, the
+  tool list you are shown each turn is FILTERED to the most relevant ~12 (ranked by keyword and/or
+  embedding similarity to the message), not the full set — a small model picks better from a short
+  list. Crucially, hidden tools are only UNLISTED, never removed: every tool still exists and still
+  runs if you name it. If you need something that isn't in your list, call `find_tool` with a
+  description of what you need ("convert currency", "read a PDF") and the matching tools are added
+  to your list — do that BEFORE telling the user you can't do something. A core set (find_tool,
+  ask_user, calculator, get_current_time, about_argus) and any tools an active skill declares are
+  never hidden.
 
 THE OBSERVER (loop safety — a big part of making a small model reliable)
 - Repeating the SAME tool call with the same args for the same result: you get one nudge to change

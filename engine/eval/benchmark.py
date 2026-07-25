@@ -165,9 +165,13 @@ BASELINE_OVERRIDES = {
 }
 
 
-def resolve_config(model_spec: str, mode: str | None, baseline: bool = False):
+def resolve_config(model_spec: str, mode: str | None, baseline: bool = False,
+                   disclosure: str | None = None):
     """Build a Config with the model endpoint + mode overridden. model_spec: 'main' (configured default)
-    or 'name=base_url|model'. baseline=True additionally disables the toggleable scaffolding."""
+    or 'name=base_url|model'. baseline=True additionally disables the toggleable scaffolding.
+
+    `disclosure` is progressive tool disclosure's own AXIS, not scaffolding — it is deliberately NOT
+    in BASELINE_OVERRIDES, so a --baseline run and a --disclosure run vary independently."""
     from config import Config
     cfg = Config()
     updates = {}
@@ -181,6 +185,8 @@ def resolve_config(model_spec: str, mode: str | None, baseline: bool = False):
         updates["tool_calling_mode"] = mode
     if baseline:
         updates.update(BASELINE_OVERRIDES)
+    if disclosure is not None:
+        updates["tool_disclosure_mode"] = disclosure
     return cfg.model_copy(update=updates) if updates else cfg
 
 
@@ -251,10 +257,11 @@ async def _run_task(cfg, judge_fn, task: dict, k: int, timeout: float, fixtures_
 
 
 async def run_model(model_spec: str, params: int, mode: str | None, k: int, judge_spec: str,
-                    battery_path: Path, timeout: float, baseline: bool = False) -> dict:
+                    battery_path: Path, timeout: float, baseline: bool = False,
+                    disclosure: str | None = None) -> dict:
     from engine.eval.judge_runner import make_judge
     battery = json.loads(battery_path.read_text())
-    cfg = resolve_config(model_spec, mode, baseline)
+    cfg = resolve_config(model_spec, mode, baseline, disclosure)
     judge_fn = make_judge(judge_spec)
     # Fixtures live in a `fixtures/` dir beside the battery file, so a battery in its own subdir
     # (e.g. benchmark/cap-2/battery.json) uses benchmark/cap-2/fixtures/. cap-1
@@ -267,6 +274,7 @@ async def run_model(model_spec: str, params: int, mode: str | None, k: int, judg
     name = model_spec.partition("=")[0]
     return {"model": name, "params": params, "mode": mode or cfg.tool_calling_mode,
             "scaffold": "off" if baseline else "on",   # Argus scaffolding on (full config) vs off (baseline arm)
+            "disclosure": cfg.tool_disclosure_mode,    # progressive tool disclosure arm (its own axis)
             "max_tokens": cfg.model_max_tokens,   # completion cap this run used (reasoning models need headroom)
             "battery_version": battery["battery_version"], "k": k,
             "date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -303,8 +311,8 @@ def render_report(battery_version: str) -> tuple[str, bool]:
     lines = [f"# Model-Capability Benchmark — `{battery_version}`", "",
              f"{len(results)} model(s), by param count. Chain = deterministic tool-chain pass-rate; "
              "Judge = Opus quality mean (0–3). A tier's line falling off below some size is the shelf.", "",
-             "| model | params (B) | mode | scaffold | max_tok | solved | abort | " + " | ".join(f"T{t} chain / judge" for t in tiers) + " | overall |",
-             "|---|---|---|---|---|---|---|" + "|".join(["---"] * (len(tiers) + 1)) + "|"]
+             "| model | params (B) | mode | scaffold | disclosure | max_tok | solved | abort | " + " | ".join(f"T{t} chain / judge" for t in tiers) + " | overall |",
+             "|---|---|---|---|---|---|---|---|" + "|".join(["---"] * (len(tiers) + 1)) + "|"]
     def _pct(x):
         return "—" if x is None else f"{x:.0%}"
 
@@ -324,6 +332,7 @@ def render_report(battery_version: str) -> tuple[str, bool]:
         # cannot fire, so an abort_rate of 0% there would be a misleading artifact, not a real measurement.
         abort_cell = "n/a" if r.get("scaffold") == "off" else _pct(ov.get("abort_rate"))
         lines.append(f"| {r['model']} | {r['params']} | {r.get('mode', '?')} | {r.get('scaffold', 'on')} | "
+                     f"{r.get('disclosure', 'off')} | "
                      f"{mt if mt is not None else '—'} | {_pct(solved)} | {abort_cell} | " + " | ".join(cells) + " |")
     lines += ["",
               "`max_tok` = the completion-token cap for the run. `—` = not recorded (runs predating this "
@@ -379,13 +388,18 @@ def main(argv=None):
     r.add_argument("--baseline", action="store_true",
                    help="disable the toggleable scaffolding (observer/verifier/clarify/rules/…) to "
                         "measure Argus's lift over a plain agent loop")
+    r.add_argument("--disclosure", default=None,
+                   choices=["off", "keyword", "embedding", "hybrid"],
+                   help="progressive tool disclosure arm: advertise only the K most relevant tools "
+                        "per turn (default: leave the configured value alone)")
     rep = sub.add_parser("report", help="regenerate report.md + curve.png from the results")
     rep.add_argument("--battery-version", default=None)
     args = p.parse_args(argv)
 
     if args.cmd == "run":
         result = asyncio.run(run_model(args.model, args.params, args.mode, args.k, args.judge,
-                                       Path(args.battery), args.timeout, args.baseline))
+                                       Path(args.battery), args.timeout, args.baseline,
+                                       args.disclosure))
         out = _write_result(result)
         print(f"\nresult: {out}")
         bv = result["battery_version"]
