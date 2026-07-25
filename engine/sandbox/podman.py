@@ -16,10 +16,10 @@ from engine.sandbox.runtime import ExecResult, SandboxUnavailable, validate_inst
 
 log = logging.getLogger("argus.sandbox")
 
-# Legacy/unnamespaced default — used when sandbox_instance is "" (today's behaviour, byte-identical).
-# Kept as a module global (rather than folded entirely into the instance) so PodmanRuntime.NETWORK_NAME
-# / EGRESS_NAME class-level access still resolves to something sane; __init__ shadows these per
-# instance with self.name_prefix/self.NETWORK_NAME/self.EGRESS_NAME (see the instance= param).
+# Legacy/unnamespaced container prefix, kept as documentation of the pre-namespacing name. Nothing
+# reads it any more: every call site goes through self.name_prefix, which __init__ derives (and which
+# is byte-identical to this when sandbox_instance is ""). The class constants NETWORK_NAME/EGRESS_NAME
+# below are the ones that still serve class-level access; this global is not.
 _NAME_PREFIX = "argus-ws-"
 
 # available() is called on the hot per-turn path (Engine.run_task's fail-closed gate) plus every

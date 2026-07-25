@@ -34,9 +34,10 @@ SandboxNetwork = Literal["proxy", "lan", "none"]
 # so it cannot start with '-' (podman would read that as a flag) and cannot contain whitespace or
 # shell metacharacters.
 _SANDBOX_IMAGE_RE = r"^[a-z0-9][a-z0-9._/-]*(?::[A-Za-z0-9._-]+)?$"
-# sandbox_instance is interpolated into podman object names that reach a podman argv. Same reasoning
-# as sandbox_image/sandbox_runtime: PATCH /config is not admin-gated, so the schema itself must
-# reject anything readable as a flag or metacharacter. "" = disabled (legacy names).
+# sandbox_instance is interpolated into podman object names that reach a podman argv. Defence in
+# depth: PATCH /config IS admin-gated (backend/app.py), but the schema rejects anything readable as
+# a flag or metacharacter regardless of who can set it — the value also arrives from .env and from
+# direct construction in tests. "" = disabled (legacy names).
 _SANDBOX_INSTANCE_RE = r"^$|^[a-z0-9][a-z0-9_-]{0,15}$"
 # "global": one shared memory bank keyed on memory_user_id, so facts follow the
 # person across every interface (dashboard, Telegram). "session": legacy per-session
