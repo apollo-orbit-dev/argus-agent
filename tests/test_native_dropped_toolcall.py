@@ -96,6 +96,123 @@ def test_single_think_close_tag_alone_does_not_trigger():
     assert isinstance(parsed, FinalAnswer) and parsed.text == text.strip()
 
 
+# ---------------------------------------------------------------------------
+# False positives. An orphan `</think>` is the NORMAL artifact of a chat template that pre-fills
+# `<think>` with no reasoning parser configured (model_client only strips when `<think>` is also
+# present), so every one of these is ordinary product output the user must receive verbatim.
+# ---------------------------------------------------------------------------
+
+_CHART_SCRIPT = (
+    "</think>\n\n"
+    "Here is the Q3 revenue chart script:\n\n"
+    "```python\n"
+    'bar_chart(labels=months, values=sales, title="Q3 revenue")\n'
+    "```\n"
+)
+_REPORT_CALL = (
+    "</think>\n\n"
+    "Run this to get July as CSV:\n\n"
+    "```python\n"
+    'build_report(month="July", fmt="csv")\n'
+    "```\n"
+)
+_GGPLOT = (
+    "</think>\n\n"
+    "In R you'd write:\n\n"
+    "```r\n"
+    "ggplot(data = df, aes(x = month, y = revenue)) + geom_col()\n"
+    "```\n"
+)
+_TS_GENERICS = (
+    "</think>\n\n"
+    "Type the ref with the built-in `Function` type:\n\n"
+    "```ts\n"
+    "const t = useRef<Function | null>(null);\n"
+    "type Bus = Record<string, Array<Function>>;\n"
+    "const handler: Ref<Function> = ref(() => {});\n"
+    "```\n"
+)
+# The repo's own false-positive guard string, with an orphan </think> prepended.
+_TOOL_TALK = (
+    "You have three file tools. The read_file tool takes a name, so read_file(\"notes.txt\") "
+    "returns the file's text. list_files takes no arguments. To convert money, "
+    "currency_convert wants an amount plus from_currency and to_currency, like this:\n\n"
+    "```\ncurrency_convert(amount=200, from_currency=\"USD\", to_currency=\"EUR\")\n```\n\n"
+    "I'd call read_file first, then decide."
+)
+_TOOL_TALK_WITH_THINK = "</think>\n\n" + _TOOL_TALK
+# A trailing bare call with NO </think> at all: rule 3 needs both ingredients.
+_TRAILING_CALL_NO_THINK = (
+    "To convert the money, call:\n\n"
+    'currency_convert(amount=200, from_currency="USD", to_currency="EUR")'
+)
+# An inline call on the trailing line: pinned so the `^` anchor in _BARE_CALL_RE cannot be dropped.
+_INLINE_CALL = (
+    "</think>\n\n"
+    'The helper is currency_convert(amount=200, from_currency="USD") — pass it the amount first.'
+)
+# Two orphan </think> is still ordinary: a support answer that quotes the tag while explaining it.
+_TWO_THINK_PROSE = (
+    "</think>\n\n"
+    "That stray `</think>` comes from the chat template pre-filling `<think>` for you. "
+    "Configure a reasoning parser and the tag disappears."
+)
+
+_FALSE_POSITIVES = {
+    "chart_script": _CHART_SCRIPT,
+    "report_call": _REPORT_CALL,
+    "ggplot": _GGPLOT,
+    "typescript_function_generics": _TS_GENERICS,
+    "tool_talk_with_orphan_think": _TOOL_TALK_WITH_THINK,
+    "trailing_call_without_think": _TRAILING_CALL_NO_THINK,
+    "inline_call_on_last_line": _INLINE_CALL,
+    "two_orphan_thinks_in_prose": _TWO_THINK_PROSE,
+}
+
+
+@pytest.mark.parametrize("text", list(_FALSE_POSITIVES.values()), ids=list(_FALSE_POSITIVES))
+def test_ordinary_product_output_is_never_a_dropped_tool_call(text):
+    parsed = NativeMode().parse_response(ModelResponse(content=text, finish_reason="stop"))
+    assert isinstance(parsed, FinalAnswer), "a real answer was replaced by a parse failure"
+    assert parsed.text == text.strip()
+
+
+async def test_loop_delivers_the_chart_script_answer_untouched():
+    # end-to-end: the FP costs the user their answer, so pin it through run_loop, not just the parse
+    model = _FakeModel([ModelResponse(content=_CHART_SCRIPT, tool_calls=[], finish_reason="stop")])
+    d = _deps(model)
+    out = await run_loop(d, "s", "r", "make me a chart of Q3 revenue")
+    assert out == _CHART_SCRIPT.strip()
+    assert not any(e.kind == "reprompt" for e in d.events.recent("s"))
+
+
+# Non-Qwen tool-call delimiters. Not captured output — these are the documented wire formats — so
+# they live here rather than in the fixture, which holds real captures only.
+_OTHER_PROVIDER_DEBRIS = {
+    "mistral": '[TOOL_CALLS] [{"name": "read_file", "arguments": {"name": "notes.txt"}}]',
+    "llama_python_tag": '<|python_tag|>read_file.call(name="notes.txt")',
+    "kimi": '<|tool_calls_section_begin|><|tool_call_begin|>read_file<|tool_call_end|>',
+    "deepseek": '<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>read_file',
+    "gemma_fenced": 'Let me read it.\n\n```tool_code\nread_file(name="notes.txt")\n```',
+}
+
+
+@pytest.mark.parametrize("text", list(_OTHER_PROVIDER_DEBRIS.values()),
+                         ids=list(_OTHER_PROVIDER_DEBRIS))
+def test_non_qwen_provider_delimiters_are_detected(text):
+    parsed = NativeMode().parse_response(ModelResponse(content=text, tool_calls=[],
+                                                       finish_reason="stop"))
+    assert isinstance(parsed, ParseFailure) and parsed.reason == DROPPED_TOOL_CALL_REASON
+
+
+def test_llama_bare_json_is_deliberately_not_detected():
+    # Documented non-coverage: indistinguishable from a legitimate JSON answer, so adding it would
+    # manufacture exactly the false-positive class the rest of this file guards against.
+    text = '{"name": "read_file", "parameters": {"name": "notes.txt"}}'
+    parsed = NativeMode().parse_response(ModelResponse(content=text, finish_reason="stop"))
+    assert isinstance(parsed, FinalAnswer)
+
+
 def test_response_with_tool_calls_is_unaffected_even_if_content_has_markup():
     resp = ModelResponse(
         content="<tool_call>\ncalculator\n</tool_call>",

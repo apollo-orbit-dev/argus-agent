@@ -29,37 +29,60 @@ DROPPED_TOOL_CALL_REASON = (
 # STRUCTURAL markers only: tag-shaped debris a provider's tool-call parser left behind. Prose that
 # merely *discusses* tools ("the read_file tool takes a name") contains none of these, which is the
 # point — a false positive costs the user a reprompt and can replace their real answer with an error.
+#
+# Every alternative below is required by at least one test: the first four by a captured sample in
+# tests/fixtures/native_toolcall_debris.txt (indices in the comments), the rest by
+# test_non_qwen_provider_delimiters_are_detected. Markers that no test required were deleted —
+# `<parameter…>`, `</parameter>` and `</?function[ =>]` — the last of which matched TypeScript
+# generics (`useRef<Function | null>`) under the case-insensitive flag this no longer sets.
 _MARKUP_RE = re.compile(
-    r"</?tool_call\b"          # <tool_call> … </tool_call>   (Qwen/Hermes)
-    r"|</?tool_code\b"         # <tool_code>
-    r"|<parameter[ =>]"        # <parameter name="x">  /  <parameter=x>
-    r"|</parameter>"
-    r"|</?invoke\b"            # <invoke name="geocode">
-    r"|</?function[ =>]"       # <function=…> / </function>
-    r"|<model_thinking\b",
-    re.IGNORECASE,
+    r"</?tool_call\b"          # <tool_call> … </tool_call>   (Qwen/Hermes)   samples 2-4,6-9,…
+    r"|</?tool_code\b"         # <tool_code>                                  samples 11,13,14,16
+    r"|</?invoke\b"            # <invoke name="geocode">                      sample 22
+    r"|<model_thinking\b"      # <model_thinking>                             sample 10
+    # Non-Qwen providers. Pipe/bracket-delimited and structurally distinctive, so the
+    # false-positive risk is near zero. Llama's bare-JSON form is deliberately absent: it is
+    # indistinguishable from a legitimate JSON answer.
+    r"|\[TOOL_CALLS\]"         # Mistral / NeMo
+    r"|<\|python_tag\|>"       # Llama 3.1
+    r"|<\|tool_call"           # Kimi K2 <|tool_calls_section_begin|>, generic <|tool_call|>
+    r"|<｜tool▁call"  # DeepSeek R1/V3 <｜tool▁calls▁begin｜> (fullwidth bar, not '<|')
+    r"|```tool_code"           # Gemma, fenced form
 )
 # A bare keyword-argument call sitting on its own line — `currency_convert(amount=200, ...)`.
-# Too weak alone (real answers show example code), so it only counts alongside a stray </think>.
+# Far too weak alone (real answers show example code), so it counts only alongside a stray
+# </think> AND only on the trailing line — see looks_like_dropped_tool_call.
+# The `^` anchor is what stops it firing on an inline `... call foo(bar=1) ...`.
 _BARE_CALL_RE = re.compile(r"^[ \t]*[A-Za-z_][A-Za-z0-9_]*\(\s*[A-Za-z_][A-Za-z0-9_]*\s*=", re.M)
 _THINK_CLOSE_RE = re.compile(r"</think\s*>", re.IGNORECASE)
+# Orphan `</think>` count that on its own means degenerate output. An orphan is the NORMAL artifact
+# of a chat template that pre-fills `<think>` with no reasoning parser configured, so one or two are
+# ordinary; three is not something an answer produces.
+_THINK_CLOSE_MIN = 3
 
 
 def looks_like_dropped_tool_call(text: str) -> bool:
     """True when `text` is a tool-call attempt the provider failed to parse.
 
-    Deliberately conservative. A lone `</think>` does NOT qualify (too plausible in ordinary
-    prose); it only counts when repeated — degenerate output no answer produces — or when it
-    sits next to a bare call blob.
+    Deliberately conservative — a false positive replaces the user's real answer with an error.
+    Three ways to qualify:
+
+    1. structural tool-call markup (`_MARKUP_RE`): the Qwen/Hermes tag shapes captured in the
+       fixture, plus the pipe/bracket-delimited delimiters of Mistral, Llama, Kimi, DeepSeek and
+       Gemma. Coverage is NOT universal: Llama's bare-JSON form is excluded on purpose, since it
+       cannot be told apart from a legitimate JSON answer.
+    2. three or more orphan `</think>` — degenerate repetition, not prose.
+    3. one orphan `</think>` plus a bare keyword-argument call as the trailing line of the message,
+       i.e. the message ENDS mid-tool-call. A call inside a fenced block, or followed by any
+       further prose, is ordinary product output (a chart script, an R snippet) and does not count.
     """
-    if not text:
-        return False
     if _MARKUP_RE.search(text):
         return True
-    thinks = len(_THINK_CLOSE_RE.findall(text))
-    if thinks >= 2:
+    if len(_THINK_CLOSE_RE.findall(text)) >= _THINK_CLOSE_MIN:
         return True
-    return thinks >= 1 and bool(_BARE_CALL_RE.search(text))
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    return (bool(lines) and bool(_THINK_CLOSE_RE.search(text))
+            and bool(_BARE_CALL_RE.search(lines[-1])))
 
 
 class NativeMode(ToolCallingMode):
