@@ -293,6 +293,30 @@ async def test_restart_stands_down_if_an_update_starts_inside_the_handoff_window
     assert upd.restart_pending() is False, "a restart that stood down must unblock the next update"
 
 
+async def test_a_restart_that_raises_does_not_brick_every_future_update(tmp_path, upd, monkeypatch):
+    """`perform_restart` can leave this process alive. `Popen` raises OSError on a fork failure, and
+    "right after a pip install" is exactly when a machine is under the memory pressure that causes
+    one. The old code called it with nothing to unwind the pending flag, so the flag stayed up: every
+    later apply AND revert was refused with "try again once it is back", forever, from a process that
+    was never coming back. The only cure was the command line — the outcome this button exists to
+    remove. Restarting is best-effort; refusing all future work is not an acceptable failure mode."""
+    applied: list = []
+    monkeypatch.setattr(upd, "perform_restart",
+                        lambda info: (_ for _ in ()).throw(OSError("Cannot allocate memory")))
+    monkeypatch.setattr(upd, "apply_update", lambda t, clone_dir=upd.ROOT, emit=None: (
+        applied.append(t) or emit({"type": "done", "ok": True, "state": "applied", "to_tag": t})))
+    async with _client(tmp_path) as c:
+        assert (await c.post("/update/restart")).json()["restarting"] is True
+        await asyncio.sleep(1.0)                 # the restart fires ~0.6s in, and blows up
+        assert upd.restart_pending() is False, "a restart that never happened must not fence forever"
+        assert upd._test_state["state"] != "restarting", (
+            "the recorded state must be put back, or the boot-side settle waits on a boot that "
+            "never comes")
+        r = await c.post("/update/apply", json={"target": "v0.2.0", "confirm": "v0.2.0"})
+    assert _events(r.text)[-1]["state"] == "applied"
+    assert applied == ["v0.2.0"], "the install was locked out of updating from the UI for good"
+
+
 async def test_an_apply_is_refused_once_a_restart_has_been_scheduled(tmp_path, upd, monkeypatch):
     """The other direction: an apply that arrives AFTER the restart was decided. The lock is free —
     the restart does not hold it — so only the pending-restart flag can refuse this."""
@@ -417,3 +441,10 @@ def test_the_update_card_shows_the_stash_name():
     assert "el.innerHTML +=" in failure_branch and "esc(result.stash)" in failure_branch, (
         "the stash name must land in the CARD (escaped), not only in the scrollback pane")
     assert "git stash list" in failure_branch, "and it must say how to get the files back"
+    # ...and the commands it prints have to be ones that WORK on what this actually saves.
+    assert "--include-untracked" in failure_branch, (
+        'a bare `git stash show -p "stash@{0}"` prints nothing at all, exit 0, for an entry holding '
+        'only untracked files — the user concludes their stash is empty')
+    assert "git stash pop" not in failure_branch, (
+        "`git stash pop` FAILS in the exact shape this saves for — the rollback has already put the "
+        "release's own copy back at that path, so it refuses with 'already exists, no checkout'")

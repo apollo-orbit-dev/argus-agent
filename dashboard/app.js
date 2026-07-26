@@ -1565,9 +1565,15 @@
       if (result.stash){
         el.innerHTML += '<span>Your version of the files it replaced was saved to the git stash as "'
           + esc(result.stash) + '" — recover it with: git stash list</span>';
+        // Deliberately NOT the obvious pair. Popping the stash FAILS in the exact shape this saves
+        // for ("already exists, no checkout") because the rollback has since put the release's own
+        // copy back at that path; and a bare `show -p` prints nothing at all, exit 0, for an entry
+        // that holds only untracked files — so the user concludes it is empty.
         out.textContent += '\nYour version of the files it replaced was saved to the git stash as "'
-          + result.stash + '":\n  git stash list\n  git stash show -p "stash@{0}"\n'
-          + '  git stash pop\n';
+          + result.stash + '":\n  git stash list\n'
+          + '  git stash show -p --include-untracked "stash@{0}"\n'
+          + '  git checkout "stash@{0}" -- <path>       # a file that was tracked\n'
+          + '  git checkout "stash@{0}^3" -- <path>     # one that was untracked or ignored\n';
       }
       var cmds = (result.commands && result.commands.length) ? result.commands
                  : (result.revert_command ? [result.revert_command] : []);

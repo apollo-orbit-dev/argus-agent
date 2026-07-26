@@ -327,6 +327,32 @@ async def test_update_confirm_applies_then_restarts_after_replying(monkeypatch):
     assert len(restarts) == 1
 
 
+async def test_update_confirm_fences_its_restart_window_against_a_dashboard_apply(monkeypatch):
+    """The Telegram restart is a THIRD path to `perform_restart`, and it scheduled itself with
+    neither `mark_restart_pending()` nor a re-check of the update lock. That made the new flag
+    one-sided: `apply_update_async`'s restart_pending() guard could not see a Telegram-initiated
+    restart at all, so an apply started from the dashboard inside the 0.6s handoff took the lock
+    legitimately and was killed mid-`pip install` — HEAD already on the new tag, the rollback never
+    reached. Half of the protection simply did not exist.
+
+    Both halves are asserted here: the mark goes up (so a new apply is refused), and if one got in
+    anyway the restart stands down rather than killing it."""
+    import asyncio
+    from types import SimpleNamespace as NS
+    restarts: list = []
+    upd = _stub_updater(monkeypatch, _upd_preview())
+    monkeypatch.setattr(upd, "perform_restart", restarts.append)
+    msg = _Msg()
+    await _handlers()["update"](NS(effective_chat=NS(id=1), effective_message=msg),
+                                NS(args=["confirm"]))
+    assert upd.restart_pending() is True, "a new apply could start into this restart and be killed"
+
+    async with upd.exclusive():                  # an apply gets in anyway, from the dashboard
+        await asyncio.sleep(0.9)
+    assert restarts == [], "the restart killed an update that started inside the handoff window"
+    assert upd.restart_pending() is False, "standing down must unblock the next update"
+
+
 async def test_update_confirm_records_the_state_it_will_come_back_in(monkeypatch):
     """The Telegram half of the same handoff: whatever this update turned the install INTO has to be
     written down before "restarting" replaces it, or the boot-side settle has to guess."""
@@ -388,6 +414,10 @@ async def test_update_failure_names_the_stash_outside_the_log_tail(monkeypatch):
     assert "pip line 39" in body and "pip line 5" not in body, "the tail is still the last 20 lines"
     assert name in body, "the user was never told where their files went"
     assert "git stash list" in body, "and never told how to get them back"
+    assert "--include-untracked" in body, (
+        'a bare `git stash show -p "stash@{0}"` prints nothing for an untracked-only entry')
+    assert "git stash pop" not in body, (
+        "pop fails once the rollback has put the release's own copy back at that path")
     assert body.index(name) < body.index("<pre>"), (
         "the stash must be named ABOVE the tail — inside it, it is the line that gets cut")
 

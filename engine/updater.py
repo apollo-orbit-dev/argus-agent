@@ -27,14 +27,19 @@ there is nothing for the checkout to refuse and no reason to reach for `--force`
 
 If the stash FAILS, the rollback does not run at all. A rollback that cannot preserve the tree is
 the one thing worse than no rollback, so the result is state="needs_manual" with the stash error
-verbatim, HEAD left exactly where it is and nothing on disk touched.
+verbatim and HEAD left exactly where it is. A non-zero exit does NOT license the report to say
+"nothing on disk was touched", though: real git writes the stash, deletes the files, and only then
+reports a failure it hit while removing one of them. So the stash ref is re-read on that path and
+the entry is named if one exists — see `_stash_working_tree`.
 
-KNOWN LIMIT, stated because it is a deliberate trade: `--include-untracked` does not save IGNORED
-files (`--all` would, but it would also strip .env, every *.db and .venv/ out of a live install —
-categorically worse). So the one shape still unprotected is a release that turns a formerly-shipped
-path into a *gitignored* runtime data dir: rolling back writes the old release's shipped file over
-the user's data there, silently, because that is what `git checkout` does to an ignored file. Going
-FORWARD is unaffected, and it needs a failed update to be reached at all.
+`--include-untracked` does not save IGNORED files, and a bare `--all` is not the answer — with no
+pathspec it would strip .env, every *.db and .venv/ out of a live install, which is categorically
+worse. The shape that leaves exposed is a release that turns a formerly-shipped path into a
+*gitignored* runtime data dir: rolling back writes the old release's file over the user's data there,
+silently, because that is what `git checkout` does to a path the target commit tracks. So a SECOND
+push covers exactly it — `git stash push --all` restricted by pathspec to the paths `from_ref` tracks
+that HEAD does not and where something exists now (`_once_shipped_paths`). The pathspec is what makes
+`--all` safe: .env, the databases and .venv/ are never named by it and are never touched.
 
 Every subprocess call goes through `_run` (capture) or `_stream` (line-by-line) — the two seams the
 suite monkeypatches, so tests never invoke real git/pip against the network.
@@ -491,9 +496,22 @@ _EXCLUSIVE = asyncio.Lock()
 # has not happened yet. /update/restart answers the HTTP request first and replaces the process ~0.6s
 # later, and the update lock is not held across that gap — so an apply started from Telegram inside
 # it takes the lock legitimately and is then killed mid-pip, which is the precise way to brick an
-# install. In-process and one-way on purpose: it is only ever set by a process that is about to stop
-# existing, so there is nothing to expire and nothing to clean up on disk.
-_RESTART_PENDING = False
+# install. In-process, so there is nothing to clean up on disk.
+#
+# IT EXPIRES, and the reason is the whole point of this feature. "Only ever set by a process about to
+# stop existing" is FALSE: `perform_restart` for systemd is a fire-and-forget Popen whose exit code
+# is never read, so a systemctl that fails, is masked, or no-ops leaves this process alive with the
+# flag up; Popen itself can raise OSError on fork failure under memory pressure, which is exactly the
+# state a machine is in right after a pip install; and /update/restart's own stand-down path already
+# proves a marked restart can decline to happen. A stuck flag refuses EVERY future apply and revert
+# with "try again once it is back" from a process that is never coming back — curable only from the
+# command line, which is the one outcome this button exists to avoid. So the flag is a timestamp, and
+# a restart that has not replaced this process within the window did not happen.
+_RESTART_PENDING: Optional[float] = None            # monotonic mark, or None/False for "not pending"
+
+# Generous against a slow systemd handoff (the process is normally dead in well under a second) and
+# still short enough that a wedged flag clears itself long before anyone reaches for a terminal.
+RESTART_PENDING_TTL = 90.0
 
 RESTART_PENDING_DETAIL = ("Argus is restarting right now — starting an update in the moment before "
                           "the process is replaced would kill it halfway through. Try again once it "
@@ -501,18 +519,22 @@ RESTART_PENDING_DETAIL = ("Argus is restarting right now — starting an update 
 
 
 def restart_pending() -> bool:
-    return _RESTART_PENDING
+    at = _RESTART_PENDING
+    if not at:
+        return False
+    return (time.monotonic() - float(at)) < RESTART_PENDING_TTL
 
 
 def mark_restart_pending() -> None:
     global _RESTART_PENDING
-    _RESTART_PENDING = True
+    _RESTART_PENDING = time.monotonic()
 
 
 def clear_restart_pending() -> None:
-    """Only for the caller that decided NOT to go through with the restart after all."""
+    """For the caller that decided NOT to go through with the restart after all — and for the one
+    whose restart RAISED, which leaves this process alive and owing the next update an answer."""
     global _RESTART_PENDING
-    _RESTART_PENDING = False
+    _RESTART_PENDING = None
 
 
 def update_in_progress() -> bool:
@@ -621,31 +643,118 @@ def _stash_ref(clone_dir: Path) -> str:
     return out.strip() if rc == 0 else ""
 
 
-def _stash_working_tree(clone_dir: Path, name: str,
-                        log: Callable[[str], None]) -> tuple[bool, bool, str]:
-    """Hand the working tree to `git stash push --include-untracked` before the rollback checkout.
+# The commands that actually get a file back out of one of these stashes. `git stash show -p` and
+# `git stash pop` — the obvious pair — are both wrong for what this saves:
+#   * `git stash show -p "stash@{0}"` prints NOTHING and exits 0 for an untracked-only stash, so a
+#     user reasonably concludes their entry is empty. `--include-untracked` makes it show them.
+#   * `git stash pop` FAILS in the exact shape this mechanism exists for — "<path> already exists,
+#     no checkout / error: could not restore untracked files" — because the rollback checkout has
+#     since put the release's own copy back at that path. Checking one path out of the stash commit
+#     works: `stash@{0}` for a file that was tracked, `stash@{0}^3` for one that was not.
+RECOVERY_COMMANDS = ('git stash list  /  git stash show -p --include-untracked "stash@{0}"  /  '
+                     'git checkout "stash@{0}" -- <path>   (for a file that was untracked or '
+                     'ignored: git checkout "stash@{0}^3" -- <path>)')
 
-    Returns (ok, created, error). `ok` false means the tree could NOT be preserved and the caller
-    must not check anything out — see rollback(). `created` false with ok true means there was
-    nothing to save.
+
+def _once_shipped_paths(clone_dir: Path, from_ref: str) -> list[str]:
+    """Paths `from_ref` TRACKS that HEAD does not, and where something exists on disk right now.
+
+    This is the one shape `--include-untracked` cannot save, and it is a real release pattern: a
+    version turns a formerly-shipped file into a gitignored runtime path. `git checkout <from_ref>`
+    then writes the old release's copy over whatever is there — .gitignore does not defend a path the
+    target commit tracks — so the rollback destroys live data, silently, and the stash above never
+    saw it because the file is ignored.
+
+    Deliberately NOT "did .gitignore change between the two refs". Measured over this repo's own 23
+    adjacent tag transitions, .gitignore changed in 8 of them (~35%) for reasons with nothing to do
+    with this hazard, so refusing the rollback on that signal would push roughly one failed update in
+    three to the command line — a worse outcome than the bug. This predicate names the paths actually
+    at risk, which is what lets the caller save exactly those and nothing else.
+    """
+    rc_old, old, _ = _run(["git", "ls-tree", "-r", "--name-only", "-z", from_ref],
+                          clone_dir, timeout=60.0)
+    rc_now, now, _ = _run(["git", "ls-files", "-z"], clone_dir, timeout=60.0)
+    if rc_old != 0 or rc_now != 0:
+        return []                               # can't tell — the general stash is what we have
+    # -z, so git emits raw bytes-as-written and never quotes a path for spaces or non-ASCII. Those
+    # are precisely the paths a naive split would mangle into a pathspec that matches nothing.
+    tracked_now = {p for p in now.split("\0") if p}
+    at_risk = []
+    for p in old.split("\0"):
+        if not p or p in tracked_now:
+            continue
+        here = clone_dir / p
+        if here.exists() or here.is_symlink():
+            at_risk.append(p)
+    return sorted(at_risk)
+
+
+def _stash_working_tree(clone_dir: Path, name: str, from_ref: str,
+                        log: Callable[[str], None]) -> tuple[bool, list[str], str, list[str]]:
+    """Hand the working tree to git before the rollback checkout.
+
+    Returns (ok, names, error, ignored_paths). `ok` false means the tree could NOT be fully preserved
+    and the caller must not check anything out — see rollback(). `names` is every stash entry this
+    created, IN CREATION ORDER, and it can be non-empty even when ok is false (see below). `names`
+    empty with ok true means there was nothing to save.
 
     Git, not a hand-rolled copy, because git is what already handles a path that swapped between
     file and directory, paths it quotes for spaces or non-ASCII, symlinks, and modes — and because
     `git stash list` is an interface a user can be pointed at. It is also what lets the rollback use
     a PLAIN checkout: the stash leaves the tree clean, so there is nothing left to force past.
+
+    TWO pushes, because one cannot cover both halves. The first is `--include-untracked`, which saves
+    everything except IGNORED files; plain `--all` is not an option, since with no pathspec it would
+    strip .env, every *.db and .venv/ out of a live install. The second is `--all` RESTRICTED BY
+    PATHSPEC to the once-shipped paths — the pathspec is the entire reason `--all` is safe there, and
+    it was verified to save an ignored file at an at-risk path while leaving .env, sessions.db and
+    .venv/ completely untouched. Two entries rather than one, with distinct names, because git offers
+    no way to add to a stash already made and identically-named entries cannot be told apart in
+    `git stash list`.
+
+    A NON-ZERO EXIT DOES NOT MEAN NOTHING HAPPENED. Real git writes the stash, deletes the files, and
+    THEN reports a failure it hit while removing one of them ("warning: failed to remove x: Permission
+    denied", rc=1) — a root-owned leftover from a past sudo, a read-only mount, ENOSPC, an NFS
+    silly-rename. So the stash ref is re-read on the failure path too: the caller still must not check
+    anything out, but it must be told the entry exists and where, because the user's files are in it.
     """
-    before = _stash_ref(clone_dir)
-    rc, out, err = _run(["git", "stash", "push", "--include-untracked", "-m", name],
-                        clone_dir, timeout=120.0)
+    def _push(argv: list[str]) -> tuple[int, str, bool]:
+        before = _stash_ref(clone_dir)
+        rc, out, err = _run(argv, clone_dir, timeout=120.0)
+        after = _stash_ref(clone_dir)
+        # Compared either side rather than trusting rc: `git stash push` EXITS 0 on a clean tree
+        # without creating anything ("No local changes to save"), and exits NON-ZERO in cases where
+        # it did create something. The ref is the only honest witness.
+        return rc, (err or out or f"{' '.join(argv[1:3])} exited {rc}"), bool(after) and after != before
+
+    names: list[str] = []
+    rc, err, created = _push(["git", "stash", "push", "--include-untracked", "-m", name])
+    if created:
+        names.append(name)
     if rc != 0:
-        return False, False, (err or out or f"git stash push exited {rc}")
-    after = _stash_ref(clone_dir)
-    if not after or after == before:
-        return True, False, ""                  # clean tree — nothing needed saving
-    log(f'the tree does not match the release, so your version of it was saved to the git stash as '
-        f'"{name}" before putting the release back — nothing has been discarded. Recover it with: '
-        f'git stash list  /  git stash show -p "stash@{{0}}"  /  git stash pop')
-    return True, True, ""
+        return False, names, err, []
+    if created:
+        log(f'the tree does not match the release, so your version of it was saved to the git stash '
+            f'as "{name}" before putting the release back — nothing has been discarded. Recover it '
+            f'with: {RECOVERY_COMMANDS}')
+
+    # Anything the first push saved is gone from disk, so this sees only what it could not: the
+    # ignored files sitting at paths the ref we are about to check out still ships.
+    at_risk = _once_shipped_paths(clone_dir, from_ref)
+    if not at_risk:
+        return True, names, "", []
+    ignored_name = f"{name}-ignored"
+    rc, err, created = _push(["git", "stash", "push", "--all", "-m", ignored_name, "--", *at_risk])
+    if created:
+        names.append(ignored_name)
+    if rc != 0:
+        return False, names, err, at_risk
+    if not created:
+        return True, names, "", []              # nothing there after all (an empty directory)
+    log(f'{from_ref} ships {", ".join(at_risk)}, which this release does not — putting it back would '
+        f'write the old release\'s copy over what is there now, ignored or not. Saved to the git '
+        f'stash as "{ignored_name}". Recover it with: {RECOVERY_COMMANDS}')
+    return True, names, "", at_risk
 
 
 def _verify(clone_dir: Path, target: str) -> tuple[bool, str]:
@@ -752,7 +861,10 @@ def apply_update(target: str, clone_dir: Path = ROOT, emit: Optional[Emit] = Non
     def finish(ok: bool, state: str, failed_step: Optional[str], detail: str,
                restart: Optional[dict], commands: Optional[list[str]] = None,
                stash: Optional[str] = None) -> dict:
-        write_state(clone_dir, state=state, failed_step=failed_step, stash=stash)
+        # `stash` is written only when there IS one. Writing None on every success overwrote the name
+        # recorded by an earlier FAILED update — the record of where those files went — with nothing.
+        write_state(clone_dir, state=state, failed_step=failed_step,
+                    **({"stash": stash} if stash else {}))
         result = {"ok": ok, "state": state, "failed_step": failed_step, "detail": detail,
                   "from_tag": from_tag, "from_ref": from_ref, "to_tag": target,
                   # `stash` is a FIELD, not a line buried in `detail`: the dashboard card and the
@@ -773,12 +885,36 @@ def apply_update(target: str, clone_dir: Path = ROOT, emit: Optional[Emit] = Non
         # the whole tree somewhere git can give it back, and leaves it clean enough that the
         # checkout below needs no --force.
         stash_name = f"argus-update-{from_ref}-{target}"
-        ok_stash, created, stash_err = _stash_working_tree(clone_dir, stash_name, log)
-        stash = stash_name if created else None
+        ok_stash, stash_names, stash_err, at_risk = _stash_working_tree(clone_dir, stash_name,
+                                                                       from_ref, log)
+        stash = ", ".join(stash_names) or None
         if not ok_stash:
             # FAIL SAFE. A rollback that cannot preserve the tree must not run: checking out over
             # unsaved work is the one outcome worse than staying broken. HEAD is untouched.
             log(f"COULD NOT SAVE THE WORKING TREE: {stash_err}")
+            if stash:
+                # ...but git may have got PART of the way: written the stash, removed the files, and
+                # only then hit what it reported. Saying "nothing here has been changed" while a
+                # file is gone from disk is worse than saying nothing, and the entry has to be named
+                # or nobody can find what is in it.
+                log(f'a PARTIAL stash WAS created as "{stash}" — some files may already have been '
+                    f'removed from disk. Look there FIRST: {RECOVERY_COMMANDS}')
+                log(f"the rollback was NOT run — HEAD is still on {target}")
+                return finish(False, "needs_manual", failed_step,
+                              f"{detail} — and saving the working tree failed part-way through "
+                              f"(git stash push failed: {stash_err}), so the rollback was NOT run "
+                              f"and HEAD is still on {target}. A PARTIAL stash was created as "
+                              f'"{stash}": git may already have removed files from disk before it '
+                              f"reported that failure, so check that stash before anything else.",
+                              None,
+                              # NOT another `git stash push -m "<same name>"`: re-running it would
+                              # make a SECOND entry with an identical name, and `git stash list`
+                              # could then no longer tell the user which one holds their files.
+                              commands=[f'cd "{clone_dir}" && git stash list',
+                                        f'cd "{clone_dir}" && git stash show -p --include-untracked'
+                                        f' "stash@{{0}}"',
+                                        revert_command(clone_dir, from_ref)],
+                              stash=stash)
             log("the rollback was NOT run — nothing on disk has been changed")
             return finish(False, "needs_manual", failed_step,
                           f"{detail} — and the working tree could not be saved first "
@@ -788,7 +924,13 @@ def apply_update(target: str, clone_dir: Path = ROOT, emit: Optional[Emit] = Non
                                     f'-m "{stash_name}"',
                                     revert_command(clone_dir, from_ref)])
         kept = (f' Your version of the files it replaced was saved to the git stash as '
-                f'"{stash_name}" — see `git stash list`.') if created else ""
+                f'"{stash}" — see `git stash list`.') if stash else ""
+        if at_risk:
+            # Named, not merely stashed: these are paths {from_ref} SHIPS and this release does not,
+            # so what is at them now is the user's runtime data and the rollback would have written
+            # the old release's copy straight over it.
+            kept += (f' That includes {", ".join(at_risk)}, which {from_ref} ships as part of the '
+                     f'release — the rollback puts the release\'s own copy back there.')
         # A PLAIN checkout. The stash above already emptied the tree of anything git would refuse to
         # overwrite, so --force would only add the power to destroy something without saying so.
         rc_co = _stream(["git", "-c", "advice.detachedHead=false", "checkout", "-q", from_ref],

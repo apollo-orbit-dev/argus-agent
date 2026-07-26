@@ -610,14 +610,10 @@ def test_rollback_stashes_a_file_the_maintainer_edited_during_the_update(tmp_pat
         "the report must offer both explanations, because verification cannot tell them apart")
 
 
-@needs_git
-def test_a_rollback_whose_stash_fails_changes_nothing_at_all(tmp_path, monkeypatch):
-    """FAIL SAFE — the one thing worse than no rollback is a rollback that checks out over work it
-    failed to preserve. If `git stash push` returns non-zero, the checkout must not run: HEAD stays
-    where it is, the tree is left alone, and the report says needs_manual with git's own words."""
+def _rollback_with_a_failing_stash(tmp_path, monkeypatch, fake_run_stash):
+    """Drive a real apply_update to the rollback, with `git stash push` failing the way
+    `fake_run_stash(real_run, argv, cwd, timeout)` says. Returns (clone, result, checkouts)."""
     clone = _two_release_clone(tmp_path, monkeypatch)
-    mine = "the note I was in the middle of writing\n"
-    at_target = _git(clone, "rev-parse", "v0.2.0^{commit}")
     real_stream, real_run = updater._stream, updater._run
     checkouts: list = []
     pip = {"n": 0}
@@ -626,7 +622,7 @@ def test_a_rollback_whose_stash_fails_changes_nothing_at_all(tmp_path, monkeypat
         if "pip" in argv:
             pip["n"] += 1
             if pip["n"] == 1:
-                (clone / "SETTINGS.md").write_text(mine)
+                (clone / "SETTINGS.md").write_text(_MID_UPDATE_EDIT)
             return 0
         if "checkout" in argv:
             checkouts.append(list(argv))
@@ -634,22 +630,220 @@ def test_a_rollback_whose_stash_fails_changes_nothing_at_all(tmp_path, monkeypat
 
     def fake_run(argv, cwd=updater.ROOT, timeout=20.0):
         if argv[:3] == ["git", "stash", "push"]:
-            return 1, "", "fatal: cannot save the current worktree state: Disk quota exceeded"
+            return fake_run_stash(real_run, argv, cwd, timeout)
         return real_run(argv, cwd, timeout)
     monkeypatch.setattr(updater, "_stream", fake_stream)
     monkeypatch.setattr(updater, "_run", fake_run)
+    return clone, updater.apply_update("v0.2.0", clone), checkouts
 
-    res = updater.apply_update("v0.2.0", clone)
+
+_MID_UPDATE_EDIT = "the note I was in the middle of writing\n"
+
+
+@needs_git
+def test_a_rollback_whose_stash_fails_before_saving_anything_changes_nothing_at_all(tmp_path,
+                                                                                    monkeypatch):
+    """FAIL SAFE — the one thing worse than no rollback is a rollback that checks out over work it
+    failed to preserve. When `git stash push` fails having done NOTHING, the checkout must not run:
+    HEAD stays where it is, the tree is left alone, and the report says needs_manual with git's own
+    words. (The other shape — git fails having already saved and deleted — is the test below.)"""
+    def fails_cleanly(real_run, argv, cwd, timeout):
+        return 1, "", "fatal: cannot save the current worktree state: Disk quota exceeded"
+    clone, res, checkouts = _rollback_with_a_failing_stash(tmp_path, monkeypatch, fails_cleanly)
+    at_target = _git(clone, "rev-parse", "v0.2.0^{commit}")
 
     assert res["state"] == "needs_manual" and res["failed_step"] == "verify"
-    assert res["stash"] is None
+    assert res["stash"] is None, "nothing was created, so there is no entry to point anyone at"
     assert [c for c in checkouts if "v0.1.0" in c] == [], (
         "the rollback checked out over a tree it had just failed to preserve")
     assert _git(clone, "rev-parse", "HEAD") == at_target, "HEAD was moved after a failed stash"
-    assert (clone / "SETTINGS.md").read_text() == mine, "the unsaved edit was destroyed"
+    assert (clone / "SETTINGS.md").read_text() == _MID_UPDATE_EDIT, "the unsaved edit was destroyed"
     assert "Disk quota exceeded" in res["detail"], "git's own error must be quoted verbatim"
     assert "nothing here has been changed" in res["detail"]
     assert any("git stash push" in c for c in res["commands"]), "no way forward was offered"
+    assert _git(clone, "stash", "list") == ""
+
+
+@needs_git
+def test_a_stash_that_fails_AFTER_saving_and_deleting_still_names_what_it_saved(tmp_path,
+                                                                                monkeypatch):
+    """`git stash push` returning non-zero does NOT mean nothing happened.
+
+    Real git writes the stash, removes the files from disk, and only THEN reports a failure it hit
+    while removing one of them — a root-owned leftover from a past sudo, a read-only mount, ENOSPC,
+    an NFS silly-rename:
+
+        $ git stash push --include-untracked -m argus-test
+        Saved working directory and index state On (no branch): argus-test
+        warning: failed to remove locked/thing.txt: Permission denied
+        rc=1        <-- non-zero, and SETTINGS.md is already gone from disk
+
+    The fail-safe half is still right — nothing may be checked out. But the report has to stop
+    claiming "nothing here has been changed" while a file has vanished, has to NAME the entry (the
+    `stash` field is the only thing either UI renders), and must not offer a recovery command that
+    pushes a SECOND stash with the same name, which `git stash list` could not then tell apart.
+
+    NOTE THE STUB: it runs the real `git stash push` and then overrides the exit code. The previous
+    version of this test returned (1, "", "...") without calling git at all, so the failure it
+    simulated changed nothing BY CONSTRUCTION and could not observe the bug.
+    """
+    def fails_after_doing_the_work(real_run, argv, cwd, timeout):
+        real_run(argv, cwd, timeout)             # git really stashes: entry created, file deleted
+        return 1, "", "warning: failed to remove locked/thing.txt: Permission denied"
+    clone, res, checkouts = _rollback_with_a_failing_stash(tmp_path, monkeypatch,
+                                                          fails_after_doing_the_work)
+    at_target = _git(clone, "rev-parse", "v0.2.0^{commit}")
+    name = "argus-update-v0.1.0-v0.2.0"
+
+    # Still fail-safe: no checkout over a tree we cannot vouch for.
+    assert res["state"] == "needs_manual" and res["failed_step"] == "verify"
+    assert [c for c in checkouts if "v0.1.0" in c] == []
+    assert _git(clone, "rev-parse", "HEAD") == at_target, "HEAD was moved after a failed stash"
+
+    # ...but git DID change the disk, and the report must say where the bytes went.
+    assert (clone / "SETTINGS.md").read_text() != _MID_UPDATE_EDIT, (
+        "precondition: real git removed the file while failing — otherwise this proves nothing")
+    assert res["stash"] == name, "the entry exists and nothing named it — neither UI can show it"
+    assert name in _git(clone, "stash", "list")
+    assert _git(clone, "show", f"stash@{{0}}:SETTINGS.md") == _MID_UPDATE_EDIT.strip()
+    assert "nothing here has been changed" not in res["detail"], (
+        "a file is gone from disk — this sentence is false")
+    assert "PARTIAL" in res["detail"] and name in res["detail"]
+    assert "Permission denied" in res["detail"], "git's own error must still be quoted verbatim"
+
+    # And no duplicate-name push, which would make `git stash list` ambiguous.
+    assert not any("stash push" in c for c in res["commands"]), (
+        f"offering another push of {name} creates a second entry with an identical name")
+    assert any("git stash list" in c for c in res["commands"])
+
+
+@needs_git
+def test_the_offered_recovery_commands_work_for_untracked_content(tmp_path, monkeypatch):
+    """`git stash show -p "stash@{0}"` and `git stash pop` — the obvious pair, and what was printed
+    — are both wrong for what this mechanism saves.
+
+    `show -p` without `--include-untracked` prints NOTHING, exit 0, for an entry holding only
+    untracked files, so a user reasonably concludes their stash is empty. And `pop` FAILS in the
+    exact shape this exists for ("<path> already exists, no checkout / could not restore untracked
+    files"), because the rollback has since put the release's own copy back at that path. No data is
+    lost either way — but the advertised one-command recovery does not work, for the one person it
+    was written for."""
+    clone = _two_release_clone(tmp_path, monkeypatch)
+    (clone / "notes.md").write_text("the untracked notes I keep in here\n")
+    _stub_pip(monkeypatch, rc=1, fail_first_only=True)
+    events: list = []
+    res = updater.apply_update("v0.2.0", clone, emit=events.append)
+
+    assert res["state"] == "reverted" and res["stash"] == "argus-update-v0.1.0-v0.2.0"
+    hint = next(ln for ln in (str(e.get("line", "")) for e in events if e["type"] == "log")
+                if "Recover it with" in ln)
+    assert 'git stash show -p --include-untracked "stash@{0}"' in hint
+    assert "git stash pop" not in hint, "pop fails in the shape this mechanism exists for"
+    assert 'git checkout "stash@{0}^3" -- <path>' in hint, "the untracked case needs the ^3 form"
+
+    # The evidence, from real git rather than from reasoning about it.
+    assert _git(clone, "stash", "show", "-p", "stash@{0}") == "", (
+        "precondition: the command that WAS printed prints nothing at all here")
+    assert "notes.md" in _git(clone, "stash", "show", "-p", "--include-untracked", "stash@{0}")
+    assert _git(clone, "show", "stash@{0}^3:notes.md") == "the untracked notes I keep in here"
+
+
+@needs_git
+def test_a_successful_update_does_not_erase_a_previous_failures_stash_name(repo, monkeypatch):
+    """finish() wrote `stash: None` on every path, so a later SUCCESSFUL update overwrote the record
+    of where an earlier failed one had put the user's files."""
+    updater.write_state(repo, state="needs_manual", stash="argus-update-v0.1.0-v0.2.0")
+    _stub_pip(monkeypatch)
+    res = updater.apply_update("v0.2.0", repo)
+    assert res["ok"] is True and res["stash"] is None, "this run made no stash of its own"
+    assert updater.read_state(repo)["stash"] == "argus-update-v0.1.0-v0.2.0", (
+        "the only record of where the earlier failure put those files was erased")
+
+
+@needs_git
+def test_rollback_preserves_user_data_at_a_path_the_old_release_shipped(tmp_path, monkeypatch):
+    """The shape `--include-untracked` cannot see, and the reason for the second, pathspec'd push.
+
+    A release turns a formerly-SHIPPED file into a gitignored RUNTIME path (routines/daily.json here
+    — Argus does exactly this kind of thing). The live instance writes real data there during the
+    multi-minute pip window. The update then fails, and `git checkout v0.1.0` writes v0.1.0's own
+    shipped copy straight over that data: .gitignore does not defend a path the target commit
+    tracks. The first stash push never saw the file, because the file is ignored.
+
+    `git stash push --all -- <the at-risk paths>` saves it. THE PATHSPEC IS WHAT MAKES `--all` SAFE
+    — this test asserts that too, because a bare `--all` would strip .env, the databases and .venv/
+    out of a live install, which is categorically worse than the bug it fixes.
+    """
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    _git(origin, "init", "-b", "main")
+    # The REAL rules, and a real transition inside them: this repo's own .gitignore already carries
+    # `/routines/`. v0.1.0 is that file WITHOUT the line (it still ships the path), v0.2.0 is it as
+    # shipped today (the path has become runtime data).
+    shipped_ignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert "/routines/\n" in shipped_ignore, "the shipped rules changed — pick another at-risk path"
+    before_ignore = shipped_ignore.replace("/routines/\n", "")
+
+    # v0.1.0 SHIPS routines/daily.json as a tracked default.
+    (origin / ".gitignore").write_text(before_ignore)
+    (origin / "pyproject.toml").write_text('[project]\nname = "argus"\nversion = "0.1.0"\n')
+    (origin / "routines").mkdir()
+    (origin / "routines" / "daily.json").write_text('{"shipped": "default"}\n')
+    _git(origin, "add", "-A")
+    _git(origin, "commit", "-m", "release 0.1.0")
+    _git(origin, "tag", "v0.1.0")
+
+    # v0.2.0 stops shipping it and makes it a gitignored runtime directory instead.
+    (origin / ".gitignore").write_text(shipped_ignore)
+    (origin / "pyproject.toml").write_text('[project]\nname = "argus"\nversion = "0.2.0"\n')
+    _git(origin, "rm", "-q", "-r", "--cached", "routines")
+    shutil.rmtree(origin / "routines")
+    _git(origin, "add", "-A")
+    _git(origin, "commit", "-m", "release 0.2.0")
+    _git(origin, "tag", "v0.2.0")
+
+    clone = _make_clone(tmp_path, origin, at="v0.1.0")
+    _pin(monkeypatch, clone)
+
+    # The live install's own state, none of which this may touch.
+    (clone / ".env").write_text("ADMIN_TOKEN=hunter2\n")
+    (clone / "sessions.db").write_bytes(b"SQLite format 3\x00not really")
+    (clone / ".venv" / "pyvenv.cfg").write_text("home = /usr\n")
+
+    mine = '{"my": "routine", "at": "07:00"}\n'
+    real_stream = updater._stream
+    pip = {"n": 0}
+
+    def fake(argv, cwd=updater.ROOT, timeout=updater.PIP_TIMEOUT, emit=None):
+        if "pip" in argv:
+            pip["n"] += 1
+            if pip["n"] == 1:
+                # The running instance, mid-update, writing its runtime data at the new location.
+                (clone / "routines").mkdir(exist_ok=True)
+                (clone / "routines" / "daily.json").write_text(mine)
+                return 1                        # ...and the install fails, so we roll back
+            return 0
+        return real_stream(argv, cwd, timeout, emit)
+    monkeypatch.setattr(updater, "_stream", fake)
+
+    res = updater.apply_update("v0.2.0", clone)
+
+    assert res["state"] == "reverted" and res["failed_step"] == "pip"
+    assert _git(clone, "rev-parse", "HEAD") == _git(clone, "rev-parse", "v0.1.0^{commit}")
+    # The rollback DID put the release's file back — that is what a checkout of v0.1.0 does.
+    assert (clone / "routines" / "daily.json").read_text() == '{"shipped": "default"}\n'
+    # ...but the user's bytes are in git's own stash, in an entry the report names.
+    ignored_name = "argus-update-v0.1.0-v0.2.0-ignored"
+    assert ignored_name in (res["stash"] or ""), (
+        "the entry holding the user's runtime data was not named — neither UI can show it")
+    assert ignored_name in _git(clone, "stash", "list")
+    assert _git(clone, "show", f"stash@{{0}}^3:routines/daily.json") == mine.strip()
+    assert "routines/daily.json" in res["detail"], "the at-risk path must be named in the report"
+
+    # THE PATHSPEC. A bare `--all` would have taken all of these.
+    assert (clone / ".env").read_text() == "ADMIN_TOKEN=hunter2\n", "--all stripped .env"
+    assert (clone / "sessions.db").exists(), "--all stripped the database"
+    assert (clone / ".venv" / "pyvenv.cfg").exists(), "--all stripped the virtualenv"
 
 
 @needs_git
@@ -884,6 +1078,29 @@ async def test_an_apply_is_refused_once_a_restart_has_been_scheduled(tmp_path, m
     assert updater.update_in_progress() is False, "the refusal must not take the lock"
     updater.clear_restart_pending()
     assert updater.restart_pending() is False
+
+
+async def test_a_restart_that_never_happens_stops_refusing_everything_forever(monkeypatch):
+    """The flag's old docstring claimed it "is only ever set by a process about to stop existing, so
+    there is nothing to expire". That is false, and the cost of it being false is total.
+
+    `perform_restart` for systemd is a fire-and-forget `Popen(["systemctl", "--user", "restart", …])`
+    whose exit code is NEVER READ. A systemctl that fails, is masked, or no-ops leaves this process
+    alive with the flag up — no exception anywhere. Every subsequent apply and revert is then refused
+    with "try again once it is back", from a process that is never coming back, and the only cure is
+    a manual restart from the command line: precisely the outcome this whole feature exists to avoid.
+    """
+    monkeypatch.setattr(updater, "_RESTART_PENDING", False)
+    monkeypatch.setattr(updater, "RESTART_PENDING_TTL", 0.15)
+    updater.mark_restart_pending()
+    assert updater.restart_pending() is True, "it must still fence the handoff window it is for"
+    await asyncio.sleep(0.25)
+    assert updater.restart_pending() is False, (
+        "a restart that has not replaced this process by now did not happen — and a flag that never "
+        "clears bricks every future update from the UI")
+    # ...and the next update really does get through.
+    monkeypatch.setattr(updater, "apply_update", lambda *a, **k: {"ok": True, "state": "applied"})
+    assert (await updater.apply_update_async("v0.2.0", Path("."), lambda _e: None))["ok"] is True
 
 
 async def test_the_exclusion_never_queues(tmp_path):

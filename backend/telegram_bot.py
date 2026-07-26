@@ -1023,9 +1023,17 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
             # writes this one first — so as a log line it fell off the top exactly when the update
             # produced enough output to matter.
             if res.get("stash"):
+                # `git stash pop` is NOT offered on purpose: it fails in the exact shape this saves
+                # for ("<path> already exists, no checkout"), because the rollback has since put the
+                # release's own copy back at that path. And a plain `git stash show -p` prints
+                # nothing at all for an untracked-only entry.
                 body += ["", "Your version of the files it replaced was saved to the git stash as "
                              f"<code>{_esc(str(res['stash']))}</code> — list it with "
-                             f"<code>git stash list</code>."]
+                             f"<code>git stash list</code>, see what is in it with "
+                             f"<code>git stash show -p --include-untracked \"stash@{{0}}\"</code>, "
+                             f"and take a file back with "
+                             f"<code>git checkout \"stash@{{0}}\" -- &lt;path&gt;</code> "
+                             f"(<code>\"stash@{{0}}^3\"</code> if it was untracked or ignored)."]
             body += ["", f"<pre>{_esc(tail)}</pre>"]
             cmd = res.get("revert_command") or (res.get("commands") or [None])[0]
             if cmd:
@@ -1040,6 +1048,12 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
                                   f"<pre>{_esc(info.get('instruction') or '')}</pre>")
             return
         notice = {"chat_id": chat_id, "to": res.get("to_tag") or res.get("from_tag")}
+        # Mirrors /update/restart in app.py, and for the same reason: between here and the moment
+        # the process is actually replaced there is an await and a 0.6s sleep, and an apply started
+        # from the dashboard inside that window takes the lock legitimately and is then killed
+        # mid-pip. Without this mark, apply_update_async's restart_pending() guard is dead weight
+        # against a Telegram-initiated restart — half of that protection would not exist.
+        updater.mark_restart_pending()
         # before_restart: what this install IS now ("applied" or "reverted"). The boot-side settle
         # restores it — see deliver_pending_update_notice for why hardcoding "applied" there lied.
         updater.write_state(state="restarting", before_restart=res.get("state"),
@@ -1048,7 +1062,22 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
 
         async def _do():
             await asyncio.sleep(0.6)          # let the reply flush before the process dies
-            updater.perform_restart(info)
+            if updater.update_in_progress():
+                # An update took the lock after the mark. Killing it here is the brick this guard
+                # exists to prevent — stand down and put the recorded state back.
+                updater.clear_restart_pending()
+                updater.write_state(state=res.get("state") or "none", before_restart=None,
+                                    pending_notice=None)
+                return
+            try:
+                updater.perform_restart(info)
+            except Exception as e:            # noqa: BLE001
+                # Still here, so it did not happen. A pending flag left up refuses every future
+                # update from a process that is never coming back.
+                updater.clear_restart_pending()
+                updater.write_state(state=res.get("state") or "none", before_restart=None,
+                                    pending_notice=None)
+                log.warning("restart failed, this process is still running: %s", e)
         asyncio.create_task(_do())
 
     async def on_mode(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:

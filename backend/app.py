@@ -698,7 +698,20 @@ def create_app(engine: Engine) -> FastAPI:
                                     before_restart=None,
                                     pending_notice=state.get("pending_notice"))
                 return
-            updater.perform_restart(info)
+            try:
+                updater.perform_restart(info)
+            except Exception as e:                 # noqa: BLE001
+                # We are still here, so the restart did not happen — Popen can raise OSError on a
+                # fork failure, and "right after a pip install" is when memory pressure makes that
+                # real. Leaving the pending flag up would refuse every future apply and revert with
+                # "try again once it is back" from a process that is never coming back, curable only
+                # from a terminal. Hand the install back instead.
+                updater.clear_restart_pending()
+                updater.write_state(state=state.get("state") or "none",
+                                    before_restart=None,
+                                    pending_notice=state.get("pending_notice"))
+                print(f"[update] restart failed, this process is still running: {e}",
+                      file=sys.stderr, flush=True)
         asyncio.create_task(_do())
         return {"restarting": True, **info}
 
