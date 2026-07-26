@@ -9,28 +9,40 @@ Shape matched to install.sh: clone -> checkout newest tag -> .venv -> `pip insta
 updater does exactly the last three steps again, so an install produced by the installer and an
 install produced by this module are the same thing.
 
-USER STATE IS NEVER TOUCHED — and that is structural, not a code path: `.env`, `*.db`,
-`model_presets.json`, `workspaces/`, `created_tools/`, `SOUL.md`, `trusted_tools.json` … are all in
-.gitignore, and `git checkout <tag>` does not touch ignored or untracked files. There is deliberately
-no "clean the tree" step anywhere in here. tests/test_updater.py proves it against the real
-.gitignore.
+USER STATE SURVIVES AN UPDATE — but because of what the RELEASES contain, not because git protects
+it. `git checkout <ref>` writes every path <ref> tracks, ignored or not: .gitignore does not defend a
+path the target commit tracks, and `--force` overwrites an untracked file there too. What makes the
+guarantee hold is that `.env`, `*.db`, `model_presets.json`, `workspaces/`, `created_tools/`,
+`SOUL.md`, `trusted_tools.json` … are gitignored AND tracked by no release, so nothing a checkout
+writes ever lands on them. There is deliberately no "clean the tree" step anywhere in here.
+
+The one shape that breaks that property is a release that turns a formerly-shipped path into a
+runtime data dir (.gitignore already carries three: /routines/, agent-created tools/skills,
+model_presets.json). Going FORWARD is still safe — the new tag does not track the path. Rolling BACK
+is not: the old ref does track it, so the checkout writes the shipped file over the user's data.
+`_rescue()` copies every such path — and every tracked file the user has modified — aside before the
+rollback runs, so nothing is ever destroyed, only moved. tests/test_updater.py proves both halves
+against the real .gitignore.
 
 Every subprocess call goes through `_run` (capture) or `_stream` (line-by-line) — the two seams the
 suite monkeypatches, so tests never invoke real git/pip against the network.
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import os
 import re
+import shutil
+import signal
 import subprocess
 import sys
 import threading
 import time
 import tomllib
 from pathlib import Path
-from typing import Callable, Iterator, Optional
+from typing import AsyncIterator, Callable, Optional
 
 from engine.version import compare_versions, get_version
 
@@ -43,11 +55,10 @@ ROOT = Path(__file__).resolve().parents[1]          # clone dir (holds main.py, 
 NEWEST_TAG_ARGV = ["git", "tag", "-l", "v*", "--sort=-v:refname"]
 
 STATE_FILE = ROOT / ".argus-update.json"            # gitignored; see state_path()
-LOCK_FILE = ROOT / ".argus-update.lock"             # gitignored; see lock_path()
+RESCUE_DIR = ".argus-rescue"                        # gitignored; see _rescue()
 CHANGELOG_CAP = 8000
 PIP_TIMEOUT = 600.0                                 # a cold-cache wheel build is slow (matches sandbox setup)
 FETCH_TIMEOUT = 120.0
-STALE_LOCK_AFTER = 4 * PIP_TIMEOUT                  # longer than any real update; see _lock_is_stale
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")     # pip colour codes render as garbage in a <pre>
 _SECTION_RE = re.compile(r"^## (\d+\.\d+\.\d+)\s*$", re.MULTILINE)
@@ -81,13 +92,22 @@ def _stream(argv: list[str], cwd: Path = ROOT, timeout: float = PIP_TIMEOUT,
     producing output entirely (a pip resolver stuck on a dead index, a git asking for credentials),
     and that child never reaches the check. A stalled step here parks a worker thread forever with
     HEAD already on the new tag, so the rollback never runs — the worst outcome this module has.
-    Killing the child closes the pipe, which ends the read loop, so `wait()` always reaps it.
+
+    The child gets its own PROCESS GROUP (`start_new_session`) and the watchdog kills the GROUP.
+    Killing only the direct child does not bound anything for the one command that matters: every
+    descendant inherited the stdout pipe, so the write end stays open and `for line in p.stdout`
+    keeps blocking with the child already dead. `pip install -e .` always has descendants — PEP 517
+    runs the build backend in a subprocess, which in turn runs compilers and git — so a direct-child
+    kill would leave exactly the stall this watchdog exists to end.
     """
     say = emit or (lambda _line: None)
     say("$ " + " ".join(argv))
     try:
+        # start_new_session is POSIX-only and silently ignored on Windows, where the fallback below
+        # (kill the child alone) is all the stdlib offers without a job object.
         p = subprocess.Popen(argv, cwd=str(cwd), stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, text=True, bufsize=1)
+                             stderr=subprocess.STDOUT, text=True, bufsize=1,
+                             start_new_session=True)
     except FileNotFoundError:
         say(f"{argv[0]}: not found")
         return 127
@@ -102,7 +122,13 @@ def _stream(argv: list[str], cwd: Path = ROOT, timeout: float = PIP_TIMEOUT,
         if not done.wait(timeout):
             timed_out.set()
             try:
-                p.kill()
+                # p.pid IS the group id: start_new_session made the child a session/group leader, so
+                # this needs no getpgid round-trip that could race. The child has not been waited on
+                # (done is unset), so its pid cannot have been recycled.
+                if hasattr(os, "killpg"):
+                    os.killpg(p.pid, signal.SIGKILL)
+                else:
+                    p.kill()
             except Exception:                       # noqa: BLE001 - already gone is fine
                 pass
 
@@ -418,89 +444,47 @@ def clear_state(clone_dir: Path = ROOT) -> None:
 
 
 class UpdateBusy(RuntimeError):
-    """Another update/revert already holds the lock. Raised only by `update_lock`."""
+    """An update or revert is already running. Raised only by `exclusive()`."""
 
 
-def lock_path(clone_dir: Path = ROOT) -> Path:
-    return clone_dir / ".argus-update.lock"
+BUSY_DETAIL = ("Another update is already running. Wait for it to finish — running two at once can "
+               "leave this install half-installed.")
+
+# Exclusion lives in the EVENT LOOP, not on the filesystem. Argus is one process: uvicorn and the
+# Telegram bot share a single asyncio loop (main.py), and nothing outside that process calls
+# apply_update — so an asyncio.Lock taken before the blocking work is handed to a worker thread is
+# correct by construction. There is no create-then-write window, no staleness to guess at, no
+# ownership to verify on release, and nothing left on disk when the process dies. A lock FILE had a
+# hole in every one of those, and each patch for one would have added machinery to a mechanism this
+# process does not need.
+#
+# Two `pip install -e .` runs into one venv can leave site-packages half-written, and two
+# apply_update()s interleaving their write_state() calls can clobber `from_ref` — the only recorded
+# way back. Dashboard and Telegram are separate entry points into the same install, so the exclusion
+# itself is still needed; only its implementation was over-built.
+_EXCLUSIVE = asyncio.Lock()
 
 
-def _pid_alive(pid: int) -> bool:
-    if sys.platform == "win32":
-        # NOT os.kill(pid, 0) here: on Windows that is TerminateProcess, not a liveness probe — it
-        # would KILL the holder. Windows falls back to the age check below.
-        return True
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True                                 # exists, just not ours to signal
-    except OSError:
-        return True
-    return True
+def update_in_progress() -> bool:
+    """Is an update or revert running RIGHT NOW? The only honest answer to "would restarting kill an
+    install halfway through" — the state file cannot answer it, because a process that died
+    mid-apply leaves "applying" written there forever."""
+    return _EXCLUSIVE.locked()
 
 
-def _lock_is_stale(path: Path, holder: dict) -> bool:
-    """Is this lock left over from a process that is gone? Either its pid is dead, or it has been
-    held for longer than any real update could possibly take (the Windows fallback, and the
-    backstop for a recycled pid)."""
-    pid = holder.get("pid")
-    if not isinstance(pid, int) or not _pid_alive(pid):
-        return True
-    try:
-        return (time.time() - path.stat().st_mtime) > STALE_LOCK_AFTER
-    except OSError:
-        return True
+@contextlib.asynccontextmanager
+async def exclusive() -> AsyncIterator[None]:
+    """Hold the update lock, or raise UpdateBusy immediately.
 
-
-@contextlib.contextmanager
-def update_lock(clone_dir: Path = ROOT) -> Iterator[Path]:
-    """Serialise apply/revert with an O_EXCL lock file. Raises UpdateBusy if one is already running.
-
-    Two `pip install -e .` runs into one venv can leave site-packages half-written, and two
-    apply_update()s interleaving their write_state() calls can clobber `from_ref` — the only
-    recorded way back. Dashboard and Telegram are separate entry points into the same install, so
-    "nobody would do that" is not a guarantee.
-
-    A lock whose recorded pid is gone is STALE and is taken over: a crash mid-update must not
-    disable the update button forever.
+    Deliberately never queues: a second update that waited its turn would then run against a tree
+    the first one has already moved, deciding what to do from a preflight taken before that. Busy is
+    the correct answer, not a delay. (The check and the acquire cannot race — asyncio.Lock.acquire
+    on a free lock returns without yielding to the loop, and there is only one loop.)
     """
-    path = lock_path(clone_dir)
-    for attempt in (0, 1):
-        try:
-            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-            break
-        except FileExistsError:
-            holder = {}
-            try:
-                holder = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:                       # noqa: BLE001 - unreadable counts as stale
-                holder = {}
-            if attempt == 0 and _lock_is_stale(path, holder):
-                try:
-                    path.unlink()                   # stale: the holder is gone
-                except OSError:
-                    pass
-                continue
-            raise UpdateBusy(
-                f"Another update is already running (started {holder.get('at', 'recently')} by "
-                f"process {holder.get('pid') or '?'}). Wait for it to finish — running two at once "
-                f"can leave this install half-installed.")
-        except OSError as e:
-            raise UpdateBusy(f"Could not take the update lock ({path}): {e}") from e
-    try:
-        os.write(fd, json.dumps({"pid": os.getpid(),
-                                 "at": time.strftime("%Y-%m-%dT%H:%M:%S")}).encode("utf-8"))
-    finally:
-        os.close(fd)
-    try:
-        yield path
-    finally:
-        try:
-            path.unlink()
-        except OSError:
-            pass
+    if _EXCLUSIVE.locked():
+        raise UpdateBusy(BUSY_DETAIL)
+    async with _EXCLUSIVE:
+        yield
 
 
 def revert_command(clone_dir: Path = ROOT, from_ref: Optional[str] = None) -> str:
@@ -579,6 +563,65 @@ def _tree_is_clean(clone_dir: Path) -> tuple[bool, str]:
     return False, f"{len(names)} file(s) do not match the checked-out release ({shown})"
 
 
+def _at_risk_paths(clone_dir: Path, from_ref: str) -> list[str]:
+    """Every path on disk whose content `git checkout --force <from_ref>` is about to destroy.
+
+    Two sources, and both are real:
+      1. TRACKED FILES THAT DIFFER from what is checked out. The rollback runs precisely because
+         verification found some, and it cannot tell a file git failed to write from one the
+         maintainer edited while pip was running. --force discards both.
+      2. PATHS `from_ref` TRACKS THAT HEAD DOES NOT. When a release turns a shipped file into a
+         runtime data dir, the user's data now sits at a path the OLD ref owns. A plain checkout
+         REFUSES to overwrite an untracked file there (and clobbers an ignored one silently);
+         --force overwrites both without a word.
+    """
+    candidates: list[str] = []
+    rc, porcelain, _ = _run(["git", "status", "--porcelain", "--untracked-files=no"], clone_dir)
+    if rc == 0:
+        candidates += [ln.strip().split(None, 1)[-1] for ln in porcelain.splitlines() if ln.strip()]
+    rc_then, then, _ = _run(["git", "ls-tree", "-r", "--name-only", from_ref], clone_dir, timeout=60.0)
+    rc_now, now, _ = _run(["git", "ls-files"], clone_dir, timeout=60.0)
+    if rc_then == 0 and rc_now == 0:
+        tracked_now = set(now.splitlines())
+        candidates += [p for p in then.splitlines() if p and p not in tracked_now]
+    out: list[str] = []
+    for rel in candidates:
+        # A deleted file has nothing to preserve, and the checkout is about to restore it anyway.
+        if rel not in out and (clone_dir / rel).is_file():
+            out.append(rel)
+    return out
+
+
+def _rescue(clone_dir: Path, from_ref: str, log: Callable[[str], None]) -> Optional[Path]:
+    """Copy aside everything the forced rollback is about to overwrite, and say where it went.
+
+    Recoverability is the requirement. `_verify` cannot distinguish "git could not write this" from
+    "the maintainer edited it during the pip step", so the rollback must assume the second and
+    destroy neither. A plain copy rather than `git stash`: a stash can only hold paths tracked at
+    HEAD, which leaves out source 2 of _at_risk_paths entirely, and it puts recovery behind git
+    plumbing the maintainer would have to know to look for. A directory of files is inert and
+    obvious. Returns the directory, or None if there was nothing at risk.
+    """
+    rels = _at_risk_paths(clone_dir, from_ref)
+    if not rels:
+        return None
+    dest = clone_dir / RESCUE_DIR / time.strftime("%Y%m%d-%H%M%S")
+    saved: list[str] = []
+    for rel in rels:
+        try:
+            (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(clone_dir / rel, dest / rel)
+            saved.append(rel)
+        except OSError as e:
+            log(f"COULD NOT PRESERVE {rel}: {e}")
+    if not saved:
+        return None
+    shown = ", ".join(saved[:8]) + (f", and {len(saved) - 8} more" if len(saved) > 8 else "")
+    log(f"the tree does not match the release; before putting it back, your copy of "
+        f"{len(saved)} file(s) ({shown}) was saved to {dest} — nothing has been discarded")
+    return dest
+
+
 def _verify(clone_dir: Path, target: str) -> tuple[bool, str]:
     """Did the checkout actually land — all of it?
 
@@ -588,6 +631,11 @@ def _verify(clone_dir: Path, target: str) -> tuple[bool, str]:
     returns 0. The result is a tree that is a mix of the old and the new release, with both of the
     cheap checks passing. The clean-tree assertion is the one that catches it: every file git could
     not write shows up as a modification against the new index.
+
+    It CANNOT say why the tree is dirty, and must not pretend to. A file the maintainer edited during
+    the multi-minute pip step looks identical to one git failed to write (a checkout carries such an
+    edit across when the path is unchanged between the two refs, and exits 0). Both are reported the
+    same way, and the rollback preserves either.
     """
     _, head, _ = _run(["git", "rev-parse", "HEAD"], clone_dir)
     _, want, _ = _run(["git", "rev-parse", f"{target}^{{commit}}"], clone_dir)
@@ -599,8 +647,8 @@ def _verify(clone_dir: Path, target: str) -> tuple[bool, str]:
         return False, f"pyproject.toml reports {version or '?'}, expected {expected}"
     clean, why = _tree_is_clean(clone_dir)
     if not clean:
-        return False, (f"the checkout of {target} was incomplete — {why}. git reported success but "
-                       f"could not write them.")
+        return False, (f"the checkout of {target} is incomplete — {why}. Either git could not write "
+                       f"them, or they were edited while the update was running.")
     return True, f"HEAD at {target}, pyproject reports {version}, tree matches the release"
 
 
@@ -613,27 +661,46 @@ def _busy(say: Emit, detail: str) -> dict:
     return result
 
 
-def apply_update(target: str, clone_dir: Path = ROOT, emit: Optional[Emit] = None) -> dict:
-    """Move this clone to `target` and reinstall. Emits {type: step|log|done} events.
+async def apply_update_async(target: str, clone_dir: Path = ROOT,
+                             emit: Optional[Emit] = None) -> dict:
+    """THE entry point for both callers (the /update/apply route and /update in Telegram).
 
-    Nothing here cleans, resets or deletes anything: the only mutating git command is
-    `git checkout <tag>`, which leaves ignored and untracked files (all of the user's state) alone.
-
-    If pip or verification fails the previous ref is checked out again and pip is re-run
-    IMMEDIATELY, both streamed, and the result is state="reverted" / ok=False with NO restart
-    offered. Only if that rollback itself fails do we fall back to printing commands.
-
-    Serialised with revert() and with itself by `update_lock` — see there for why.
-    """
+    Holds the exclusion in the event loop and only then hands the blocking git+pip work to a worker
+    thread. `emit` is therefore called FROM that thread — every caller already crosses back to the
+    loop itself (call_soon_threadsafe in the SSE bridge, a plain list append in the bot)."""
     say: Emit = emit or (lambda _ev: None)
     try:
-        with update_lock(clone_dir):
-            return _apply_update_locked(target, clone_dir, say)
+        async with exclusive():
+            return await asyncio.to_thread(apply_update, target, clone_dir, emit)
     except UpdateBusy as e:
         return _busy(say, str(e))
 
 
-def _apply_update_locked(target: str, clone_dir: Path, say: Emit) -> dict:
+async def revert_async(clone_dir: Path = ROOT, emit: Optional[Emit] = None) -> dict:
+    """revert() under the same exclusion as apply_update_async — a revert racing an apply is two pip
+    installs into one venv and two writers of the state file."""
+    say: Emit = emit or (lambda _ev: None)
+    try:
+        async with exclusive():
+            return await asyncio.to_thread(revert, clone_dir, emit)
+    except UpdateBusy as e:
+        return _busy(say, str(e))
+
+
+def apply_update(target: str, clone_dir: Path = ROOT, emit: Optional[Emit] = None) -> dict:
+    """Move this clone to `target` and reinstall. Emits {type: step|log|done} events. BLOCKING —
+    call it through apply_update_async, which is what holds the exclusion.
+
+    Nothing here cleans, resets or deletes anything: the only mutating git command is
+    `git checkout <tag>`, which writes only the paths the target tracks — none of which is user
+    state (see the module docstring).
+
+    If pip or verification fails the previous ref is checked out again and pip is re-run
+    IMMEDIATELY, both streamed, and the result is state="reverted" / ok=False with NO restart
+    offered. Only if that rollback itself fails do we fall back to printing commands.
+    """
+    say: Emit = emit or (lambda _ev: None)
+
     def step(name: str, text: str) -> None:
         say({"type": "step", "step": name, "text": text})
 
@@ -663,11 +730,17 @@ def _apply_update_locked(target: str, clone_dir: Path, say: Emit) -> dict:
     def rollback(failed_step: str, detail: str) -> dict:
         step("rollback", f"{failed_step} failed — putting this install back on {from_ref}")
         log(detail)
+        # PRESERVE FIRST, always. The rollback below runs --force, which DISCARDS tracked
+        # modifications and silently overwrites an untracked file at a path from_ref tracks. The
+        # tree being dirty is the normal reason we are here, and it does NOT mean git wrote it: a
+        # maintainer editing a file during the multi-minute pip step lands in exactly this branch,
+        # and that edit is theirs. _rescue copies every at-risk byte aside and logs where.
+        rescued = _rescue(clone_dir, from_ref, log)
+        kept = f" Your copies of the files it overwrote are in {rescued}." if rescued else ""
         # --force, and only here. A plain checkout REFUSES to move when a tracked file differs from
         # the index — which is exactly the state a partially-written checkout leaves behind, so the
-        # rollback would fail precisely in the case that needs it most. Nothing of the user's is at
-        # risk: preflight required a clean tree, the forward checkout only moved because the tree
-        # was still clean, and --force does not touch untracked or ignored files (all user state).
+        # rollback would fail precisely in the case that needs it most. What makes that acceptable
+        # is the rescue above, not any protection --force offers: it offers none.
         rc_co = _stream(["git", "-c", "advice.detachedHead=false", "checkout", "-q", "--force",
                          from_ref], clone_dir, 120.0, log)
         rc_pip = _stream(_pip_argv(), clone_dir, PIP_TIMEOUT, log) if rc_co == 0 else 1
@@ -677,10 +750,10 @@ def _apply_update_locked(target: str, clone_dir: Path, say: Emit) -> dict:
         if rc_co == 0 and rc_pip == 0 and clean:
             log(f"rolled back to {from_ref} — still running {from_tag}")
             return finish(False, "reverted", failed_step,
-                          f"{detail} — rolled back to {from_tag}", None)
+                          f"{detail} — rolled back to {from_tag}.{kept}", None)
         log("ROLLBACK FAILED — this install needs manual attention")
         return finish(False, "needs_manual", failed_step,
-                      f"{detail} — and the automatic rollback also failed", None,
+                      f"{detail} — and the automatic rollback also failed.{kept}", None,
                       commands=[revert_command(clone_dir, from_ref)])
 
     # 2. checkout
@@ -711,19 +784,14 @@ def _apply_update_locked(target: str, clone_dir: Path, say: Emit) -> dict:
 
 
 def revert(clone_dir: Path = ROOT, emit: Optional[Emit] = None) -> dict:
-    """Undo the recorded update: check the previous ref out again and reinstall.
+    """Undo the recorded update: check the previous ref out again and reinstall. BLOCKING — call it
+    through revert_async, which is what holds the exclusion.
 
-    Takes the same lock as apply_update — a revert racing an apply is two pip installs into one
-    venv and two writers of the state file."""
+    Uses a PLAIN checkout: unlike the rollback inside a failed apply there is no half-written tree
+    to force past, so git's own refusal to overwrite a local modification is the right behaviour and
+    is left in place."""
     say: Emit = emit or (lambda _ev: None)
-    try:
-        with update_lock(clone_dir):
-            return _revert_locked(clone_dir, say)
-    except UpdateBusy as e:
-        return _busy(say, str(e))
 
-
-def _revert_locked(clone_dir: Path, say: Emit) -> dict:
     def log(line: str) -> None:
         say({"type": "log", "line": line})
 

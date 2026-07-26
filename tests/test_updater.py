@@ -7,7 +7,7 @@ own install.
 """
 from __future__ import annotations
 
-import json
+import asyncio
 import os
 import re
 import shlex
@@ -542,6 +542,137 @@ def test_apply_detects_a_partial_checkout_and_rolls_back(tmp_path, monkeypatch):
 
 
 @needs_git
+def test_rollback_preserves_a_file_the_maintainer_edited_during_the_update(tmp_path, monkeypatch):
+    """THE data-loss sequence, exactly:
+
+      1. preflight passes on a clean tree.
+      2. during the multi-minute fetch/checkout/pip window the maintainer edits a tracked file that
+         is IDENTICAL in both refs — so `git checkout <target>` CARRIES THE EDIT OVER and exits 0.
+      3. verification then sees a dirty tree and cannot tell that edit from a file git failed to
+         write, so it rolls back.
+      4. the rollback checks out --force, which discards it.
+
+    The edit must survive. `_verify` cannot diagnose the dirt, so the rollback must not destroy
+    either explanation of it: it copies the file aside first and says where.
+    """
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    _git(origin, "init", "-b", "main")
+    shutil.copy(REPO_ROOT / ".gitignore", origin / ".gitignore")
+    for v in ("0.1.0", "0.2.0"):
+        (origin / "pyproject.toml").write_text(f'[project]\nname = "argus"\nversion = "{v}"\n')
+        (origin / "SETTINGS.md").write_text("shipped default\n")     # unchanged between releases
+        _git(origin, "add", "-A")
+        _git(origin, "commit", "-m", f"release {v}")
+        _git(origin, "tag", f"v{v}")
+    clone = _make_clone(tmp_path, origin, at="v0.1.0")
+    _pin(monkeypatch, clone)
+
+    mine = "the note I was in the middle of writing\n"
+    real_stream = updater._stream
+    pip = {"n": 0}
+
+    def fake(argv, cwd=updater.ROOT, timeout=updater.PIP_TIMEOUT, emit=None):
+        if "pip" in argv:
+            pip["n"] += 1
+            if pip["n"] == 1:
+                (clone / "SETTINGS.md").write_text(mine)     # the maintainer, mid-update
+            return 0
+        return real_stream(argv, cwd, timeout, emit)
+    monkeypatch.setattr(updater, "_stream", fake)
+
+    events: list = []
+    res = updater.apply_update("v0.2.0", clone, emit=events.append)
+
+    # Refusing is right — the updater genuinely cannot tell this from a half-written checkout.
+    assert res["state"] == "reverted" and res["failed_step"] == "verify"
+    assert _git(clone, "rev-parse", "HEAD") == _git(clone, "rev-parse", "v0.1.0^{commit}")
+    assert (clone / "SETTINGS.md").read_text() == "shipped default\n", "the rollback did run"
+
+    # ...but the maintainer's bytes are still on disk, and the report says where.
+    saved = sorted((clone / updater.RESCUE_DIR).rglob("SETTINGS.md"))
+    assert saved, "the rollback DESTROYED a file the maintainer had edited — no stash, no backup"
+    assert saved[0].read_text() == mine
+    where = str(saved[0].parent)
+    assert where in res["detail"], "the failure report must say where the preserved copy is"
+    assert any(where in str(e.get("line", "")) for e in events if e["type"] == "log")
+
+    # And it must not misdiagnose whose fault it was: git wrote the file perfectly well.
+    assert "git reported success but could not write" not in res["detail"]
+    assert "or they were edited while the update was running" in res["detail"], (
+        "the report must offer both explanations, because verification cannot tell them apart")
+
+
+@needs_git
+def test_rollback_preserves_user_data_at_a_path_the_old_release_shipped(tmp_path, monkeypatch):
+    """The once-tracked-now-runtime-data shape, which `--force` makes WORSE rather than better.
+
+    A release that turns a shipped path into a runtime data dir (.gitignore already carries three:
+    /routines/, agent-created tools and skills, model_presets.json) leaves the user's own data at a
+    path the OLD ref still tracks. Rolling back writes the shipped file over it: a plain checkout
+    refuses that for an untracked file and clobbers an IGNORED one silently, and --force clobbers
+    both without a word. The bytes must be recoverable either way.
+    """
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    _git(origin, "init", "-b", "main")
+    ignore = ".argus-update.json\n.argus-rescue/\n"
+    (origin / ".gitignore").write_text(ignore)
+    (origin / "pyproject.toml").write_text('[project]\nname = "argus"\nversion = "0.1.0"\n')
+    (origin / "routines").mkdir()
+    (origin / "routines" / "daily.json").write_text("shipped example\n")
+    _git(origin, "add", "-A")
+    _git(origin, "commit", "-m", "release 0.1.0")
+    _git(origin, "tag", "v0.1.0")
+    # 0.2.0 stops shipping routines/ and declares it a runtime data dir.
+    (origin / ".gitignore").write_text(ignore + "/routines/\n")
+    (origin / "pyproject.toml").write_text('[project]\nname = "argus"\nversion = "0.2.0"\n')
+    _git(origin, "rm", "-q", "routines/daily.json")
+    _git(origin, "add", "-A")
+    _git(origin, "commit", "-m", "release 0.2.0")
+    _git(origin, "tag", "v0.2.0")
+    clone = _make_clone(tmp_path, origin, at="v0.1.0")
+    _pin(monkeypatch, clone)
+
+    mine = '{"my": "routine"}\n'
+    real_stream = updater._stream
+    pip = {"n": 0}
+
+    def fake(argv, cwd=updater.ROOT, timeout=updater.PIP_TIMEOUT, emit=None):
+        if "pip" in argv:
+            pip["n"] += 1
+            if pip["n"] == 1:
+                # The new release owns routines/ as user data now — this is the user's file.
+                (clone / "routines").mkdir(exist_ok=True)
+                (clone / "routines" / "daily.json").write_text(mine)
+                return 1                                     # ...and then the install fails
+            return 0
+        return real_stream(argv, cwd, timeout, emit)
+    monkeypatch.setattr(updater, "_stream", fake)
+
+    res = updater.apply_update("v0.2.0", clone)
+    assert res["state"] == "reverted" and res["failed_step"] == "pip"
+    # The rollback restores the old release's file — that part is correct, it is what v0.1.0 says.
+    assert (clone / "routines" / "daily.json").read_text() == "shipped example\n"
+    # The user's data was copied aside first rather than destroyed.
+    saved = sorted((clone / updater.RESCUE_DIR).rglob("daily.json"))
+    assert saved, "--force overwrote the user's data at a path the old release shipped"
+    assert saved[0].read_text() == mine
+    assert str(saved[0].parents[1]) in res["detail"]
+
+
+@needs_git
+def test_a_rollback_with_nothing_at_risk_leaves_no_rescue_directory(repo, monkeypatch):
+    """The preserve step must be silent when there is nothing to preserve — a rescue directory
+    appearing after every failed update would train the maintainer to ignore it."""
+    _stub_pip(monkeypatch, rc=1, fail_first_only=True)
+    res = updater.apply_update("v0.2.0", repo)
+    assert res["state"] == "reverted"
+    assert not (repo / updater.RESCUE_DIR).exists()
+    assert "copies of the files it overwrote" not in res["detail"]
+
+
+@needs_git
 def test_apply_from_a_branch_records_the_branch_name_not_the_sha(tmp_path, monkeypatch):
     origin = _make_origin(tmp_path)
     clone = _make_clone(tmp_path, origin, at="")          # stays on main
@@ -603,6 +734,49 @@ def test_stream_reaps_the_child_and_closes_the_pipe_on_timeout(tmp_path, monkeyp
     assert made[0].stdout.closed, "the stdout pipe was never closed"
 
 
+def test_stream_bounds_wall_clock_when_a_descendant_still_holds_the_pipe(tmp_path):
+    """THE case the deadline is for, and the one the tests above cannot see.
+
+    Both parametrized bodies above are CHILDLESS, which is the only shape a direct-child kill
+    handles. `pip install -e .` never has that shape: PEP 517 runs the build backend
+    (setuptools.build_meta) in a subprocess, which runs compilers and git. Every descendant inherited
+    the stdout pipe, so killing the direct child alone leaves the write end open and
+    `for line in p.stdout` blocks on with the child already dead — the deadline returns nothing, and
+    a stalled pip still parks a worker thread forever with HEAD on the new tag and the rollback
+    unreachable. Only killing the process GROUP ends it.
+    """
+    body = ("import subprocess, sys, time\n"
+            "kid = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(20)'])\n"
+            "print(kid.pid, flush=True)\n"          # it inherited our stdout — that is the point
+            "time.sleep(20)\n")
+    lines: list = []
+    box: dict = {}
+    th = threading.Thread(
+        target=lambda: box.update(rc=updater._stream([sys.executable, "-c", body], tmp_path, 1.0,
+                                                     lines.append)),
+        daemon=True)
+    started = time.monotonic()
+    th.start()
+    th.join(8.0)
+    elapsed = time.monotonic() - started
+
+    assert not th.is_alive(), ("the 1s deadline never fired: the direct child was killed but a "
+                               "descendant is still holding the stdout pipe open")
+    assert box["rc"] == 124
+    assert elapsed < 6.0, f"the 1s deadline took {elapsed:.1f}s to fire"
+
+    descendant = next(int(ln) for ln in lines if ln.strip().isdigit())
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        try:
+            os.kill(descendant, 0)
+        except OSError:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail(f"the descendant ({descendant}) outlived the timeout — the group was not killed")
+
+
 def test_stream_still_returns_the_real_exit_code_of_a_quick_command(tmp_path):
     lines: list = []
     rc = updater._stream([sys.executable, "-c", "print('hello'); raise SystemExit(3)"],
@@ -612,65 +786,65 @@ def test_stream_still_returns_the_real_exit_code_of_a_quick_command(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# mutual exclusion — two updates into one venv is a corrupt site-packages
+# mutual exclusion — two updates into one venv is a corrupt site-packages.
+#
+# The exclusion is an asyncio.Lock held in the ASYNC layer (updater.exclusive), so these tests drive
+# the *_async entry points. There is no lock FILE to test: Argus is one process (uvicorn and the
+# Telegram bot share one event loop), so a lock on the filesystem was solving a problem that does not
+# exist here while introducing three of its own — a non-atomic create-then-write, a non-atomic stale
+# takeover, and a release that unlinked whatever lock happened to be present.
 # --------------------------------------------------------------------------
 @needs_git
-def test_apply_refuses_while_another_update_holds_the_lock(repo, monkeypatch):
+async def test_two_concurrent_applies_produce_exactly_one_apply_and_one_busy(repo, monkeypatch):
     """Dashboard and Telegram are separate entry points into the same install. Two concurrent
     `pip install -e .` runs can leave site-packages half-written, and two apply_update()s
     interleaving their write_state() calls can clobber `from_ref` — the only recorded way back."""
+    calls: list = []
+    _stub_pip(monkeypatch, calls=calls)
+    monkeypatch.setattr(updater, "restart_strategy",
+                        lambda clone_dir=updater.ROOT: {"strategy": "exec", "unit": None,
+                                                        "instruction": "x"})
+    first, second = await asyncio.gather(updater.apply_update_async("v0.2.0", repo),
+                                         updater.apply_update_async("v0.2.0", repo))
+    assert sorted([first["state"], second["state"]]) == ["applied", "busy"]
+    busy = first if first["state"] == "busy" else second
+    assert busy["ok"] is False and busy["failed_step"] == "lock"
+    assert "Another update is already running" in busy["detail"]
+    assert len(calls) == 1, "exactly one pip install ran"
+    assert updater.read_state(repo)["state"] == "applied"
+    assert updater.update_in_progress() is False, "the lock must be released on the way out"
+
+
+@needs_git
+async def test_an_update_refused_as_busy_touches_nothing(repo, monkeypatch):
     _stub_pip(monkeypatch)
     before = _git(repo, "rev-parse", "HEAD")
     events: list = []
-    with updater.update_lock(repo):
-        res = updater.apply_update("v0.2.0", repo, emit=events.append)
-        res_revert = updater.revert(repo)
+    async with updater.exclusive():                  # stand in for an update already in flight
+        assert updater.update_in_progress() is True
+        res = await updater.apply_update_async("v0.2.0", repo, emit=events.append)
+        res_revert = await updater.revert_async(repo)
     assert res["ok"] is False and res["state"] == "busy" and res["failed_step"] == "lock"
-    assert "Another update is already running" in res["detail"]
     assert res_revert["state"] == "busy", "revert must take the same lock as apply"
     assert _git(repo, "rev-parse", "HEAD") == before, "the refused update must not touch the tree"
     assert updater.read_state(repo) == {}, "nor overwrite the running update's recorded ref"
     assert [e["type"] for e in events] == ["done"], "the refusal is a terminal done event"
     # Released on the way out, so the next attempt is not blocked forever.
-    assert not updater.lock_path(repo).exists()
-    assert updater.apply_update("v0.2.0", repo)["ok"] is True
+    assert updater.update_in_progress() is False
+    assert (await updater.apply_update_async("v0.2.0", repo))["ok"] is True
 
 
-def test_a_stale_lock_from_a_dead_process_is_taken_over(tmp_path):
-    """A crash mid-update must not disable the update button until someone SSHes in."""
-    dead = subprocess.Popen([sys.executable, "-c", "pass"])
-    dead.wait()
-    updater.lock_path(tmp_path).write_text(
-        json.dumps({"pid": dead.pid, "at": "2020-01-01T00:00:00"}), encoding="utf-8")
-    with updater.update_lock(tmp_path):
-        assert json.loads(updater.lock_path(tmp_path).read_text())["pid"] == os.getpid()
-    assert not updater.lock_path(tmp_path).exists()
-
-
-def test_a_lock_held_far_longer_than_any_update_is_stale(tmp_path, monkeypatch):
-    """The pid backstop: on Windows there is no safe liveness probe (os.kill(pid, 0) TERMINATES
-    there), and a recycled pid would look alive anywhere. Age settles both."""
-    path = updater.lock_path(tmp_path)
-    path.write_text(json.dumps({"pid": os.getpid(), "at": "2020-01-01T00:00:00"}), encoding="utf-8")
-    old = time.time() - (updater.STALE_LOCK_AFTER + 60)
-    os.utime(path, (old, old))
-    monkeypatch.setattr(updater, "_pid_alive", lambda pid: True)     # "the holder is still running"
-    with updater.update_lock(tmp_path):
-        assert json.loads(path.read_text())["at"] != "2020-01-01T00:00:00"
-    # ...but a FRESH lock held by a live process is not stale.
-    path.write_text(json.dumps({"pid": os.getpid(), "at": "now"}), encoding="utf-8")
-    with pytest.raises(updater.UpdateBusy):
-        with updater.update_lock(tmp_path):
-            pass
-    path.unlink()
-
-
-def test_pid_alive_never_signals_on_windows(monkeypatch):
-    """os.kill(pid, 0) on Windows is TerminateProcess, not a probe — calling it to test liveness
-    would kill the very process we were asking about."""
-    monkeypatch.setattr(sys, "platform", "win32")
-    monkeypatch.setattr(updater.os, "kill", lambda *a: pytest.fail("os.kill must not run on win32"))
-    assert updater._pid_alive(4242) is True
+async def test_the_exclusion_never_queues(tmp_path):
+    """A second update that WAITED would then run against a tree the first one already moved,
+    deciding what to do from a preflight taken before that. Busy is the answer, not a delay."""
+    async with updater.exclusive():
+        started = time.monotonic()
+        with pytest.raises(updater.UpdateBusy):
+            async with updater.exclusive():
+                pytest.fail("a second holder got in")
+        assert time.monotonic() - started < 0.5, "it waited instead of refusing"
+    async with updater.exclusive():                  # and it is usable again straight after
+        pass
 
 
 # --------------------------------------------------------------------------
@@ -804,7 +978,12 @@ def test_state_roundtrip_and_clear(tmp_path):
 def test_state_file_is_gitignored():
     text = (REPO_ROOT / ".gitignore").read_text()
     assert ".argus-update.json" in text
+    # Never written any more (the exclusion is an asyncio.Lock), but a file left behind by an older
+    # version must still not show up as a change.
     assert ".argus-update.lock" in text
+    # What a failed update copies aside before rolling the tree back. Ignored, or the very next
+    # preflight would refuse the retry because of it.
+    assert f"{updater.RESCUE_DIR}/" in text
 
 
 def test_revert_command_is_literal_and_runnable(tmp_path):

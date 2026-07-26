@@ -563,11 +563,14 @@ def create_app(engine: Engine) -> FastAPI:
     # so the server never trusts the client's idea of what is safe — /update/apply re-runs the FULL
     # preflight itself before it touches anything. ----
     def _update_sse(work) -> StreamingResponse:
-        """Run `work(emit)` on a worker thread and stream its events as SSE.
+        """Run the AWAITABLE `work(emit)` and stream its events as SSE.
 
-        The work is git + a pip build that can run for minutes, so it must not happen on the event
-        loop. Events cross back with loop.call_soon_threadsafe, which is the only thread-safe way
-        to hand something to an asyncio.Queue from a foreign thread."""
+        `work` is one of updater's *_async entry points: it takes the update lock on this loop and
+        only then hands the git + pip build (minutes long) to a worker thread, so nothing blocking
+        happens here. Events therefore arrive from that thread, and cross back with
+        loop.call_soon_threadsafe — the only thread-safe way to feed an asyncio.Queue from a foreign
+        thread. The sentinel goes through the same call, so a refusal emitted on THIS thread (no
+        update ran) is still queued ahead of it."""
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()
         sentinel = object()
@@ -575,9 +578,9 @@ def create_app(engine: Engine) -> FastAPI:
         def emit(ev: dict) -> None:
             loop.call_soon_threadsafe(queue.put_nowait, ev)
 
-        def runner():
+        async def runner():
             try:
-                work(emit)
+                await work(emit)
             except Exception as e:                       # noqa: BLE001 - never strand the stream
                 emit({"type": "done", "ok": False, "state": "failed", "failed_step": "internal",
                       "detail": f"the update crashed: {e}", "restart": None, "commands": []})
@@ -585,7 +588,7 @@ def create_app(engine: Engine) -> FastAPI:
                 loop.call_soon_threadsafe(queue.put_nowait, sentinel)
 
         async def gen():
-            fut = loop.run_in_executor(None, runner)
+            fut = asyncio.ensure_future(runner())
             try:
                 while True:
                     item = await queue.get()
@@ -638,7 +641,7 @@ def create_app(engine: Engine) -> FastAPI:
             why = " ".join(b["message"] for b in pf.get("blockers", []) if b.get("message"))
             raise HTTPException(409, "There is no update to apply — "
                                      + (why or f"{target} is not newer than what is running."))
-        return _update_sse(lambda emit: updater.apply_update(target, emit=emit))
+        return _update_sse(lambda emit: updater.apply_update_async(target, emit=emit))
 
     @app.post("/update/restart")
     async def update_restart(request: Request):
@@ -648,14 +651,23 @@ def create_app(engine: Engine) -> FastAPI:
         _require_admin(request)
         from engine import updater
         state = updater.read_state()
-        if state.get("state") == "applying":
+        if updater.update_in_progress():
             # An update is mid-flight (possibly started from Telegram). Restarting now kills pip
             # halfway through writing site-packages, with HEAD already on the new tag and the
             # rollback never reached — the exact way to brick this install.
+            #
+            # Asked of the LOCK, not of state["state"]. The state file says "applying" until finish()
+            # clears it, so a process that died mid-apply — the very thing a stalled pip provokes
+            # someone to arrange — leaves "applying" behind forever and would 409 this button for
+            # good, with no way to clear it from the UI. The lock is held only by a live apply.
             raise HTTPException(409, "An update is being installed right now — restarting would "
                                      "kill it halfway through. Wait for it to finish.")
         info = await run_in_threadpool(updater.restart_strategy)
-        updater.write_state(state="restarting", strategy=info["strategy"],
+        # before_restart carries the outcome we are restarting INTO across the restart: the boot-side
+        # settle (deliver_pending_update_notice) has to put it back, and hardcoding "applied" there
+        # turns a revert into an "applied" record that offers to revert to the release already running.
+        updater.write_state(state="restarting", before_restart=state.get("state"),
+                            strategy=info["strategy"],
                             pending_notice=state.get("pending_notice"))
         if info["strategy"] == "manual":
             # Windows: no restart is attempted. The instruction is the whole answer.
@@ -676,7 +688,7 @@ def create_app(engine: Engine) -> FastAPI:
         ok, reason = await run_in_threadpool(updater.can_revert)
         if not ok:
             raise HTTPException(409, reason)
-        return _update_sse(lambda emit: updater.revert(emit=emit))
+        return _update_sse(lambda emit: updater.revert_async(emit=emit))
 
     # ---- approval-gated dependency installs ----
     @app.get("/deps")

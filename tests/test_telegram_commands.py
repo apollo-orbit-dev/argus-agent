@@ -325,6 +325,20 @@ async def test_update_confirm_applies_then_restarts_after_replying(monkeypatch):
     assert len(restarts) == 1
 
 
+async def test_update_confirm_records_the_state_it_will_come_back_in(monkeypatch):
+    """The Telegram half of the same handoff: whatever this update turned the install INTO has to be
+    written down before "restarting" replaces it, or the boot-side settle has to guess."""
+    from types import SimpleNamespace as NS
+    written: list = []
+    upd = _stub_updater(monkeypatch, _upd_preview())
+    monkeypatch.setattr(upd, "write_state", lambda clone_dir=upd.ROOT, **f: written.append(f))
+    msg = _Msg()
+    await _handlers()["update"](NS(effective_chat=NS(id=1), effective_message=msg),
+                                NS(args=["confirm"]))
+    restarting = [w for w in written if w.get("state") == "restarting"]
+    assert restarting and restarting[-1]["before_restart"] == "applied"
+
+
 async def test_update_confirm_refuses_when_preflight_blocks(monkeypatch):
     from types import SimpleNamespace as NS
     applied = []
@@ -430,6 +444,62 @@ async def test_a_restart_with_nobody_to_notify_still_settles_the_state(monkeypat
     assert sent == [], "there is nobody to tell"
     assert written and written[-1]["state"] == "applied", "the transient state must be settled"
     assert written[-1]["pending_notice"] is None
+
+
+def _settle_state(monkeypatch, state: dict) -> dict:
+    """Point read_state/write_state at one dict, so the settle can be watched end to end."""
+    from engine import updater
+    monkeypatch.setattr(updater, "read_state", lambda clone_dir=updater.ROOT: dict(state))
+    monkeypatch.setattr(updater, "write_state",
+                        lambda clone_dir=updater.ROOT, **f: state.update(f) or dict(state))
+    monkeypatch.setattr(updater, "_resolves", lambda ref, clone_dir=updater.ROOT: True)
+    return state
+
+
+async def test_the_settle_carries_a_revert_forward_instead_of_calling_it_applied(monkeypatch):
+    """A REVERT restarts too, and the settle used to hardcode "applied".
+
+    The whole flow: revert() writes state="reverted"; the dashboard posts /update/restart on the
+    success path, which writes "restarting"; on boot this settle found "restarting" with no chat_id
+    and wrote "applied". can_revert() then no longer saw "reverted" and said yes — so the dashboard
+    offered "Revert to v0.1.0" on an install already running v0.1.0. The transient state must carry
+    the real one forward, not invent one."""
+    from types import SimpleNamespace as NS
+
+    from backend.telegram_bot import deliver_pending_update_notice
+    from engine import updater
+    state = _settle_state(monkeypatch, {"state": "restarting", "before_restart": "reverted",
+                                        "pending_notice": None, "from_ref": "v0.1.0",
+                                        "from_tag": "v0.1.0"})
+
+    async def send_message(chat_id, text, **kw):
+        raise AssertionError("there is nobody to tell")
+    await deliver_pending_update_notice(NS(bot=NS(send_message=send_message)))
+
+    assert state["state"] == "reverted", "the settle invented an outcome instead of restoring one"
+    assert state["before_restart"] is None, "the marker must not survive into the next update"
+    ok, why = updater.can_revert()
+    assert ok is False and "already been put back" in why, (
+        "the dashboard is being offered a revert to the release it is already running")
+
+
+async def test_the_settle_carries_the_state_forward_on_the_notified_path_too(monkeypatch):
+    """The same settle runs after the ✅ is sent — /update revert confirm from Telegram reaches it
+    with a chat to answer."""
+    from types import SimpleNamespace as NS
+
+    from backend.telegram_bot import deliver_pending_update_notice
+    from engine.version import get_version
+    sent = []
+    state = _settle_state(monkeypatch, {
+        "state": "restarting", "before_restart": "reverted", "from_ref": "v0.1.0",
+        "pending_notice": {"chat_id": 5, "to": f"v{get_version()}"}})
+
+    async def send_message(chat_id, text, **kw):
+        sent.append(text)
+    await deliver_pending_update_notice(NS(bot=NS(send_message=send_message)))
+    assert len(sent) == 1 and "Update complete" in sent[0]
+    assert state["state"] == "reverted" and state["pending_notice"] is None
 
 
 async def test_reply_html_fallback_strips_pre_too(monkeypatch):

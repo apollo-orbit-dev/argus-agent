@@ -707,13 +707,17 @@ async def deliver_pending_update_notice(app: Application) -> None:
         state = updater.read_state()
         if state.get("state") != "restarting":
             return
+        # What the install actually IS on the other side of the restart, recorded by whoever asked
+        # for it. NOT a hardcoded "applied": a revert also restarts, and calling its result "applied"
+        # makes can_revert() offer "Revert to v0.1.0" on an install already running v0.1.0.
+        settled = state.get("before_restart") or "applied"
         notice = state.get("pending_notice") or {}
         chat_id = notice.get("chat_id")
         if not chat_id:
             # A dashboard-initiated restart has nobody to tell. Settle the state anyway: leaving it
             # at "restarting" forever means the NEXT boot that happens to find a pending_notice
             # would deliver a stale "update complete" for an update that finished long ago.
-            updater.write_state(state="applied", pending_notice=None)
+            updater.write_state(state=settled, before_restart=None, pending_notice=None)
             return
         running, expected = f"v{get_version()}", notice.get("to")
         if expected and running != expected:
@@ -722,7 +726,7 @@ async def deliver_pending_update_notice(app: Application) -> None:
         else:
             text = f"✅ Update complete — now running <b>{_esc(running)}</b>."
         await app.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
-        updater.write_state(state="applied", pending_notice=None)
+        updater.write_state(state=settled, before_restart=None, pending_notice=None)
     except Exception:
         log.debug("could not deliver the post-update notice", exc_info=True)
 
@@ -977,7 +981,7 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
             elif ev.get("type") == "step":
                 log_lines.append(f"== {ev.get('step')}: {ev.get('text')}")
 
-        res = await asyncio.to_thread(updater.apply_update, target, updater.ROOT, _collect)
+        res = await updater.apply_update_async(target, updater.ROOT, _collect)
         await _update_finish(msg, chat_id, res, updater, log_lines)
 
     async def _update_revert(msg, confirmed: bool, updater) -> None:
@@ -993,8 +997,8 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
             return
         await reply_html(msg, f"⏳ Reverting to {_esc(back_to)}…")
         log_lines: list[str] = []
-        res = await asyncio.to_thread(updater.revert, updater.ROOT,
-                                      lambda ev: log_lines.append(str(ev.get("line", ""))))
+        res = await updater.revert_async(updater.ROOT,
+                                         lambda ev: log_lines.append(str(ev.get("line", ""))))
         await _update_finish(msg, None, res, updater, log_lines)
 
     async def _update_finish(msg, chat_id, res: dict, updater, log_lines: list[str]) -> None:
@@ -1028,7 +1032,10 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
                                   f"<pre>{_esc(info.get('instruction') or '')}</pre>")
             return
         notice = {"chat_id": chat_id, "to": res.get("to_tag") or res.get("from_tag")}
-        updater.write_state(state="restarting", pending_notice=notice if chat_id else None)
+        # before_restart: what this install IS now ("applied" or "reverted"). The boot-side settle
+        # restores it — see deliver_pending_update_notice for why hardcoding "applied" there lied.
+        updater.write_state(state="restarting", before_restart=res.get("state"),
+                            pending_notice=notice if chat_id else None)
         await reply_html(msg, "🔄 Restarting… I'll say when I'm back.")
 
         async def _do():

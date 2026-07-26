@@ -236,20 +236,71 @@ async def test_restart_records_state_before_dying(tmp_path, upd, monkeypatch):
     assert upd._test_state["state"] == "restarting"
 
 
+async def test_restart_records_the_state_it_will_come_back_in(tmp_path, upd, monkeypatch):
+    """"restarting" is transient and something has to put the real state back on boot. That settle
+    can only be honest if the state being restarted INTO was recorded here: a revert restarts too,
+    and calling its result "applied" makes can_revert() offer "Revert to v0.1.0" on an install
+    already running v0.1.0 — the exact lie the "reverted" state exists to prevent."""
+    monkeypatch.setattr(upd, "perform_restart", lambda info: None)
+    upd._test_state.update(state="reverted", from_tag="v0.1.0", to_tag="v0.1.0")
+    async with _client(tmp_path) as c:
+        await c.post("/update/restart")
+    assert upd._test_state["state"] == "restarting"
+    assert upd._test_state["before_restart"] == "reverted"
+
+
 async def test_restart_refuses_while_an_update_is_being_applied(tmp_path, upd, monkeypatch):
     """Nothing serialises the restart button against an update started somewhere else (Telegram,
     a second tab). Restarting mid-`pip install` kills it with HEAD already on the new tag and the
-    rollback never reached — a bricked instance."""
+    rollback never reached — a bricked instance.
+
+    Round 2: the gate is the update LOCK actually being held, not the word in the state file — see
+    test_restart_is_not_bricked_by_an_applying_left_over_from_a_crash for why the string alone was
+    both too weak and too strong. So this test now holds the real lock."""
     calls: list = []
     monkeypatch.setattr(upd, "perform_restart", calls.append)
     upd._test_state.update(state="applying", from_ref="v0.1.0", to_tag="v0.2.0")
     async with _client(tmp_path) as c:
-        r = await c.post("/update/restart")
+        async with upd.exclusive():                 # an update is genuinely in flight
+            r = await c.post("/update/restart")
     assert r.status_code == 409
     assert "halfway" in r.json()["detail"]
     assert upd._test_state["state"] == "applying", "the refusal must not overwrite the update state"
     await asyncio.sleep(0.9)
     assert calls == [], "no restart may be attempted while an update is in flight"
+
+
+async def test_restart_is_not_bricked_by_an_applying_left_over_from_a_crash(tmp_path, upd,
+                                                                           monkeypatch):
+    """state="applying" is written before the work begins and cleared only by finish(). A process
+    that dies mid-apply — which a stalled pip is exactly the thing that provokes someone to arrange
+    — leaves it on disk forever. Gating the restart button on that STRING then refuses it forever,
+    with no affordance anywhere in the UI to clear it. The lock cannot get stuck that way: it lives
+    in this process and dies with it."""
+    calls: list = []
+    monkeypatch.setattr(upd, "perform_restart", calls.append)
+    upd._test_state.update(state="applying", from_ref="v0.1.0", to_tag="v0.2.0")
+    assert upd.update_in_progress() is False, "nothing is running — the previous process died"
+    async with _client(tmp_path) as c:
+        r = await c.post("/update/restart")
+    assert r.status_code == 200 and r.json()["restarting"] is True
+    await asyncio.sleep(0.9)
+    assert len(calls) == 1, "the one button that could clear this state must still work"
+
+
+async def test_a_second_apply_while_one_is_running_streams_a_busy_done(tmp_path, upd, monkeypatch):
+    """The user-visible half of the exclusion: the refusal arrives as a normal terminal `done`
+    event on the SSE stream, so the dashboard reports it through its existing failure path rather
+    than hanging or 500ing."""
+    monkeypatch.setattr(upd, "apply_update", lambda *a, **k: pytest.fail("a second apply ran"))
+    async with _client(tmp_path) as c:
+        async with upd.exclusive():
+            r = await c.post("/update/apply", json={"target": "v0.2.0", "confirm": "v0.2.0"})
+            evs = _events(r.text)
+    assert r.status_code == 200
+    assert [e["type"] for e in evs] == ["done"]
+    assert evs[-1]["state"] == "busy" and evs[-1]["ok"] is False
+    assert evs[-1]["failed_step"] == "lock" and evs[-1]["restart"] is None
 
 
 async def test_restart_manual_on_windows_attempts_nothing(tmp_path, upd, monkeypatch):
