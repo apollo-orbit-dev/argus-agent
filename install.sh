@@ -115,6 +115,9 @@ else
         git clone "$REPO_URL" "$DIR_NAME"
         ok "cloned into ./$DIR_NAME"
         # Pin to the latest released version (a stable tag), not the moving main branch.
+        # KEEP IN SYNC with engine/updater.NEWEST_TAG_ARGV — the in-app updater picks the newest
+        # release with this exact expression, and tests/test_updater.py greps this line and asserts
+        # they match. An installer and an updater that disagree about "newest" is a silent downgrade.
         LATEST_TAG="$(git -C "$DIR_NAME" tag -l 'v*' --sort=-v:refname | head -n 1)"
         if [ -n "$LATEST_TAG" ]; then
             git -C "$DIR_NAME" -c advice.detachedHead=false checkout -q "$LATEST_TAG"

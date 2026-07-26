@@ -557,6 +557,113 @@ def create_app(engine: Engine) -> FastAPI:
         from engine import service
         return await run_in_threadpool(service.uninstall)
 
+    # ---- self-update (follows release TAGS, never main) — see engine/updater.py. Every route is
+    # admin-gated and every blocking call runs off the event loop. This is the most consequential
+    # button in the product: it replaces the running process on the instance someone uses daily,
+    # so the server never trusts the client's idea of what is safe — /update/apply re-runs the FULL
+    # preflight itself before it touches anything. ----
+    def _update_sse(work) -> StreamingResponse:
+        """Run `work(emit)` on a worker thread and stream its events as SSE.
+
+        The work is git + a pip build that can run for minutes, so it must not happen on the event
+        loop. Events cross back with loop.call_soon_threadsafe, which is the only thread-safe way
+        to hand something to an asyncio.Queue from a foreign thread."""
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        sentinel = object()
+
+        def emit(ev: dict) -> None:
+            loop.call_soon_threadsafe(queue.put_nowait, ev)
+
+        def runner():
+            try:
+                work(emit)
+            except Exception as e:                       # noqa: BLE001 - never strand the stream
+                emit({"type": "done", "ok": False, "state": "failed", "failed_step": "internal",
+                      "detail": f"the update crashed: {e}", "restart": None, "commands": []})
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, sentinel)
+
+        async def gen():
+            fut = loop.run_in_executor(None, runner)
+            try:
+                while True:
+                    item = await queue.get()
+                    if item is sentinel:
+                        break
+                    yield f"data: {json.dumps(item)}\n\n"
+            finally:
+                await fut
+        # Same headers as /logs/stream: no buffering anywhere between here and the browser, or a
+        # multi-minute pip step looks like a hung request.
+        return StreamingResponse(gen(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    @app.get("/update/preview")
+    async def update_preview(request: Request):
+        _require_admin(request)
+        from engine import updater
+        # Read-only: fetches refs (never the working tree) and reads the target tag's CHANGELOG.
+        return await run_in_threadpool(updater.preview)
+
+    @app.get("/update/state")
+    async def update_state(request: Request):
+        _require_admin(request)
+        from engine import updater
+        return updater.read_state() or {"state": "none"}
+
+    @app.post("/update/apply")
+    async def update_apply(request: Request, body: Optional[dict] = None):
+        _require_admin(request)
+        from engine import updater
+        body = body or {}
+        target = (body.get("target") or "").strip()
+        if not target:
+            raise HTTPException(400, "body must include 'target'")
+        if body.get("confirm") != target:
+            raise HTTPException(400, f"'confirm' must be exactly the target version ({target})")
+        pf = await run_in_threadpool(updater.preflight)
+        errors = [b for b in pf.get("blockers", []) if b.get("severity") == "error"]
+        if errors:
+            raise HTTPException(409, "This install cannot be updated right now — "
+                                     + " ".join(b["message"] for b in errors))
+        if pf.get("target") != target:
+            raise HTTPException(409, f"The newest release changed while you were reading the preview "
+                                     f"({target} -> {pf.get('target')}) — re-check before applying.")
+        return _update_sse(lambda emit: updater.apply_update(target, emit=emit))
+
+    @app.post("/update/restart")
+    async def update_restart(request: Request):
+        """Return FIRST, restart after. The process performing the restart is the process being
+        replaced, so the response has to be fully flushed before it dies — otherwise the UI hangs
+        on a socket that will never answer. Same shape as /admin/restart."""
+        _require_admin(request)
+        from engine import updater
+        info = await run_in_threadpool(updater.restart_strategy)
+        state = updater.read_state()
+        updater.write_state(state="restarting", strategy=info["strategy"],
+                            pending_notice=state.get("pending_notice"))
+        if info["strategy"] == "manual":
+            # Windows: no restart is attempted. The instruction is the whole answer.
+            return {"restarting": False, **info}
+
+        async def _do():
+            await asyncio.sleep(0.6)          # let the HTTP response flush first
+            updater.perform_restart(info)
+        asyncio.create_task(_do())
+        return {"restarting": True, **info}
+
+    @app.post("/update/revert")
+    async def update_revert(request: Request, body: Optional[dict] = None):
+        _require_admin(request)
+        from engine import updater
+        if (body or {}).get("confirm") != "revert":
+            raise HTTPException(400, "body must include confirm:'revert'")
+        ok, reason = await run_in_threadpool(updater.can_revert)
+        if not ok:
+            raise HTTPException(409, reason)
+        return _update_sse(lambda emit: updater.revert(emit=emit))
+
     # ---- approval-gated dependency installs ----
     @app.get("/deps")
     async def deps():

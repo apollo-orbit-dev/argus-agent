@@ -21,6 +21,8 @@ rules.json
 approvals.json
 permissions.json
 custom_commands.yaml
+# in-app updater bookkeeping (previous ref, so a revert is still offerable after a restart)
+.argus-update.json
 # user-authored routines (repo-root runtime data dir only — not engine/routines/ source)
 /routines/
 # agent-created tools / skills
