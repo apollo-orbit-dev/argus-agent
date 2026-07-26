@@ -319,7 +319,10 @@ async def reply_html(msg, text: str) -> None:
         await msg.reply_text(text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
     except Exception:
         try:
-            stripped = re.sub(r"</?(code|b|i)>", "", text)
+            # Every tag this module emits — <pre> included: /update wraps the changelog and the pip
+            # tail in one, and a leftover "<pre>" in the plain-text fallback is exactly what the
+            # fallback exists to avoid.
+            stripped = re.sub(r"</?(code|b|i|u|s|pre|blockquote)>", "", text)
             await msg.reply_text(_html.unescape(stripped))
         except Exception:
             log.debug("could not send reply_html fallback", exc_info=True)
@@ -702,9 +705,15 @@ async def deliver_pending_update_notice(app: Application) -> None:
         from engine import updater
         from engine.version import get_version
         state = updater.read_state()
+        if state.get("state") != "restarting":
+            return
         notice = state.get("pending_notice") or {}
         chat_id = notice.get("chat_id")
-        if state.get("state") != "restarting" or not chat_id:
+        if not chat_id:
+            # A dashboard-initiated restart has nobody to tell. Settle the state anyway: leaving it
+            # at "restarting" forever means the NEXT boot that happens to find a pending_notice
+            # would deliver a stale "update complete" for an update that finished long ago.
+            updater.write_state(state="applied", pending_notice=None)
             return
         running, expected = f"v{get_version()}", notice.get("to")
         if expected and running != expected:

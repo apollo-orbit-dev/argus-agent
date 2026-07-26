@@ -20,15 +20,17 @@ suite monkeypatches, so tests never invoke real git/pip against the network.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Iterator, Optional
 
 from engine.version import compare_versions, get_version
 
@@ -41,9 +43,11 @@ ROOT = Path(__file__).resolve().parents[1]          # clone dir (holds main.py, 
 NEWEST_TAG_ARGV = ["git", "tag", "-l", "v*", "--sort=-v:refname"]
 
 STATE_FILE = ROOT / ".argus-update.json"            # gitignored; see state_path()
+LOCK_FILE = ROOT / ".argus-update.lock"             # gitignored; see lock_path()
 CHANGELOG_CAP = 8000
 PIP_TIMEOUT = 600.0                                 # a cold-cache wheel build is slow (matches sandbox setup)
 FETCH_TIMEOUT = 120.0
+STALE_LOCK_AFTER = 4 * PIP_TIMEOUT                  # longer than any real update; see _lock_is_stale
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")     # pip colour codes render as garbage in a <pre>
 _SECTION_RE = re.compile(r"^## (\d+\.\d+\.\d+)\s*$", re.MULTILINE)
@@ -70,7 +74,15 @@ def _run(argv: list[str], cwd: Path = ROOT, timeout: float = 20.0) -> tuple[int,
 def _stream(argv: list[str], cwd: Path = ROOT, timeout: float = PIP_TIMEOUT,
             emit: Optional[Callable[[str], None]] = None) -> int:
     """Streaming seam: run argv, hand every output line to `emit` as it arrives, return the exit
-    code. stderr is folded into stdout so pip's warnings appear in order."""
+    code. stderr is folded into stdout so pip's warnings appear in order.
+
+    The deadline is enforced OUT OF BAND, by a watchdog thread — never from inside the read loop.
+    A checked-per-line deadline is no deadline at all: the pathological case is a child that stops
+    producing output entirely (a pip resolver stuck on a dead index, a git asking for credentials),
+    and that child never reaches the check. A stalled step here parks a worker thread forever with
+    HEAD already on the new tag, so the rollback never runs — the worst outcome this module has.
+    Killing the child closes the pipe, which ends the read loop, so `wait()` always reaps it.
+    """
     say = emit or (lambda _line: None)
     say("$ " + " ".join(argv))
     try:
@@ -82,20 +94,37 @@ def _stream(argv: list[str], cwd: Path = ROOT, timeout: float = PIP_TIMEOUT,
     except OSError as e:
         say(str(e))
         return 1
-    deadline = time.monotonic() + timeout
+
+    done = threading.Event()
+    timed_out = threading.Event()
+
+    def _watchdog() -> None:
+        if not done.wait(timeout):
+            timed_out.set()
+            try:
+                p.kill()
+            except Exception:                       # noqa: BLE001 - already gone is fine
+                pass
+
+    watchdog = threading.Thread(target=_watchdog, name="updater-watchdog", daemon=True)
+    watchdog.start()
     try:
         assert p.stdout is not None
         for line in p.stdout:
             say(_ANSI_RE.sub("", line.rstrip("\n")))
-            if time.monotonic() > deadline:
-                p.kill()
-                say(f"timed out after {timeout:.0f}s")
-                return 124
-        return p.wait(timeout=max(1.0, deadline - time.monotonic()))
-    except subprocess.TimeoutExpired:
-        p.kill()
+        rc = p.wait()                               # reap: no zombie left behind
+    finally:
+        done.set()
+        watchdog.join(timeout=5.0)
+        if p.stdout is not None:
+            try:
+                p.stdout.close()                    # close the pipe: no leaked fd
+            except Exception:                       # noqa: BLE001
+                pass
+    if timed_out.is_set():
         say(f"timed out after {timeout:.0f}s")
         return 124
+    return rc
 
 
 def _pip_argv() -> list[str]:
@@ -174,9 +203,16 @@ def preflight(clone_dir: Path = ROOT) -> dict:
     blockers: list[dict] = []
 
     if not is_checkout(clone_dir):
+        # Refusing is the CORRECT answer here, and the message has to say why in a way that fits
+        # the install someone actually has: an instance provisioned by copying files (rsync, scp, a
+        # container image, an unpacked archive) has no .git, and there is no update this button
+        # could perform on it. It is updated at its source and re-deployed — not from in here.
         blockers.append(_b("not_a_checkout",
             f"This install is not a git checkout — there is no .git directory in {clone_dir}, so "
-            f"there is nothing to update from. Re-install with install.sh to get an updatable copy."))
+            f"there are no releases to move between and nothing here can be updated in place. If "
+            f"this instance was deployed by copying files (rsync, scp, a container image), update "
+            f"it where it is built and deploy it again. To make an instance that CAN update itself, "
+            f"install it with install.sh, which clones the repository."))
         return {"ok": False, "current": current, "target": None,
                 "update_available": False, "blockers": blockers}
 
@@ -187,18 +223,24 @@ def preflight(clone_dir: Path = ROOT) -> dict:
             "This checkout has no 'origin' remote, so there is nowhere to fetch new releases from. "
             "Add one with: git remote add origin <url>"))
 
-    rc_s, porcelain, _ = _run(["git", "status", "--porcelain"], clone_dir)
+    # TRACKED files only (`--untracked-files=no`). Untracked files are not at risk — `git checkout`
+    # never touches them — and listing them here made this blocker fire on EVERY LIVE INSTANCE:
+    # sessions.db is opened in WAL mode, so `sessions.db-wal` / `sessions.db-shm` sit in the repo
+    # root whenever Argus is running. That is the whole update button, refusing itself forever.
+    # (The sidecars are gitignored too now, but -uno is the structural fix: the question this
+    # blocker asks is "would updating overwrite work you have not committed?", and only tracked
+    # modifications can answer yes.)
+    rc_s, porcelain, _ = _run(["git", "status", "--porcelain", "--untracked-files=no"], clone_dir)
     if rc_s == 0 and porcelain.strip():
-        # Ignored files never appear in --porcelain, so .env / *.db / model_presets.json /
-        # workspaces/ cannot trip this. Anything listed here is a tracked file you edited.
         # "XY path" — split on whitespace rather than slicing [3:], because _run() strips the
         # leading space of a " M path" status line and a fixed offset would eat the filename.
         names = [ln.strip().split(None, 1)[-1] for ln in porcelain.splitlines() if ln.strip()]
         shown = ", ".join(names[:8]) + (f", and {len(names) - 8} more" if len(names) > 8 else "")
         blockers.append(_b("dirty_tree",
-            f"The working tree has uncommitted changes to tracked files ({shown}). Updating would "
-            f"overwrite them — commit, stash or discard them first. (Your .env, databases, "
-            f"workspaces and connections are gitignored and are never part of this.)"))
+            f"The working tree has uncommitted changes to files that are part of the release "
+            f"({shown}). Updating would overwrite them — commit, stash or discard them first. "
+            f"(Only tracked files are listed here: your .env, databases, workspaces and "
+            f"connections are gitignored, and new files you have added are left alone.)"))
 
     expected_venv = (clone_dir / ".venv").resolve()
     running = _running_prefix()
@@ -332,8 +374,10 @@ def perform_restart(info: dict) -> None:
     Telegram reply has flushed — never inline in a request handler."""
     strategy = info.get("strategy")
     if strategy == "systemd":
-        # start_new_session so the helper is NOT our child: it has to outlive the SIGTERM systemd
-        # is about to send us.
+        # start_new_session detaches the helper from THIS process (own session/pgid), so our death
+        # does not take it down with us as a child. It does NOT survive the unit stopping — it stays
+        # in the unit's cgroup and is killed along with it. That is fine: `systemctl restart`
+        # enqueues the job with systemd before we die, and systemd, not the helper, carries it out.
         subprocess.Popen(["systemctl", "--user", "restart", info["unit"]], start_new_session=True)
     elif strategy == "exec":
         os.execv(sys.executable, [sys.executable] + sys.argv)
@@ -373,6 +417,92 @@ def clear_state(clone_dir: Path = ROOT) -> None:
         pass
 
 
+class UpdateBusy(RuntimeError):
+    """Another update/revert already holds the lock. Raised only by `update_lock`."""
+
+
+def lock_path(clone_dir: Path = ROOT) -> Path:
+    return clone_dir / ".argus-update.lock"
+
+
+def _pid_alive(pid: int) -> bool:
+    if sys.platform == "win32":
+        # NOT os.kill(pid, 0) here: on Windows that is TerminateProcess, not a liveness probe — it
+        # would KILL the holder. Windows falls back to the age check below.
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True                                 # exists, just not ours to signal
+    except OSError:
+        return True
+    return True
+
+
+def _lock_is_stale(path: Path, holder: dict) -> bool:
+    """Is this lock left over from a process that is gone? Either its pid is dead, or it has been
+    held for longer than any real update could possibly take (the Windows fallback, and the
+    backstop for a recycled pid)."""
+    pid = holder.get("pid")
+    if not isinstance(pid, int) or not _pid_alive(pid):
+        return True
+    try:
+        return (time.time() - path.stat().st_mtime) > STALE_LOCK_AFTER
+    except OSError:
+        return True
+
+
+@contextlib.contextmanager
+def update_lock(clone_dir: Path = ROOT) -> Iterator[Path]:
+    """Serialise apply/revert with an O_EXCL lock file. Raises UpdateBusy if one is already running.
+
+    Two `pip install -e .` runs into one venv can leave site-packages half-written, and two
+    apply_update()s interleaving their write_state() calls can clobber `from_ref` — the only
+    recorded way back. Dashboard and Telegram are separate entry points into the same install, so
+    "nobody would do that" is not a guarantee.
+
+    A lock whose recorded pid is gone is STALE and is taken over: a crash mid-update must not
+    disable the update button forever.
+    """
+    path = lock_path(clone_dir)
+    for attempt in (0, 1):
+        try:
+            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            break
+        except FileExistsError:
+            holder = {}
+            try:
+                holder = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:                       # noqa: BLE001 - unreadable counts as stale
+                holder = {}
+            if attempt == 0 and _lock_is_stale(path, holder):
+                try:
+                    path.unlink()                   # stale: the holder is gone
+                except OSError:
+                    pass
+                continue
+            raise UpdateBusy(
+                f"Another update is already running (started {holder.get('at', 'recently')} by "
+                f"process {holder.get('pid') or '?'}). Wait for it to finish — running two at once "
+                f"can leave this install half-installed.")
+        except OSError as e:
+            raise UpdateBusy(f"Could not take the update lock ({path}): {e}") from e
+    try:
+        os.write(fd, json.dumps({"pid": os.getpid(),
+                                 "at": time.strftime("%Y-%m-%dT%H:%M:%S")}).encode("utf-8"))
+    finally:
+        os.close(fd)
+    try:
+        yield path
+    finally:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
 def revert_command(clone_dir: Path = ROOT, from_ref: Optional[str] = None) -> str:
     """The literal shell command that puts this install back. Printed everywhere a failure is
     reported — a stated way back is the whole point."""
@@ -388,6 +518,13 @@ def can_revert(clone_dir: Path = ROOT) -> tuple[bool, str]:
     st = read_state(clone_dir)
     if not st or st.get("state") in (None, "none"):
         return False, "There is no recorded update to revert — this install has not been updated from here."
+    if st.get("state") == "reverted":
+        # Already back on the previous ref — whether by hand, by `revert()`, or by the automatic
+        # rollback inside a failed apply. The record is kept (it is what the failure report quotes),
+        # but offering "Revert to v0.13.0" while running v0.13.0 is a lie.
+        return False, (f"This install has already been put back on "
+                       f"{st.get('from_tag') or st.get('from_ref') or 'the previous release'} — "
+                       f"there is nothing further to revert.")
     from_ref = st.get("from_ref")
     if not from_ref:
         return False, "The recorded update has no previous ref, so there is nothing to go back to."
@@ -429,7 +566,29 @@ def preview(clone_dir: Path = ROOT) -> dict:
     }
 
 
+def _tree_is_clean(clone_dir: Path) -> tuple[bool, str]:
+    """Does every TRACKED file match what git thinks is checked out? (`--untracked-files=no`, so the
+    user's untracked and ignored state is not the subject.) Empty output is the only pass."""
+    rc, porcelain, err = _run(["git", "status", "--porcelain", "--untracked-files=no"], clone_dir)
+    if rc != 0:
+        return False, f"could not read the state of the tree: {err or f'git status exit {rc}'}"
+    if not porcelain.strip():
+        return True, ""
+    names = [ln.strip().split(None, 1)[-1] for ln in porcelain.splitlines() if ln.strip()]
+    shown = ", ".join(names[:8]) + (f", and {len(names) - 8} more" if len(names) > 8 else "")
+    return False, f"{len(names)} file(s) do not match the checked-out release ({shown})"
+
+
 def _verify(clone_dir: Path, target: str) -> tuple[bool, str]:
+    """Did the checkout actually land — all of it?
+
+    HEAD and the root pyproject version are NOT sufficient, because `git checkout` reports success
+    (exit 0) on a PARTIAL checkout: if it cannot write some files — a read-only directory left by a
+    past run, ENOSPC, a file held open — it prints "unable to create file", moves HEAD anyway, and
+    returns 0. The result is a tree that is a mix of the old and the new release, with both of the
+    cheap checks passing. The clean-tree assertion is the one that catches it: every file git could
+    not write shows up as a modification against the new index.
+    """
     _, head, _ = _run(["git", "rev-parse", "HEAD"], clone_dir)
     _, want, _ = _run(["git", "rev-parse", f"{target}^{{commit}}"], clone_dir)
     if not head or head != want:
@@ -438,7 +597,20 @@ def _verify(clone_dir: Path, target: str) -> tuple[bool, str]:
     expected = target[1:] if target.startswith("v") else target
     if version != expected:
         return False, f"pyproject.toml reports {version or '?'}, expected {expected}"
-    return True, f"HEAD at {target}, pyproject reports {version}"
+    clean, why = _tree_is_clean(clone_dir)
+    if not clean:
+        return False, (f"the checkout of {target} was incomplete — {why}. git reported success but "
+                       f"could not write them.")
+    return True, f"HEAD at {target}, pyproject reports {version}, tree matches the release"
+
+
+def _busy(say: Emit, detail: str) -> dict:
+    """The refusal an already-running update gets. Shaped exactly like every other `done` event so
+    both callers (SSE and Telegram) report it through their normal failure path."""
+    result = {"ok": False, "state": "busy", "failed_step": "lock", "detail": detail,
+              "restart": None, "commands": []}
+    say({"type": "done", **result})
+    return result
 
 
 def apply_update(target: str, clone_dir: Path = ROOT, emit: Optional[Emit] = None) -> dict:
@@ -450,9 +622,18 @@ def apply_update(target: str, clone_dir: Path = ROOT, emit: Optional[Emit] = Non
     If pip or verification fails the previous ref is checked out again and pip is re-run
     IMMEDIATELY, both streamed, and the result is state="reverted" / ok=False with NO restart
     offered. Only if that rollback itself fails do we fall back to printing commands.
+
+    Serialised with revert() and with itself by `update_lock` — see there for why.
     """
     say: Emit = emit or (lambda _ev: None)
+    try:
+        with update_lock(clone_dir):
+            return _apply_update_locked(target, clone_dir, say)
+    except UpdateBusy as e:
+        return _busy(say, str(e))
 
+
+def _apply_update_locked(target: str, clone_dir: Path, say: Emit) -> dict:
     def step(name: str, text: str) -> None:
         say({"type": "step", "step": name, "text": text})
 
@@ -482,10 +663,18 @@ def apply_update(target: str, clone_dir: Path = ROOT, emit: Optional[Emit] = Non
     def rollback(failed_step: str, detail: str) -> dict:
         step("rollback", f"{failed_step} failed — putting this install back on {from_ref}")
         log(detail)
-        rc_co = _stream(["git", "-c", "advice.detachedHead=false", "checkout", "-q", from_ref],
-                        clone_dir, 120.0, log)
+        # --force, and only here. A plain checkout REFUSES to move when a tracked file differs from
+        # the index — which is exactly the state a partially-written checkout leaves behind, so the
+        # rollback would fail precisely in the case that needs it most. Nothing of the user's is at
+        # risk: preflight required a clean tree, the forward checkout only moved because the tree
+        # was still clean, and --force does not touch untracked or ignored files (all user state).
+        rc_co = _stream(["git", "-c", "advice.detachedHead=false", "checkout", "-q", "--force",
+                         from_ref], clone_dir, 120.0, log)
         rc_pip = _stream(_pip_argv(), clone_dir, PIP_TIMEOUT, log) if rc_co == 0 else 1
-        if rc_co == 0 and rc_pip == 0:
+        clean, why = _tree_is_clean(clone_dir) if rc_co == 0 else (False, "the checkout failed")
+        if not clean:
+            log(f"the tree is still not what {from_ref} says it should be: {why}")
+        if rc_co == 0 and rc_pip == 0 and clean:
             log(f"rolled back to {from_ref} — still running {from_tag}")
             return finish(False, "reverted", failed_step,
                           f"{detail} — rolled back to {from_tag}", None)
@@ -522,9 +711,19 @@ def apply_update(target: str, clone_dir: Path = ROOT, emit: Optional[Emit] = Non
 
 
 def revert(clone_dir: Path = ROOT, emit: Optional[Emit] = None) -> dict:
-    """Undo the recorded update: check the previous ref out again and reinstall."""
-    say: Emit = emit or (lambda _ev: None)
+    """Undo the recorded update: check the previous ref out again and reinstall.
 
+    Takes the same lock as apply_update — a revert racing an apply is two pip installs into one
+    venv and two writers of the state file."""
+    say: Emit = emit or (lambda _ev: None)
+    try:
+        with update_lock(clone_dir):
+            return _revert_locked(clone_dir, say)
+    except UpdateBusy as e:
+        return _busy(say, str(e))
+
+
+def _revert_locked(clone_dir: Path, say: Emit) -> dict:
     def log(line: str) -> None:
         say({"type": "log", "line": line})
 

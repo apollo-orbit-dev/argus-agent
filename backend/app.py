@@ -630,6 +630,14 @@ def create_app(engine: Engine) -> FastAPI:
         if pf.get("target") != target:
             raise HTTPException(409, f"The newest release changed while you were reading the preview "
                                      f"({target} -> {pf.get('target')}) — re-check before applying.")
+        # The verdict, not just the errors. up_to_date and ahead_of_tags are INFO blockers, so the
+        # errors check above lets them through — and applying then is a DOWNGRADE onto an older tag,
+        # reachable from nothing worse than a stale dashboard tab. `update_available` is the one
+        # field that means "moving to this tag is going forwards"; honour it.
+        if not pf.get("update_available"):
+            why = " ".join(b["message"] for b in pf.get("blockers", []) if b.get("message"))
+            raise HTTPException(409, "There is no update to apply — "
+                                     + (why or f"{target} is not newer than what is running."))
         return _update_sse(lambda emit: updater.apply_update(target, emit=emit))
 
     @app.post("/update/restart")
@@ -639,8 +647,14 @@ def create_app(engine: Engine) -> FastAPI:
         on a socket that will never answer. Same shape as /admin/restart."""
         _require_admin(request)
         from engine import updater
-        info = await run_in_threadpool(updater.restart_strategy)
         state = updater.read_state()
+        if state.get("state") == "applying":
+            # An update is mid-flight (possibly started from Telegram). Restarting now kills pip
+            # halfway through writing site-packages, with HEAD already on the new tag and the
+            # rollback never reached — the exact way to brick this install.
+            raise HTTPException(409, "An update is being installed right now — restarting would "
+                                     "kill it halfway through. Wait for it to finish.")
+        info = await run_in_threadpool(updater.restart_strategy)
         updater.write_state(state="restarting", strategy=info["strategy"],
                             pending_notice=state.get("pending_notice"))
         if info["strategy"] == "manual":

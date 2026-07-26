@@ -1457,7 +1457,10 @@
     if (!btn) return;
     try {
       var s = await (await fetch('/update/state')).json();
-      if ((s.state === 'applied' || s.state === 'restarting' || s.state === 'reverted') && s.from_tag){
+      // NOT 'reverted': that state means this install is already back on from_tag (by revert, or by
+      // the automatic rollback inside a failed update), so offering "Revert to v0.13.0" while
+      // running v0.13.0 would be a lie — and the server's can_revert() refuses it anyway.
+      if ((s.state === 'applied' || s.state === 'restarting') && s.from_tag){
         btn.style.display = '';
         btn.textContent = 'Revert to ' + s.from_tag;
         btn.dataset.fromTag = s.from_tag;
@@ -1597,9 +1600,13 @@
             var result = await streamUpdate('/update/apply',
               { target: updateTarget, confirm: updateTarget }, out);
             await finishUpdate(result, out, was);
+            // A refused or failed update leaves this install exactly where it was, so Apply has to
+            // come back — otherwise the only way to retry is to re-check first.
+            if (!result.ok && updateTarget) apply.disabled = false;
           } catch(e){
             $('updateStatus').innerHTML = updBad('Update stream failed: ' + e.message);
             out.textContent += '\n' + e.message + '\n';
+            if (updateTarget) apply.disabled = false;
           }
           check.disabled = false;
         }

@@ -7,12 +7,15 @@ own install.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
 import shutil
 import subprocess
 import sys
+import threading
+import time
 import tomllib
 from pathlib import Path
 
@@ -164,11 +167,16 @@ def test_preflight_clean_checkout_offers_the_update(repo):
 
 
 def test_preflight_not_a_checkout(tmp_path, monkeypatch):
+    """Refusing is CORRECT — an install provisioned by copying files has no releases to move
+    between. The message therefore has to name that case and say where the update does happen,
+    instead of only telling someone to re-run an installer they may not have."""
     monkeypatch.setattr(updater, "_running_prefix", lambda: (tmp_path / ".venv").resolve())
     pf = updater.preflight(tmp_path)
     assert _codes(pf) == ["not_a_checkout"]
-    assert "not a git checkout" in _msg(pf, "not_a_checkout")
-    assert "install.sh" in _msg(pf, "not_a_checkout")
+    m = _msg(pf, "not_a_checkout")
+    assert "not a git checkout" in m
+    assert "copying files" in m and "deploy it again" in m
+    assert "install.sh" in m
     assert pf["update_available"] is False
 
 
@@ -204,6 +212,39 @@ def test_preflight_dirty_tree_ignores_user_state(repo):
     (repo / "workspaces").mkdir()
     (repo / "workspaces" / "f.txt").write_text("mine")
     (repo / "SOUL.md").write_text("persona")
+    pf = updater.preflight(repo)
+    assert "dirty_tree" not in _codes(pf)
+    assert pf["update_available"] is True
+
+
+@needs_git
+def test_preflight_ignores_the_wal_sidecars_of_a_live_instance(repo):
+    """THE regression that made this button refuse itself on every running instance.
+
+    sessions.db is opened with `PRAGMA journal_mode=WAL` (engine/state.py), so a live Argus always
+    has `sessions.db-wal` and `sessions.db-shm` sitting in the repo root. `*.db` did not cover them,
+    so `git status --porcelain` listed them as untracked and dirty_tree fired forever."""
+    (repo / "sessions.db").write_bytes(b"SQLite format 3\x00")
+    (repo / "sessions.db-wal").write_bytes(b"\x00" * 32)
+    (repo / "sessions.db-shm").write_bytes(b"\x00" * 32)
+    # Not just "the updater tolerates them": they must be gitignored, so they never show up as a
+    # change to anything, in any tool. This is what asserts the .gitignore half of the fix.
+    assert _git(repo, "status", "--porcelain") == "", (
+        "the WAL sidecars of a live instance must be gitignored")
+    pf = updater.preflight(repo)
+    assert "dirty_tree" not in _codes(pf)
+    assert pf["update_available"] is True
+
+
+@needs_git
+def test_preflight_ignores_untracked_files(repo):
+    """`git checkout <tag>` does not touch untracked files, so they cannot be "overwritten" by an
+    update and must not block one. Only tracked modifications answer the question this blocker
+    asks. (This is the `--untracked-files=no` half of the fix.)"""
+    (repo / "notes-to-self.txt").write_text("scratch\n")
+    (repo / "somedir").mkdir()
+    (repo / "somedir" / "thing.py").write_text("mine\n")
+    assert _git(repo, "status", "--porcelain") != "", "these ARE untracked (not gitignored)"
     pf = updater.preflight(repo)
     assert "dirty_tree" not in _codes(pf)
     assert pf["update_available"] is True
@@ -445,6 +486,62 @@ def test_apply_rolls_back_when_verification_fails(repo, monkeypatch):
 
 
 @needs_git
+def test_apply_detects_a_partial_checkout_and_rolls_back(tmp_path, monkeypatch):
+    """`git checkout` RETURNS 0 on a partial checkout.
+
+    When it cannot write some paths — a directory left read-only by a past run, ENOSPC, a file held
+    open — it prints "unable to create file", moves HEAD to the target anyway, and exits 0. HEAD and
+    the root pyproject version then both check out while the tree is a MIX of two releases, so
+    without a clean-tree assertion the updater pip-installs and restarts onto a Frankenstein tree.
+    """
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root writes through the read-only directory this test relies on")
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    _git(origin, "init", "-b", "main")
+    shutil.copy(REPO_ROOT / ".gitignore", origin / ".gitignore")
+    (origin / "engine").mkdir()
+    for v in ("0.1.0", "0.2.0"):
+        (origin / "pyproject.toml").write_text(f'[project]\nname = "argus"\nversion = "{v}"\n')
+        (origin / "engine" / "mod.py").write_text(f"VERSION = {v!r}\n")
+        _git(origin, "add", "-A")
+        _git(origin, "commit", "-m", f"release {v}")
+        _git(origin, "tag", f"v{v}")
+    clone = _make_clone(tmp_path, origin, at="v0.1.0")
+    _pin(monkeypatch, clone)
+    before = _git(clone, "rev-parse", "HEAD")
+
+    # engine/ cannot be written, so `git checkout v0.2.0` updates pyproject.toml and the index but
+    # leaves engine/mod.py at the old release. The (stubbed) pip step then puts the permissions back,
+    # standing in for the transient condition clearing — the point under test is that VERIFICATION
+    # notices the mixed tree, not what caused it.
+    (clone / "engine").chmod(0o555)
+    real_stream = updater._stream
+    pip_calls: list = []
+
+    def fake(argv, cwd=updater.ROOT, timeout=updater.PIP_TIMEOUT, emit=None):
+        if "pip" in argv:
+            pip_calls.append(list(argv))
+            (clone / "engine").chmod(0o755)
+            return 0
+        return real_stream(argv, cwd, timeout, emit)
+    monkeypatch.setattr(updater, "_stream", fake)
+    try:
+        res = updater.apply_update("v0.2.0", clone)
+    finally:
+        (clone / "engine").chmod(0o755)
+
+    assert _git(clone, "rev-parse", "v0.2.0^{commit}") == _git(origin, "rev-parse", "v0.2.0^{commit}")
+    assert res["ok"] is False, "a half-written tree must never be reported as a successful update"
+    assert res["failed_step"] == "verify"
+    assert "incomplete" in res["detail"] and "engine/mod.py" in res["detail"]
+    assert res["state"] == "reverted" and res["restart"] is None
+    assert _git(clone, "rev-parse", "HEAD") == before
+    assert (clone / "engine" / "mod.py").read_text() == "VERSION = '0.1.0'\n"
+    assert len(pip_calls) == 2, "pip ran forward and then again for the rollback"
+
+
+@needs_git
 def test_apply_from_a_branch_records_the_branch_name_not_the_sha(tmp_path, monkeypatch):
     origin = _make_origin(tmp_path)
     clone = _make_clone(tmp_path, origin, at="")          # stays on main
@@ -454,6 +551,126 @@ def test_apply_from_a_branch_records_the_branch_name_not_the_sha(tmp_path, monke
     st = updater.read_state(clone)
     assert st["from_ref"] == "main", "reverting must restore the branch, not a detached sha"
     assert _git(clone, "symbolic-ref", "--short", "HEAD") == "main"
+
+
+# --------------------------------------------------------------------------
+# _stream — the deadline has to be enforced OUT OF BAND
+# --------------------------------------------------------------------------
+def _stream_with_a_hard_stop(argv, cwd, timeout, budget: float = 15.0):
+    """Run _stream on a thread so a deadline that is NOT enforced fails the test instead of hanging
+    the whole suite. Returns (result_box, thread, elapsed)."""
+    box: dict = {}
+    th = threading.Thread(target=lambda: box.update(rc=updater._stream(argv, cwd, timeout)),
+                          daemon=True)
+    started = time.monotonic()
+    th.start()
+    th.join(budget)
+    return box, th, time.monotonic() - started
+
+
+@pytest.mark.parametrize("label,body", [
+    ("silent", "import time; time.sleep(60)"),
+    ("one line then silence",
+     "import sys, time; print('Collecting argus'); sys.stdout.flush(); time.sleep(60)"),
+])
+def test_stream_enforces_the_deadline_when_the_child_goes_quiet(tmp_path, label, body):
+    """A deadline checked only inside `for line in p.stdout` is not a deadline: the case that
+    matters is a child that stops producing output (pip stuck on a dead index, git waiting on
+    credentials), and that child never reaches the check. A stalled step parks a worker thread
+    forever with HEAD ALREADY on the new tag, so the rollback never runs."""
+    box, th, elapsed = _stream_with_a_hard_stop([sys.executable, "-c", body], tmp_path, 1.0)
+    assert not th.is_alive(), f"the deadline was never enforced ({label}) — _stream is still running"
+    assert box["rc"] == 124, f"a timeout must report 124, got {box.get('rc')!r} ({label})"
+    assert elapsed < 10.0, f"the 1s deadline took {elapsed:.1f}s to fire ({label})"
+
+
+def test_stream_reaps_the_child_and_closes_the_pipe_on_timeout(tmp_path, monkeypatch):
+    """Killing a process is not the same as reaping it: `p.kill()` alone leaves a zombie and an
+    open pipe for the lifetime of this long-running process."""
+    made: list = []
+    real_popen = subprocess.Popen
+
+    def spy(*a, **kw):
+        p = real_popen(*a, **kw)
+        made.append(p)
+        return p
+    monkeypatch.setattr(updater.subprocess, "Popen", spy)
+    box, th, _ = _stream_with_a_hard_stop(
+        [sys.executable, "-c", "import time; time.sleep(60)"], tmp_path, 1.0)
+    assert not th.is_alive() and box["rc"] == 124
+    assert len(made) == 1
+    assert made[0].returncode is not None, "the killed child was never waited on — it is a zombie"
+    assert made[0].stdout.closed, "the stdout pipe was never closed"
+
+
+def test_stream_still_returns_the_real_exit_code_of_a_quick_command(tmp_path):
+    lines: list = []
+    rc = updater._stream([sys.executable, "-c", "print('hello'); raise SystemExit(3)"],
+                         tmp_path, 30.0, lines.append)
+    assert rc == 3
+    assert "hello" in lines
+
+
+# --------------------------------------------------------------------------
+# mutual exclusion — two updates into one venv is a corrupt site-packages
+# --------------------------------------------------------------------------
+@needs_git
+def test_apply_refuses_while_another_update_holds_the_lock(repo, monkeypatch):
+    """Dashboard and Telegram are separate entry points into the same install. Two concurrent
+    `pip install -e .` runs can leave site-packages half-written, and two apply_update()s
+    interleaving their write_state() calls can clobber `from_ref` — the only recorded way back."""
+    _stub_pip(monkeypatch)
+    before = _git(repo, "rev-parse", "HEAD")
+    events: list = []
+    with updater.update_lock(repo):
+        res = updater.apply_update("v0.2.0", repo, emit=events.append)
+        res_revert = updater.revert(repo)
+    assert res["ok"] is False and res["state"] == "busy" and res["failed_step"] == "lock"
+    assert "Another update is already running" in res["detail"]
+    assert res_revert["state"] == "busy", "revert must take the same lock as apply"
+    assert _git(repo, "rev-parse", "HEAD") == before, "the refused update must not touch the tree"
+    assert updater.read_state(repo) == {}, "nor overwrite the running update's recorded ref"
+    assert [e["type"] for e in events] == ["done"], "the refusal is a terminal done event"
+    # Released on the way out, so the next attempt is not blocked forever.
+    assert not updater.lock_path(repo).exists()
+    assert updater.apply_update("v0.2.0", repo)["ok"] is True
+
+
+def test_a_stale_lock_from_a_dead_process_is_taken_over(tmp_path):
+    """A crash mid-update must not disable the update button until someone SSHes in."""
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    updater.lock_path(tmp_path).write_text(
+        json.dumps({"pid": dead.pid, "at": "2020-01-01T00:00:00"}), encoding="utf-8")
+    with updater.update_lock(tmp_path):
+        assert json.loads(updater.lock_path(tmp_path).read_text())["pid"] == os.getpid()
+    assert not updater.lock_path(tmp_path).exists()
+
+
+def test_a_lock_held_far_longer_than_any_update_is_stale(tmp_path, monkeypatch):
+    """The pid backstop: on Windows there is no safe liveness probe (os.kill(pid, 0) TERMINATES
+    there), and a recycled pid would look alive anywhere. Age settles both."""
+    path = updater.lock_path(tmp_path)
+    path.write_text(json.dumps({"pid": os.getpid(), "at": "2020-01-01T00:00:00"}), encoding="utf-8")
+    old = time.time() - (updater.STALE_LOCK_AFTER + 60)
+    os.utime(path, (old, old))
+    monkeypatch.setattr(updater, "_pid_alive", lambda pid: True)     # "the holder is still running"
+    with updater.update_lock(tmp_path):
+        assert json.loads(path.read_text())["at"] != "2020-01-01T00:00:00"
+    # ...but a FRESH lock held by a live process is not stale.
+    path.write_text(json.dumps({"pid": os.getpid(), "at": "now"}), encoding="utf-8")
+    with pytest.raises(updater.UpdateBusy):
+        with updater.update_lock(tmp_path):
+            pass
+    path.unlink()
+
+
+def test_pid_alive_never_signals_on_windows(monkeypatch):
+    """os.kill(pid, 0) on Windows is TerminateProcess, not a probe — calling it to test liveness
+    would kill the very process we were asking about."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(updater.os, "kill", lambda *a: pytest.fail("os.kill must not run on win32"))
+    assert updater._pid_alive(4242) is True
 
 
 # --------------------------------------------------------------------------
@@ -481,6 +698,16 @@ def test_revert_refuses_with_no_recorded_update(repo):
     assert ok is False and "no recorded update" in reason
     res = updater.revert(repo)
     assert res["ok"] is False and res["failed_step"] == "precondition"
+
+
+@needs_git
+def test_a_rolled_back_install_has_nothing_left_to_revert(repo, monkeypatch):
+    """After the automatic rollback this install IS on the previous release again — offering
+    "Revert to v0.1.0" while running v0.1.0 is a lie, and the button would do nothing useful."""
+    _stub_pip(monkeypatch, rc=1, fail_first_only=True)
+    assert updater.apply_update("v0.2.0", repo)["state"] == "reverted"
+    ok, reason = updater.can_revert(repo)
+    assert ok is False and "already been put back" in reason and "v0.1.0" in reason
 
 
 @needs_git
@@ -519,9 +746,13 @@ def test_restart_strategy_systemd_requires_active_and_matching_mainpid(tmp_path,
 
     # 3. installed but INACTIVE: `systemctl restart` would START A SECOND INSTANCE that collides
     #    with this one on the port. Must never pick systemd.
+    #    MainPID is stubbed as OURS here on purpose: with the realistic MainPID=0 of a stopped unit
+    #    the pid equality alone already forces exec, and this case would pass with the `active`
+    #    guard deleted from restart_strategy() — a vacuous assertion. Our own pid is the only stub
+    #    under which the `active` check is the thing being tested.
     _fake_service_status(monkeypatch, active=False)
     monkeypatch.setattr(updater, "_run",
-                        lambda argv, cwd=updater.ROOT, timeout=20.0: (0, "MainPID=0", ""))
+                        lambda argv, cwd=updater.ROOT, timeout=20.0: (0, f"MainPID={os.getpid()}", ""))
     assert updater.restart_strategy(tmp_path)["strategy"] == "exec"
 
     # 4. not installed at all -> exec.
@@ -571,7 +802,9 @@ def test_state_roundtrip_and_clear(tmp_path):
 
 
 def test_state_file_is_gitignored():
-    assert ".argus-update.json" in (REPO_ROOT / ".gitignore").read_text()
+    text = (REPO_ROOT / ".gitignore").read_text()
+    assert ".argus-update.json" in text
+    assert ".argus-update.lock" in text
 
 
 def test_revert_command_is_literal_and_runnable(tmp_path):

@@ -150,6 +150,38 @@ async def test_apply_reruns_preflight_server_side(tmp_path, upd, monkeypatch):
     assert called == [], "preflight must refuse BEFORE apply_update is reached"
 
 
+async def test_apply_409s_when_there_is_no_update_to_apply(tmp_path, upd, monkeypatch):
+    """A DOWNGRADE is reachable without a crafted request: a dashboard tab left open while the
+    instance moves ahead of the newest tag still holds a live Apply button. up_to_date and
+    ahead_of_tags are INFO blockers, so an errors-only check waves them through and the updater
+    happily checks out an OLDER tag. The verdict field is the one that has to be honoured."""
+    called = []
+    monkeypatch.setattr(upd, "apply_update", lambda *a, **k: called.append(a))
+    monkeypatch.setattr(upd, "preflight", lambda clone_dir=upd.ROOT: _preflight(
+        ok=False, current="9.9.9", target="v0.2.0", update_available=False,
+        blockers=[{"code": "ahead_of_tags", "severity": "info",
+                   "message": "This checkout is ahead of every published release: it reports "
+                              "v9.9.9, but the newest release tag is v0.2.0."}]))
+    async with _client(tmp_path) as c:
+        r = await c.post("/update/apply", json={"target": "v0.2.0", "confirm": "v0.2.0"})
+    assert r.status_code == 409, "applying an older tag over a newer install is a downgrade"
+    assert "ahead of every published release" in r.json()["detail"]
+    assert called == [], "the updater must never be reached for a downgrade"
+
+
+async def test_apply_409s_when_already_up_to_date(tmp_path, upd, monkeypatch):
+    called = []
+    monkeypatch.setattr(upd, "apply_update", lambda *a, **k: called.append(a))
+    monkeypatch.setattr(upd, "preflight", lambda clone_dir=upd.ROOT: _preflight(
+        ok=False, current="0.2.0", target="v0.2.0", update_available=False,
+        blockers=[{"code": "up_to_date", "severity": "info",
+                   "message": "Already up to date — running v0.2.0, and the newest release is v0.2.0."}]))
+    async with _client(tmp_path) as c:
+        r = await c.post("/update/apply", json={"target": "v0.2.0", "confirm": "v0.2.0"})
+    assert r.status_code == 409 and "Already up to date" in r.json()["detail"]
+    assert called == []
+
+
 async def test_apply_streams_sse_with_a_terminal_done(tmp_path, upd, monkeypatch):
     def fake_apply(target, clone_dir=upd.ROOT, emit=None):
         emit({"type": "step", "step": "checkout", "text": f"checking out {target}"})
@@ -202,6 +234,22 @@ async def test_restart_records_state_before_dying(tmp_path, upd, monkeypatch):
     async with _client(tmp_path) as c:
         await c.post("/update/restart")
     assert upd._test_state["state"] == "restarting"
+
+
+async def test_restart_refuses_while_an_update_is_being_applied(tmp_path, upd, monkeypatch):
+    """Nothing serialises the restart button against an update started somewhere else (Telegram,
+    a second tab). Restarting mid-`pip install` kills it with HEAD already on the new tag and the
+    rollback never reached — a bricked instance."""
+    calls: list = []
+    monkeypatch.setattr(upd, "perform_restart", calls.append)
+    upd._test_state.update(state="applying", from_ref="v0.1.0", to_tag="v0.2.0")
+    async with _client(tmp_path) as c:
+        r = await c.post("/update/restart")
+    assert r.status_code == 409
+    assert "halfway" in r.json()["detail"]
+    assert upd._test_state["state"] == "applying", "the refusal must not overwrite the update state"
+    await asyncio.sleep(0.9)
+    assert calls == [], "no restart may be attempted while an update is in flight"
 
 
 async def test_restart_manual_on_windows_attempts_nothing(tmp_path, upd, monkeypatch):

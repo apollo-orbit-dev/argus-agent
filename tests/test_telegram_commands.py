@@ -409,6 +409,47 @@ async def test_post_restart_ack_confirms_success_when_the_version_matches(monkey
     assert len(sent) == 1 and "Update complete" in sent[0][1]
 
 
+async def test_a_restart_with_nobody_to_notify_still_settles_the_state(monkeypatch):
+    """A dashboard-initiated restart writes state="restarting" with no chat to reply to. If this
+    returns early without clearing it the state stays "restarting" for good, and the next boot that
+    happens to find a pending_notice delivers a bogus "Update complete" for an update that finished
+    days ago."""
+    from types import SimpleNamespace as NS
+
+    from backend.telegram_bot import deliver_pending_update_notice
+    from engine import updater
+    sent, written = [], []
+    monkeypatch.setattr(updater, "read_state", lambda clone_dir=updater.ROOT: {
+        "state": "restarting", "pending_notice": None, "from_tag": "v0.1.0"})
+    monkeypatch.setattr(updater, "write_state",
+                        lambda clone_dir=updater.ROOT, **f: written.append(f))
+
+    async def send_message(chat_id, text, **kw):
+        sent.append(text)
+    await deliver_pending_update_notice(NS(bot=NS(send_message=send_message)))
+    assert sent == [], "there is nobody to tell"
+    assert written and written[-1]["state"] == "applied", "the transient state must be settled"
+    assert written[-1]["pending_notice"] is None
+
+
+async def test_reply_html_fallback_strips_pre_too(monkeypatch):
+    """The plain-text fallback exists so a Telegram parse error still lands as clean text. /update
+    wraps the changelog and the pip tail in <pre>, so a fallback that only strips code/b/i shows
+    the user literal "<pre>" markup."""
+    from backend.telegram_bot import reply_html
+    seen = []
+
+    class _Picky:
+        async def reply_text(self, text, **kw):
+            if kw.get("parse_mode"):
+                raise RuntimeError("Can't parse entities")
+            seen.append(text)
+    await reply_html(_Picky(), "<b>Update failed</b>\n<pre>ERROR: no matching distribution</pre>")
+    assert len(seen) == 1
+    assert "<pre>" not in seen[0] and "</pre>" not in seen[0]
+    assert "ERROR: no matching distribution" in seen[0]
+
+
 async def test_no_ack_when_nothing_is_pending(monkeypatch):
     from types import SimpleNamespace as NS
 
