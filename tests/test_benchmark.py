@@ -254,9 +254,10 @@ def test_render_report_has_abort_column():
     assert len(body_lines) == len(results)
     for line, r in zip(body_lines, results):
         cells = [c.strip() for c in line.split("|")]
-        # abort is the 8th cell: | model | params | mode | scaffold | disclosure | max_tok |
-        # solved | abort | ...   (`disclosure` was added when progressive tool disclosure landed)
-        abort_cell = cells[8]
+        # abort is the 9th cell: | model | params | mode | scaffold | disclosure | max_tok |
+        # solved | answered | abort | ...   (`disclosure` was added when progressive tool disclosure
+        # landed; `answered` when the second headline metric landed, argus-3zn)
+        abort_cell = cells[9]
         has_observer_data = r.get("scaffold") != "off" and any(
             "aborted" in run or "observer" in run
             for t in r.get("tasks", []) for run in t.get("runs", []))
@@ -303,6 +304,118 @@ def test_disclosure_is_its_own_axis_not_scaffolding():
     from engine.eval.benchmark import BASELINE_OVERRIDES
     assert "tool_disclosure_mode" not in BASELINE_OVERRIDES
     assert resolve_config("main", None, baseline=True, disclosure="keyword").tool_disclosure_mode == "keyword"
+
+
+# ---- `answered`: the second headline metric (argus-3zn) ----
+
+def test_answered_is_true_when_judge_approves_but_the_chain_failed():
+    """THE 3zn CASE IN ONE ASSERTION: a reasoning model answers a trivial task inside its reasoning
+    pass, so judge=3 with an EMPTY tool list. solved stays False (strict, unchanged); answered is
+    True — that gap is the quantity this metric exists to expose."""
+    runs = [{"chain_correct": False, "judge_score": 3}] * 3
+    v = task_verdict(runs, 3)
+    assert v["solved"] is False and v["chain_pass"] is False
+    assert v["answered"] is True
+
+
+def test_answered_is_none_not_true_when_the_task_has_no_judge_verdict():
+    """DELIBERATE ASYMMETRY with solved, which treats a missing judge score as vacuously true.
+    answered IS the judge axis: no judge means no verdict, and vacuous-true would inflate it."""
+    runs = [{"chain_correct": True}] * 3
+    v = task_verdict(runs, 3)
+    assert v["solved"] is True        # unchanged: judge vacuously ok
+    assert v["answered"] is None      # NOT True
+
+
+def test_answered_honours_the_collapse_threshold():
+    # k=3, threshold = ceil(3*0.6) = 2 -- 1 of 3 judged-good is not answered
+    one_of_three = [{"chain_correct": False, "judge_score": 3},
+                    {"chain_correct": False, "judge_score": 1},
+                    {"chain_correct": False, "judge_score": 0}]
+    assert task_verdict(one_of_three, 3)["answered"] is False
+    two_of_three = [{"chain_correct": False, "judge_score": 3},
+                    {"chain_correct": False, "judge_score": 2},
+                    {"chain_correct": False, "judge_score": 0}]
+    assert task_verdict(two_of_three, 3)["answered"] is True
+
+
+def test_aggregate_rolls_up_answered_skipping_none():
+    tasks = [{"tier": 1, "chain_pass": False, "judge_mean": 3.0, "solved": False, "answered": True,
+              "skipped": False},
+             {"tier": 1, "chain_pass": True, "judge_mean": 1.0, "solved": False, "answered": False,
+              "skipped": False},
+             {"tier": 1, "chain_pass": True, "judge_mean": None, "solved": True, "answered": None,
+              "skipped": False},                                   # unjudged: excluded, not counted
+             {"tier": 2, "chain_pass": None, "judge_mean": None, "solved": None, "answered": None,
+              "skipped": True}]
+    agg = aggregate(tasks)
+    assert agg["per_tier"]["1"]["answered"] == 0.5     # 1 of the 2 tasks WITH a verdict
+    assert agg["per_tier"]["2"]["answered"] is None
+    assert agg["overall"]["answered"] == 0.5
+
+
+def test_backfill_adds_answered_to_a_result_that_already_has_solved():
+    """THE TRAP: every committed result already carries a non-None overall.solved, so a single
+    `if solved is not None: return` guard would backfill answered for nothing and the new column
+    would render — on every published row. Each metric must be guarded independently."""
+    r = {"model": "m", "params": 27, "mode": "native", "scaffold": "off", "max_tokens": 8192,
+         "battery_version": "cap-1", "k": 3, "date": "2026-01-01T00:00:00+00:00",
+         "tasks": [
+             {"id": "a", "tier": 1, "skipped": False, "chain_pass": False, "judge_mean": 3.0,
+              "solved": False,                                     # right answer, no tool call
+              "runs": [{"chain_correct": False, "judge_score": 3}] * 3},
+             {"id": "b", "tier": 1, "skipped": False, "chain_pass": True, "judge_mean": 1.0,
+              "solved": False,                                     # tool used, bad answer
+              "runs": [{"chain_correct": True, "judge_score": 1}] * 3}],
+         "per_tier": {"1": {"chain_pass": 0.5, "judge_mean": 2.0, "solved": 0.0, "abort_rate": None,
+                            "n": 2, "skipped": 0}},
+         "overall": {"chain_pass": 0.5, "judge_mean": 2.0, "solved": 0.0, "abort_rate": None,
+                     "n": 2, "skipped": 0}}
+    out = _backfill_solved(r)
+    assert out["overall"]["answered"] == 0.5          # derived from the stored judge_scores
+    assert out["per_tier"]["1"]["answered"] == 0.5
+    # and the published numbers are untouched (answered != solved here, so it can't be a copy)
+    assert out["overall"]["solved"] == 0.0 and out["per_tier"]["1"]["solved"] == 0.0
+    assert out["overall"]["chain_pass"] == 0.5
+
+
+def test_build_series_metric_answered():
+    r = _backfill_solved(_fake_result("m", 3, {1: True}))
+    s = build_series([r], "cap-1", metric="answered")
+    assert s["1"][0][1] == 1.0
+
+
+def test_report_renders_the_answered_column():
+    base = {"mode": "native", "scaffold": "on", "disclosure": "off", "max_tokens": 2048,
+            "battery_version": "cap-3zn-test", "date": "2026-01-01T00:00:00+00:00",
+            "per_tier": {}, "tasks": []}
+    with_answered = {**base, "model": "has-answered", "params": 1,
+                     "overall": {"solved": 1.0, "answered": 0.5}}
+    without = {**base, "model": "no-answered", "params": 2, "overall": {"solved": 1.0}}
+    outs = [_write_result(with_answered), _write_result(without)]
+    try:
+        md, ok = render_report("cap-3zn-test")
+        assert ok
+        header = md.splitlines()[4].lower()
+        assert "answered" in header
+        # answered sits immediately after solved
+        cols = [c.strip() for c in header.split("|")]
+        assert cols[cols.index("solved") + 1] == "answered"
+        rows = {l.split("|")[1].strip(): [c.strip() for c in l.split("|")]
+                for l in md.splitlines()[6:] if l.startswith("|")}
+        assert rows["has-answered"][8] == "50%"
+        assert rows["no-answered"][8] == "—"    # absent -> em dash, never a fabricated number
+        footnotes = [l for l in md.splitlines() if l.startswith("`answered`")]
+        assert footnotes and "GAP" in footnotes[0]   # the footnote names the gap
+    finally:
+        import json as _json
+        idx = outs[0].parent / "index.json"
+        names = {o.name for o in outs}
+        for o in outs:
+            o.unlink(missing_ok=True)
+        if idx.exists():
+            keep = [e for e in _json.loads(idx.read_text()) if e.get("file") not in names]
+            idx.write_text(_json.dumps(keep, indent=2))
 
 
 def test_report_renders_the_disclosure_column():

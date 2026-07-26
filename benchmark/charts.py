@@ -3,7 +3,8 @@ chain-pass by model x (mode x scaffold)) and `model_tiers` (per-model per-tier g
 
 Both read committed results via engine.eval.benchmark._load_results() so the `solved` back-fill
 (Task 2) applies uniformly, and both accept `metric` so any per_tier/overall key (chain_pass,
-judge_mean, solved) can be plotted. Ported from ad-hoc scratch scripts; kept Agg-backed matplotlib.
+judge_mean, solved, answered) can be plotted. Ported from ad-hoc scratch scripts; kept Agg-backed
+matplotlib.
 """
 from __future__ import annotations
 
