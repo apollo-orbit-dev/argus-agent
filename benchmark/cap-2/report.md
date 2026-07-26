@@ -1,6 +1,6 @@
 # Model-Capability Benchmark — `cap-2`
 
-20 model(s), by param count. Chain = deterministic tool-chain pass-rate; Judge = Opus quality mean (0–3). A tier's line falling off below some size is the shelf.
+24 model(s), by param count. Chain = deterministic tool-chain pass-rate; Judge = Opus quality mean (0–3). A tier's line falling off below some size is the shelf.
 
 | model | params (B) | mode | scaffold | disclosure | max_tok | solved | abort | T1 chain / judge | T2 chain / judge | T3 chain / judge | T4 chain / judge | overall |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -20,6 +20,10 @@
 | gemma-4-26B-A4B-it | 26 | manual | on | off | 16384 | 86% | — | 100% / 3.0 | 92% / 2.8 | 93% / 2.9 | 71% / 2.5 | 88% / 2.8 |
 | gemma-4-26B-A4B-it | 26 | native | off | off | 16384 | 64% | n/a | 100% / 3.0 | 100% / 2.9 | 50% / 1.4 | 21% / 0.8 | 65% / 2.0 |
 | gemma-4-26B-A4B-it | 26 | manual | off | off | 16384 | 64% | n/a | 100% / 3.0 | 100% / 3.0 | 43% / 1.3 | 21% / 0.6 | 63% / 2.0 |
+| Qwen3.6-27B-FP8 | 27 | native | on | off | 16384 | 36% | 0% | 75% / 2.2 | 42% / 1.8 | 29% / 0.8 | 0% / 0.0 | 35% / 1.2 |
+| Qwen3.6-27B-FP8 | 27 | manual | on | off | 16384 | 77% | 0% | 92% / 2.5 | 83% / 2.3 | 86% / 2.6 | 79% / 2.6 | 85% / 2.5 |
+| Qwen3.6-27B-FP8 | 27 | native | off | off | 16384 | 59% | n/a | 92% / 2.8 | 83% / 2.9 | 57% / 1.5 | 21% / 1.0 | 62% / 2.1 |
+| Qwen3.6-27B-FP8 | 27 | manual | off | off | 16384 | 36% | n/a | 83% / 2.6 | 92% / 1.9 | 14% / 0.3 | 7% / 0.2 | 46% / 1.3 |
 | Qwen3.6-35B-A3B-FP8 | 35 | native | on | off | 16384 | 70% | 0% | 83% / 2.9 | 83% / 2.9 | 64% / 2.1 | 57% / 1.8 | 71% / 2.4 |
 | Qwen3.6-35B-A3B-FP8 | 35 | manual | on | off | 16384 | 79% | 2% | 100% / 3.0 | 100% / 2.8 | 79% / 2.5 | 57% / 2.1 | 83% / 2.6 |
 | Qwen3.6-35B-A3B-FP8 | 35 | native | off | off | 16384 | 25% | n/a | 83% / 2.6 | 0% / 0.8 | 0% / 0.0 | 0% / 0.1 | 19% / 0.9 |
