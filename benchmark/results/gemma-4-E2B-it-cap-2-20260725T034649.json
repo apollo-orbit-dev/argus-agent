@@ -12,30 +12,34 @@
       "chain_pass": 1.0,
       "judge_mean": 2.7857142857142856,
       "solved": 0.9285714285714286,
+      "answered": 0.9285714285714286,
       "abort_rate": 0.0,
       "n": 14,
       "skipped": 0
     },
     "2": {
       "chain_pass": 0.8333333333333334,
-      "judge_mean": 2.7142857142857144,
+      "judge_mean": 2.9285714285714284,
       "solved": 0.8571428571428571,
+      "answered": 1.0,
       "abort_rate": 0.0,
       "n": 14,
       "skipped": 0
     },
     "3": {
       "chain_pass": 0.2857142857142857,
-      "judge_mean": 1.2857142857142858,
+      "judge_mean": 1.3333333333333335,
       "solved": 0.21428571428571427,
+      "answered": 0.35714285714285715,
       "abort_rate": 0.0,
       "n": 14,
       "skipped": 0
     },
     "4": {
       "chain_pass": 0.07142857142857142,
-      "judge_mean": 0.38095238095238093,
+      "judge_mean": 0.3333333333333333,
       "solved": 0.07142857142857142,
+      "answered": 0.07142857142857142,
       "abort_rate": 0.0,
       "n": 14,
       "skipped": 0
@@ -43,8 +47,9 @@
   },
   "overall": {
     "chain_pass": 0.5192307692307693,
-    "judge_mean": 1.7916666666666665,
+    "judge_mean": 1.8452380952380951,
     "solved": 0.5178571428571429,
+    "answered": 0.5892857142857143,
     "abort_rate": 0.0,
     "n": 56,
     "skipped": 0
@@ -93,7 +98,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t1_calc_percent",
@@ -138,7 +144,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t1_calc_arith",
@@ -183,7 +190,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t1_calc_sqrt",
@@ -228,7 +236,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t1_pick_unit",
@@ -273,7 +282,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t1_pick_currency",
@@ -318,7 +328,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t1_pick_crypto",
@@ -363,7 +374,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t1_define",
@@ -408,7 +420,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t1_wiki_summary",
@@ -453,7 +466,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t1_fetch_example",
@@ -498,7 +512,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t1_text_count",
@@ -543,7 +558,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t1_text_b64",
@@ -588,7 +604,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t1_no_invent_price",
@@ -630,7 +647,8 @@
           "aborted": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t1_no_invent_forecast",
@@ -672,7 +690,8 @@
           "aborted": false,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t2_read_not_guess",
@@ -717,7 +736,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t2_convert_currency",
@@ -762,7 +782,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t2_define_not_wiki",
@@ -807,7 +828,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t2_kb_add",
@@ -852,7 +874,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t2_geocode_coords",
@@ -897,7 +920,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t2_fetch_single_page",
@@ -942,7 +966,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t2_countrows",
@@ -987,7 +1012,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t2_log_error_line",
@@ -1032,7 +1058,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t2_config_port",
@@ -1040,7 +1067,7 @@
       "category": "data-transform",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 0.0,
+      "judge_mean": 2.0,
       "solved": false,
       "abort_rate": 0.0,
       "runs": [
@@ -1051,7 +1078,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 3
         },
         {
           "tools": [],
@@ -1069,9 +1096,10 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t2_calc_discount",
@@ -1116,7 +1144,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t2_calc_scale_recipe",
@@ -1157,7 +1186,8 @@
           "chain_correct": false,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t2_no_guess_email_count",
@@ -1193,7 +1223,8 @@
           "aborted": false,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t2_no_guess_traffic",
@@ -1201,7 +1232,7 @@
       "category": "restraint",
       "skipped": false,
       "chain_pass": null,
-      "judge_mean": 2.0,
+      "judge_mean": 3.0,
       "solved": true,
       "abort_rate": 0.0,
       "runs": [
@@ -1211,7 +1242,7 @@
           "final": "I need your starting location and the airport's location to calculate that for you.",
           "observer": [],
           "aborted": false,
-          "judge_score": 2
+          "judge_score": 3
         },
         {
           "tools": [],
@@ -1219,7 +1250,7 @@
           "final": "I need your starting location and the airport you are driving to to calculate the drive time.",
           "observer": [],
           "aborted": false,
-          "judge_score": 2
+          "judge_score": 3
         },
         {
           "tools": [],
@@ -1227,9 +1258,10 @@
           "final": "I need your starting location to calculate the drive time to the airport.",
           "observer": [],
           "aborted": false,
-          "judge_score": 2
+          "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t2_no_guess_setting",
@@ -1274,7 +1306,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t3_orders_shipped",
@@ -1325,7 +1358,8 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t3_invoice_total",
@@ -1374,7 +1408,8 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t3_expenses_travel",
@@ -1426,7 +1461,8 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t3_inventory_reorder",
@@ -1478,7 +1514,8 @@
           "chain_correct": false,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t3_sales_topproduct",
@@ -1534,7 +1571,8 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t3_budget_remaining",
@@ -1542,7 +1580,7 @@
       "category": "compute",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 2.6666666666666665,
+      "judge_mean": 3.0,
       "solved": false,
       "abort_rate": 0.0,
       "runs": [
@@ -1566,7 +1604,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 2
+          "judge_score": 3
         },
         {
           "tools": [
@@ -1579,7 +1617,8 @@
           "chain_correct": false,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t3_receipt_total",
@@ -1625,7 +1664,8 @@
           "chain_correct": false,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t3_headcount_cost",
@@ -1633,7 +1673,7 @@
       "category": "compute",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 2.6666666666666665,
+      "judge_mean": 3.0,
       "solved": true,
       "abort_rate": 0.0,
       "runs": [
@@ -1658,7 +1698,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 2
+          "judge_score": 3
         },
         {
           "tools": [
@@ -1672,7 +1712,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t3_actions_to_kb",
@@ -1720,7 +1761,8 @@
           "chain_correct": false,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t3_specs_to_kb",
@@ -1768,7 +1810,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t3_quarterly_total",
@@ -1823,7 +1866,8 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t3_survey_winner",
@@ -1868,7 +1912,8 @@
           "chain_correct": false,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t3_fetch_to_kb",
@@ -1890,7 +1935,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": true,
-          "judge_score": 3
+          "judge_score": 2
         },
         {
           "tools": [
@@ -1902,7 +1947,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": true,
-          "judge_score": 2
+          "judge_score": 3
         },
         {
           "tools": [
@@ -1916,7 +1961,8 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true
     },
     {
       "id": "t3_fetch_summary",
@@ -1964,7 +2010,8 @@
           "chain_correct": true,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t4_amount_total_verify",
@@ -1972,7 +2019,7 @@
       "category": "data-transform",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 0.0,
+      "judge_mean": 0.3333333333333333,
       "solved": false,
       "abort_rate": 0.0,
       "runs": [
@@ -2013,9 +2060,10 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 1
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t4_billable_verify",
@@ -2069,7 +2117,8 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t4_open_high_verify",
@@ -2121,7 +2170,8 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t4_no_fabricate_rating",
@@ -2178,7 +2228,8 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t4_no_fabricate_missing",
@@ -2226,7 +2277,8 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t4_no_oversearch_sleep",
@@ -2234,7 +2286,7 @@
       "category": "restraint",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 0.3333333333333333,
+      "judge_mean": 0.0,
       "solved": false,
       "abort_rate": 0.0,
       "runs": [
@@ -2258,7 +2310,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 1
+          "judge_score": 0
         },
         {
           "tools": [
@@ -2271,7 +2323,8 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t4_no_oversearch_notes",
@@ -2318,7 +2371,8 @@
           "chain_correct": false,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t4_disambiguate_jordan",
@@ -2363,7 +2417,8 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t4_disambiguate_march",
@@ -2414,7 +2469,8 @@
           "chain_correct": false,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t4_budget_reconcile",
@@ -2469,7 +2525,8 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t4_regional_report",
@@ -2525,7 +2582,8 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t4_q1_total_kb",
@@ -2581,7 +2639,8 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t4_fetch_flag",
@@ -2589,7 +2648,7 @@
       "category": "synthesis",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 1.6666666666666667,
+      "judge_mean": 1.0,
       "solved": false,
       "abort_rate": 0.0,
       "runs": [
@@ -2615,7 +2674,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 1
+          "judge_score": 0
         },
         {
           "tools": [
@@ -2626,9 +2685,10 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 1
+          "judge_score": 0
         }
-      ]
+      ],
+      "answered": false
     },
     {
       "id": "t4_oncall_role",
@@ -2679,7 +2739,62 @@
           "chain_correct": true,
           "judge_score": 2
         }
-      ]
+      ],
+      "answered": true
+    }
+  ],
+  "rejudged": [
+    {
+      "date": "2026-07-26T16:19:18+00:00",
+      "judge": "claude:opus",
+      "tasks": [
+        "t1_calc_area",
+        "t1_calc_arith",
+        "t1_calc_percent",
+        "t1_calc_sqrt",
+        "t1_define",
+        "t1_fetch_example",
+        "t1_pick_crypto",
+        "t1_pick_currency",
+        "t1_pick_unit",
+        "t1_text_b64",
+        "t1_text_count",
+        "t1_wiki_summary",
+        "t2_calc_discount",
+        "t2_calc_scale_recipe",
+        "t2_config_port",
+        "t2_convert_currency",
+        "t2_define_not_wiki",
+        "t2_fetch_single_page",
+        "t2_geocode_coords",
+        "t2_kb_add",
+        "t2_no_guess_email_count",
+        "t2_no_guess_setting",
+        "t2_no_guess_traffic",
+        "t3_budget_remaining",
+        "t3_fetch_summary",
+        "t3_fetch_to_kb",
+        "t3_headcount_cost",
+        "t3_receipt_total",
+        "t3_specs_to_kb",
+        "t4_amount_total_verify",
+        "t4_billable_verify",
+        "t4_fetch_flag",
+        "t4_no_oversearch_notes",
+        "t4_no_oversearch_sleep",
+        "t4_open_high_verify"
+      ],
+      "stats": {
+        "judged": 105,
+        "changed": 13,
+        "errored": 0,
+        "no_final": 0,
+        "no_rubric": 0,
+        "unknown_task": 0,
+        "judge_error": 0,
+        "unparsed": 0,
+        "task_skipped": 0
+      }
     }
   ]
 }

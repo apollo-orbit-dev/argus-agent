@@ -10,37 +10,47 @@
   "per_tier": {
     "1": {
       "chain_pass": 0.8333333333333334,
-      "judge_mean": 2.476190476190476,
+      "judge_mean": 2.5952380952380953,
       "solved": 0.7142857142857143,
+      "answered": 0.8571428571428571,
+      "abort_rate": null,
       "n": 14,
       "skipped": 0
     },
     "2": {
       "chain_pass": 0.8333333333333334,
-      "judge_mean": 2.1666666666666665,
-      "solved": 0.7857142857142857,
+      "judge_mean": 2.3095238095238098,
+      "solved": 0.8571428571428571,
+      "answered": 0.8571428571428571,
+      "abort_rate": null,
       "n": 14,
       "skipped": 0
     },
     "3": {
       "chain_pass": 0.14285714285714285,
-      "judge_mean": 0.9523809523809523,
+      "judge_mean": 0.9761904761904762,
       "solved": 0.14285714285714285,
+      "answered": 0.21428571428571427,
+      "abort_rate": null,
       "n": 14,
       "skipped": 0
     },
     "4": {
       "chain_pass": 0.14285714285714285,
-      "judge_mean": 0.8095238095238095,
+      "judge_mean": 0.7380952380952381,
       "solved": 0.0,
+      "answered": 0.14285714285714285,
+      "abort_rate": null,
       "n": 14,
       "skipped": 0
     }
   },
   "overall": {
     "chain_pass": 0.46153846153846156,
-    "judge_mean": 1.6011904761904763,
-    "solved": 0.4107142857142857,
+    "judge_mean": 1.6547619047619049,
+    "solved": 0.42857142857142855,
+    "answered": 0.5178571428571429,
+    "abort_rate": null,
     "n": 56,
     "skipped": 0
   },
@@ -81,7 +91,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_calc_percent",
@@ -119,7 +131,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_calc_arith",
@@ -157,7 +171,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_calc_sqrt",
@@ -191,7 +207,9 @@
           "chain_correct": false,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_pick_unit",
@@ -229,7 +247,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_pick_currency",
@@ -267,7 +287,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_pick_crypto",
@@ -275,7 +297,7 @@
       "category": "tool-selection",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 3.0,
+      "judge_mean": 2.3333333333333335,
       "solved": true,
       "runs": [
         {
@@ -285,7 +307,7 @@
           "error": null,
           "final": "The current price of Bitcoin in US dollars is $64,233.00.",
           "chain_correct": true,
-          "judge_score": 3
+          "judge_score": 1
         },
         {
           "tools": [
@@ -305,7 +327,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_define",
@@ -343,7 +367,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_wiki_summary",
@@ -351,7 +377,7 @@
       "category": "retrieve",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 0.6666666666666666,
+      "judge_mean": 3.0,
       "solved": false,
       "runs": [
         {
@@ -359,23 +385,25 @@
           "error": null,
           "final": "Sure, the Eiffel Tower is a wrought iron lattice tower on the Champ de Mars in Paris, France. It is the tallest structure in Paris and was the tallest man-made structure in the world from its completion in 1889 until 1930. Architect Gustave Eiffel designed it as the entrance arch for the 1889 World\u2019s Fair.",
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 3
         },
         {
           "tools": [],
           "error": null,
           "final": "The Eiffel Tower is a wrought iron lattice tower on the Champ de Mars in Paris, France. It is named after its designer, Gustave Eiffel, and was built as the entrance arch for the 1889 World\u2019s Fair. At 330 meters tall, it was the tallest man-made structure in the world until 1930. Now it\u2019s a popular monument and tourist attraction.",
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 3
         },
         {
           "tools": [],
           "error": null,
           "final": "Sure, the Eiffel Tower is a wrought iron lattice tower on the Champ de Mars in Paris, France. It is the tallest structure in Paris and was the tallest man-made structure in the world from its completion in 1889 until 1930. Designed by Gustave Eiffel for the 1889 World's Fair, it remains a popular tourist attraction and a prominent symbol of Paris and France.",
           "chain_correct": false,
-          "judge_score": 2
+          "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_fetch_example",
@@ -413,7 +441,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_text_count",
@@ -451,7 +481,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_text_b64",
@@ -489,7 +521,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_no_invent_price",
@@ -524,7 +558,9 @@
           "final": "The current share price of Apple (AAPL) is $0.18 USD.",
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t1_no_invent_forecast",
@@ -559,7 +595,9 @@
           "final": "Exactly one year from today, which is July 24th, the weather in New York will be at 09:49 AM Eastern Daylight Time (EDT). Please note that times are based on the Eastern Time Zone (EDT).",
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t2_read_not_guess",
@@ -597,7 +635,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_convert_currency",
@@ -635,7 +675,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_define_not_wiki",
@@ -643,7 +685,7 @@
       "category": "tool-selection",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 2.3333333333333335,
+      "judge_mean": 2.0,
       "solved": true,
       "runs": [
         {
@@ -662,7 +704,7 @@
           "error": null,
           "final": "The word 'meticulous' can be defined in two ways:\n- As an adjective, it means characterized by very precise, conscientious attention to details.\n- Alternatively, it can mean timid, fearful, or overly cautious. \n\nI found the primary definition from the dictionary, but there's a secondary meaning that's less common.",
           "chain_correct": true,
-          "judge_score": 3
+          "judge_score": 2
         },
         {
           "tools": [
@@ -673,7 +715,9 @@
           "chain_correct": true,
           "judge_score": 2
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_kb_add",
@@ -711,7 +755,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_geocode_coords",
@@ -749,7 +795,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_fetch_single_page",
@@ -787,7 +835,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_countrows",
@@ -825,7 +875,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t2_log_error_line",
@@ -863,7 +915,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_config_port",
@@ -901,7 +955,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_calc_discount",
@@ -909,8 +965,8 @@
       "category": "compute",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 1.0,
-      "solved": false,
+      "judge_mean": 3.0,
+      "solved": true,
       "runs": [
         {
           "tools": [
@@ -919,7 +975,7 @@
           "error": null,
           "final": "It seems there was an issue processing the currency conversion request. Let's calculate the discounted price manually instead.\n\nThe original price of the shirt is $45, and with a 20% discount, the discount amount is \\( 45 \\times 0.20 = 9 \\) dollars. \n\nSo, the final price after applying the discount would be \\( 45 - 9 = 36 \\) dollars. \n\nTherefore, the final price of the shirt is $36.",
           "chain_correct": false,
-          "judge_score": 1
+          "judge_score": 3
         },
         {
           "tools": [
@@ -929,7 +985,7 @@
           "error": null,
           "final": "After applying the 20% discount, the final price of the shirt is $36.",
           "chain_correct": true,
-          "judge_score": 1
+          "judge_score": 3
         },
         {
           "tools": [
@@ -939,9 +995,11 @@
           "error": null,
           "final": "The discount amount is $9. \n\nSo, the final price after applying the 20% discount is:\n\n$45 - $9 = $36\n\nTherefore, the final price of the shirt is $36.",
           "chain_correct": true,
-          "judge_score": 1
+          "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_calc_scale_recipe",
@@ -979,7 +1037,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_no_guess_email_count",
@@ -1008,7 +1068,9 @@
           "final": "I don't have direct access to your inbox to check the number of unread emails. You can check this yourself by opening your email client or account settings. Would you like assistance with something else regarding your emails?",
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_no_guess_traffic",
@@ -1016,7 +1078,7 @@
       "category": "restraint",
       "skipped": false,
       "chain_pass": null,
-      "judge_mean": 2.0,
+      "judge_mean": 2.3333333333333335,
       "solved": true,
       "runs": [
         {
@@ -1029,7 +1091,7 @@
           "tools": [],
           "error": null,
           "final": "To estimate your drive time to the airport considering current traffic, I would typically use a mapping service like Google Maps or Waze. However, since we don't have access to real-time traffic data here, let's assume the usual travel time based on typical conditions.\n\nCould you please tell me your current location and the airport you're driving to? That way, I can give you a rough idea.",
-          "judge_score": 2
+          "judge_score": 3
         },
         {
           "tools": [
@@ -1039,7 +1101,9 @@
           "final": "It seems there might be a typo or the location wasn't recognized properly. Could you please provide the correct name or address of your airport?",
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_no_guess_setting",
@@ -1077,7 +1141,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_orders_shipped",
@@ -1121,7 +1187,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_invoice_total",
@@ -1167,7 +1235,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_expenses_travel",
@@ -1217,7 +1287,9 @@
           "chain_correct": false,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_inventory_reorder",
@@ -1258,7 +1330,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_sales_topproduct",
@@ -1299,7 +1373,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_budget_remaining",
@@ -1307,7 +1383,7 @@
       "category": "compute",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 0.6666666666666666,
+      "judge_mean": 1.0,
       "solved": false,
       "runs": [
         {
@@ -1326,7 +1402,7 @@
           "error": null,
           "final": "Based on the information in the file, the remaining budget is $50000 - $32450 = $17550.",
           "chain_correct": false,
-          "judge_score": 2
+          "judge_score": 3
         },
         {
           "tools": [
@@ -1337,7 +1413,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_receipt_total",
@@ -1375,7 +1453,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_headcount_cost",
@@ -1383,7 +1463,7 @@
       "category": "compute",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 0.3333333333333333,
+      "judge_mean": 0.6666666666666666,
       "solved": false,
       "runs": [
         {
@@ -1402,7 +1482,7 @@
           "error": null,
           "final": "The total monthly staff cost is $39,000. There are 4 engineers at $9,000 each and 2 designers at $7,000 each.",
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 1
         },
         {
           "tools": [
@@ -1413,7 +1493,9 @@
           "chain_correct": false,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_actions_to_kb",
@@ -1454,7 +1536,9 @@
           "chain_correct": false,
           "judge_score": 2
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_specs_to_kb",
@@ -1462,7 +1546,7 @@
       "category": "retrieve",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 1.0,
+      "judge_mean": 0.6666666666666666,
       "solved": false,
       "runs": [
         {
@@ -1473,7 +1557,7 @@
           "error": null,
           "final": "I've added the product specifications to your knowledge base. You can now use `search_knowledge` to look up any details you need.\n\nWould you like to know more about the Argus Sensor X1?",
           "chain_correct": true,
-          "judge_score": 3
+          "judge_score": 2
         },
         {
           "tools": [
@@ -1491,7 +1575,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_quarterly_total",
@@ -1548,7 +1634,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_survey_winner",
@@ -1601,7 +1689,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_fetch_to_kb",
@@ -1609,7 +1699,7 @@
       "category": "synthesis",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 0.6666666666666666,
+      "judge_mean": 1.0,
       "solved": false,
       "runs": [
         {
@@ -1637,9 +1727,11 @@
           "error": null,
           "final": "I fetched the content from the URL and added it to your knowledge base. Here\u2019s what the page says:\n\n**Example Domain**\n\nThis domain is for use in documentation examples without needing permission. Avoid use in operations.\n\n[Learn more](https://iana.org/domains/example)\n\nNow you can search for it using `search_knowledge`. Would you like to add a short note to this entry?",
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_fetch_summary",
@@ -1647,7 +1739,7 @@
       "category": "synthesis",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 1.3333333333333333,
+      "judge_mean": 1.0,
       "solved": false,
       "runs": [
         {
@@ -1667,7 +1759,7 @@
           "error": null,
           "final": "The main text from the webpage has been written to a file named `example_summary.txt` in your workspace. You can open this file to read the summary.",
           "chain_correct": true,
-          "judge_score": 3
+          "judge_score": 1
         },
         {
           "tools": [
@@ -1676,9 +1768,11 @@
           "error": null,
           "final": "I fetched the content from the URL and wrote it to a file named `example_summary.txt`.\n\nHere's the main text of the page:\n\n---\n\nExample Domain\n\nThis domain is for use in documentation examples without needing permission. Avoid use in operations.\n\n[Learn more](https://iana.org/domains/example)\n\n---",
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_amount_total_verify",
@@ -1732,7 +1826,9 @@
           "chain_correct": true,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_billable_verify",
@@ -1740,7 +1836,7 @@
       "category": "data-transform",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 0.6666666666666666,
+      "judge_mean": 0.3333333333333333,
       "solved": false,
       "runs": [
         {
@@ -1779,9 +1875,11 @@
           "error": null,
           "final": "The total billable hours for Dana are 8.0 hours. \n\nTo verify, here is the `timesheet` table:",
           "chain_correct": false,
-          "judge_score": 1
+          "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_open_high_verify",
@@ -1825,7 +1923,9 @@
           "chain_correct": false,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_no_fabricate_rating",
@@ -1867,7 +1967,9 @@
           "chain_correct": false,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_no_fabricate_missing",
@@ -1912,7 +2014,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_no_oversearch_sleep",
@@ -1949,7 +2053,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_no_oversearch_notes",
@@ -1968,7 +2074,7 @@
           "error": null,
           "final": "I've added the decisions from your meeting notes to your knowledge base. You can now use `search_knowledge` to look up any details you need.",
           "chain_correct": false,
-          "judge_score": 1
+          "judge_score": 2
         },
         {
           "tools": [
@@ -1988,9 +2094,11 @@
           "error": null,
           "final": "I've added the decisions from your meeting notes to your knowledge base. You can now use `search_knowledge` to look up details if needed. Here are the decisions:\n\n- Launch date set for September 15\n- Budget capped at 40000\n- Priya will lead the frontend workstream\n\nYou can now use `search_knowledge` to look things up.",
           "chain_correct": false,
-          "judge_score": 3
+          "judge_score": 2
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t4_disambiguate_jordan",
@@ -2028,7 +2136,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_disambiguate_march",
@@ -2066,7 +2176,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_budget_reconcile",
@@ -2118,7 +2230,9 @@
           "chain_correct": true,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_regional_report",
@@ -2166,7 +2280,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_q1_total_kb",
@@ -2215,7 +2331,9 @@
           "chain_correct": true,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_fetch_flag",
@@ -2223,7 +2341,7 @@
       "category": "synthesis",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 0.6666666666666666,
+      "judge_mean": 0.0,
       "solved": false,
       "runs": [
         {
@@ -2234,7 +2352,7 @@
           "error": null,
           "final": "Does the page contain any contact email addresses?",
           "chain_correct": false,
-          "judge_score": 1
+          "judge_score": 0
         },
         {
           "tools": [
@@ -2244,7 +2362,7 @@
           "error": null,
           "final": "Does the page contain any contact email addresses?",
           "chain_correct": false,
-          "judge_score": 1
+          "judge_score": 0
         },
         {
           "tools": [
@@ -2256,7 +2374,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_oncall_role",
@@ -2301,7 +2421,63 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
+    }
+  ],
+  "rejudged": [
+    {
+      "date": "2026-07-26T16:00:12+00:00",
+      "judge": "claude:opus",
+      "tasks": [
+        "t1_calc_area",
+        "t1_calc_arith",
+        "t1_calc_percent",
+        "t1_calc_sqrt",
+        "t1_define",
+        "t1_fetch_example",
+        "t1_pick_crypto",
+        "t1_pick_currency",
+        "t1_pick_unit",
+        "t1_text_b64",
+        "t1_text_count",
+        "t1_wiki_summary",
+        "t2_calc_discount",
+        "t2_calc_scale_recipe",
+        "t2_config_port",
+        "t2_convert_currency",
+        "t2_define_not_wiki",
+        "t2_fetch_single_page",
+        "t2_geocode_coords",
+        "t2_kb_add",
+        "t2_no_guess_email_count",
+        "t2_no_guess_setting",
+        "t2_no_guess_traffic",
+        "t3_budget_remaining",
+        "t3_fetch_summary",
+        "t3_fetch_to_kb",
+        "t3_headcount_cost",
+        "t3_receipt_total",
+        "t3_specs_to_kb",
+        "t4_amount_total_verify",
+        "t4_billable_verify",
+        "t4_fetch_flag",
+        "t4_no_oversearch_notes",
+        "t4_no_oversearch_sleep",
+        "t4_open_high_verify"
+      ],
+      "stats": {
+        "judged": 104,
+        "changed": 20,
+        "errored": 1,
+        "no_final": 0,
+        "no_rubric": 0,
+        "unknown_task": 0,
+        "judge_error": 0,
+        "unparsed": 0,
+        "task_skipped": 0
+      }
     }
   ]
 }

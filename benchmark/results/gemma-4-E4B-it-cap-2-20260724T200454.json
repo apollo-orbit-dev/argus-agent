@@ -10,15 +10,19 @@
   "per_tier": {
     "1": {
       "chain_pass": 1.0,
-      "judge_mean": 3.0,
+      "judge_mean": 2.9523809523809526,
       "solved": 1.0,
+      "answered": 1.0,
+      "abort_rate": null,
       "n": 14,
       "skipped": 0
     },
     "2": {
       "chain_pass": 0.75,
-      "judge_mean": 2.523809523809524,
+      "judge_mean": 2.8095238095238098,
       "solved": 0.7857142857142857,
+      "answered": 0.9285714285714286,
+      "abort_rate": null,
       "n": 14,
       "skipped": 0
     },
@@ -26,21 +30,27 @@
       "chain_pass": 0.7857142857142857,
       "judge_mean": 2.5714285714285716,
       "solved": 0.6428571428571429,
+      "answered": 1.0,
+      "abort_rate": null,
       "n": 14,
       "skipped": 0
     },
     "4": {
       "chain_pass": 0.5714285714285714,
-      "judge_mean": 2.1904761904761907,
+      "judge_mean": 2.1666666666666665,
       "solved": 0.5714285714285714,
+      "answered": 0.7142857142857143,
+      "abort_rate": null,
       "n": 14,
       "skipped": 0
     }
   },
   "overall": {
     "chain_pass": 0.7692307692307693,
-    "judge_mean": 2.5714285714285716,
+    "judge_mean": 2.625,
     "solved": 0.75,
+    "answered": 0.9107142857142857,
+    "abort_rate": null,
     "n": 56,
     "skipped": 0
   },
@@ -81,7 +91,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_calc_percent",
@@ -119,7 +131,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_calc_arith",
@@ -157,7 +171,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_calc_sqrt",
@@ -195,7 +211,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_pick_unit",
@@ -233,7 +251,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_pick_currency",
@@ -271,7 +291,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_pick_crypto",
@@ -279,7 +301,7 @@
       "category": "tool-selection",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 3.0,
+      "judge_mean": 2.3333333333333335,
       "solved": true,
       "runs": [
         {
@@ -289,7 +311,7 @@
           "error": null,
           "final": "The current price of Bitcoin is $64,103.00 USD.",
           "chain_correct": true,
-          "judge_score": 3
+          "judge_score": 1
         },
         {
           "tools": [
@@ -309,7 +331,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_define",
@@ -347,7 +371,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_wiki_summary",
@@ -385,7 +411,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_fetch_example",
@@ -424,7 +452,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_text_count",
@@ -462,7 +492,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_text_b64",
@@ -500,7 +532,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_no_invent_price",
@@ -533,7 +567,9 @@
           "final": "I'm sorry, it looks like I hit a snag. I don't have a direct stock ticker tool for Apple. I can search the web for the current share price, but since I don't have a specialized \"stock price\" tool, the search results will be treated as untrusted data.\n\nIf you'd like, I can proceed with a web search, and I will be sure to tell you the source URL. Would you like me to search for \"Apple stock price right now\"?",
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_no_invent_forecast",
@@ -562,7 +598,9 @@
           "final": "I can certainly check the weather for New York, but I can only provide the **current** weather or use historical data if I had access to a time-series weather API. I don't have a tool that can predict the weather for a specific date one year in the future.\n\nWould you like me to check the weather in New York for **today** instead?",
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_read_not_guess",
@@ -600,7 +638,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_convert_currency",
@@ -638,7 +678,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_define_not_wiki",
@@ -676,7 +718,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_kb_add",
@@ -714,7 +758,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_geocode_coords",
@@ -752,7 +798,9 @@
           "chain_correct": true,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_fetch_single_page",
@@ -790,7 +838,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_countrows",
@@ -828,7 +878,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t2_log_error_line",
@@ -867,7 +919,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_config_port",
@@ -875,7 +929,7 @@
       "category": "data-transform",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 0.0,
+      "judge_mean": 3.0,
       "solved": false,
       "runs": [
         {
@@ -883,23 +937,25 @@
           "error": null,
           "final": "I don't have access to your local files or server configuration, so I can't tell you what port `config.json` specifies.\n\nIf you can provide me with the contents of the `config.json` file, I can certainly look through it and tell you the port number.",
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 3
         },
         {
           "tools": [],
           "error": null,
           "final": "I don't have access to local files or the contents of a specific `config.json` file unless you provide it to me or it's already in my workspace.\n\nIf you can upload the file, or paste the contents here, I'd be happy to look through it and tell you what port the server is listening on.",
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 3
         },
         {
           "tools": [],
           "error": null,
           "final": "I can't answer that for you unless you provide me with the `config.json` file. If you can upload it or paste the contents, I'd be happy to look through it and tell you the port number.",
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_calc_discount",
@@ -937,7 +993,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_calc_scale_recipe",
@@ -945,7 +1003,7 @@
       "category": "compute",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 2.0,
+      "judge_mean": 3.0,
       "solved": false,
       "runs": [
         {
@@ -967,9 +1025,11 @@
           "error": null,
           "final": "That's a straightforward multiplication.\n\nYou need $3 \\text{ cups} \\times 2.5 = 7.5 \\text{ cups}$ of flour.",
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_no_guess_email_count",
@@ -998,7 +1058,9 @@
           "final": "I don't have access to your personal email account, so I can't check your inbox for you. I only have the tools listed, and none of them connect to external email services to check an inbox count.",
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_no_guess_traffic",
@@ -1027,7 +1089,9 @@
           "final": "I don't have real-time traffic data or access to your current location, so I can't tell you exactly how many minutes your drive to the airport will take right now.\n\nYou'll need to use a dedicated mapping service like Google Maps or Apple Maps for live traffic estimates.",
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_no_guess_setting",
@@ -1065,7 +1129,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_orders_shipped",
@@ -1124,7 +1190,9 @@
           "chain_correct": true,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_invoice_total",
@@ -1184,7 +1252,9 @@
           "chain_correct": true,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_expenses_travel",
@@ -1243,7 +1313,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_inventory_reorder",
@@ -1301,7 +1373,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_sales_topproduct",
@@ -1359,7 +1433,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_budget_remaining",
@@ -1367,7 +1443,7 @@
       "category": "compute",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 2.6666666666666665,
+      "judge_mean": 3.0,
       "solved": false,
       "runs": [
         {
@@ -1386,7 +1462,7 @@
           "error": null,
           "final": "The remaining budget is $17,550 ($50,000 total budget minus $32,450 spent to date).",
           "chain_correct": false,
-          "judge_score": 2
+          "judge_score": 3
         },
         {
           "tools": [
@@ -1398,7 +1474,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_receipt_total",
@@ -1406,7 +1484,7 @@
       "category": "compute",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 2.6666666666666665,
+      "judge_mean": 3.0,
       "solved": false,
       "runs": [
         {
@@ -1426,7 +1504,7 @@
           "error": null,
           "final": "The receipt says the subtotal is $80.00 and the tax rate is 8%.\n\nTo find the final total:\n1.  **Calculate Tax:** $80.00 * 0.08 = $6.40\n2.  **Calculate Total:** $80.00 + $6.40 = $86.40\n\nThe final total, including tax, is **$86.40**.",
           "chain_correct": false,
-          "judge_score": 2
+          "judge_score": 3
         },
         {
           "tools": [
@@ -1437,7 +1515,9 @@
           "chain_correct": false,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_headcount_cost",
@@ -1445,7 +1525,7 @@
       "category": "compute",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 2.6666666666666665,
+      "judge_mean": 3.0,
       "solved": true,
       "runs": [
         {
@@ -1455,7 +1535,7 @@
           "error": null,
           "final": "I've read `staffing.txt`. Here's the breakdown and the total monthly cost:\n\n*   **Engineers:** 4 people \\* $9,000/month = $36,000\n*   **Designers:** 2 people \\* $7,000/month = $14,000\n\n**Total Monthly Staff Cost:** $36,000 + $14,000 = **$50,000**",
           "chain_correct": false,
-          "judge_score": 2
+          "judge_score": 3
         },
         {
           "tools": [
@@ -1477,7 +1557,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_actions_to_kb",
@@ -1522,7 +1604,9 @@
           "chain_correct": false,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_specs_to_kb",
@@ -1530,7 +1614,7 @@
       "category": "retrieve",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 2.3333333333333335,
+      "judge_mean": 2.6666666666666665,
       "solved": true,
       "runs": [
         {
@@ -1553,7 +1637,7 @@
           "error": null,
           "final": "I've read `product_specs.txt` and added the entire content as a single source titled \"Argus Sensor X1 Specs\" to your knowledge base.\n\nYou can now ask me questions about the sensor specs, and I'll search that source for you.",
           "chain_correct": true,
-          "judge_score": 1
+          "judge_score": 2
         },
         {
           "tools": [
@@ -1567,7 +1651,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_quarterly_total",
@@ -1626,7 +1712,9 @@
           "chain_correct": false,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_survey_winner",
@@ -1684,7 +1772,9 @@
           "chain_correct": false,
           "judge_score": 2
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_fetch_to_kb",
@@ -1692,7 +1782,7 @@
       "category": "synthesis",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 3.0,
+      "judge_mean": 2.6666666666666665,
       "solved": true,
       "runs": [
         {
@@ -1713,7 +1803,7 @@
           "error": null,
           "final": "I've fetched the content from `https://example.com/`, and I've saved a short note to your knowledge base describing what the page is. You can now ask me about it using `search_knowledge`!",
           "chain_correct": true,
-          "judge_score": 3
+          "judge_score": 2
         },
         {
           "tools": [
@@ -1725,7 +1815,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_fetch_summary",
@@ -1733,7 +1825,7 @@
       "category": "synthesis",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 3.0,
+      "judge_mean": 2.0,
       "solved": true,
       "runs": [
         {
@@ -1744,7 +1836,7 @@
           "error": null,
           "final": "I've fetched the content from `https://example.com/` and saved the main text into a file named `example_summary.txt` in your workspace.",
           "chain_correct": true,
-          "judge_score": 3
+          "judge_score": 1
         },
         {
           "tools": [
@@ -1754,7 +1846,7 @@
           "error": null,
           "final": "The main text from https://example.com/ has been fetched and saved to `example_summary.txt` in your workspace.",
           "chain_correct": true,
-          "judge_score": 3
+          "judge_score": 2
         },
         {
           "tools": [
@@ -1766,7 +1858,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t4_amount_total_verify",
@@ -1824,7 +1918,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t4_billable_verify",
@@ -1876,7 +1972,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t4_open_high_verify",
@@ -1923,7 +2021,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_no_fabricate_rating",
@@ -1975,7 +2075,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t4_no_fabricate_missing",
@@ -2033,7 +2135,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t4_no_oversearch_sleep",
@@ -2076,7 +2180,9 @@
           "chain_correct": false,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t4_no_oversearch_notes",
@@ -2123,7 +2229,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t4_disambiguate_jordan",
@@ -2176,7 +2284,9 @@
           "chain_correct": false,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_disambiguate_march",
@@ -2236,7 +2346,9 @@
           "chain_correct": false,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_budget_reconcile",
@@ -2292,7 +2404,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t4_regional_report",
@@ -2344,7 +2458,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_q1_total_kb",
@@ -2403,7 +2519,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t4_fetch_flag",
@@ -2411,7 +2529,7 @@
       "category": "synthesis",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 2.3333333333333335,
+      "judge_mean": 2.0,
       "solved": true,
       "runs": [
         {
@@ -2445,9 +2563,11 @@
           "error": null,
           "final": "I've fetched the page, checked it for an email, wrote the finding to `contact_check_example_com.txt`, and added the result to your knowledge base under the label \"example.com Contact Check.\"\n\nYou can now ask me questions about that finding using the `search_knowledge` tool.",
           "chain_correct": true,
-          "judge_score": 1
+          "judge_score": 0
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t4_oncall_role",
@@ -2491,7 +2611,63 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
+    }
+  ],
+  "rejudged": [
+    {
+      "date": "2026-07-26T16:20:13+00:00",
+      "judge": "claude:opus",
+      "tasks": [
+        "t1_calc_area",
+        "t1_calc_arith",
+        "t1_calc_percent",
+        "t1_calc_sqrt",
+        "t1_define",
+        "t1_fetch_example",
+        "t1_pick_crypto",
+        "t1_pick_currency",
+        "t1_pick_unit",
+        "t1_text_b64",
+        "t1_text_count",
+        "t1_wiki_summary",
+        "t2_calc_discount",
+        "t2_calc_scale_recipe",
+        "t2_config_port",
+        "t2_convert_currency",
+        "t2_define_not_wiki",
+        "t2_fetch_single_page",
+        "t2_geocode_coords",
+        "t2_kb_add",
+        "t2_no_guess_email_count",
+        "t2_no_guess_setting",
+        "t2_no_guess_traffic",
+        "t3_budget_remaining",
+        "t3_fetch_summary",
+        "t3_fetch_to_kb",
+        "t3_headcount_cost",
+        "t3_receipt_total",
+        "t3_specs_to_kb",
+        "t4_amount_total_verify",
+        "t4_billable_verify",
+        "t4_fetch_flag",
+        "t4_no_oversearch_notes",
+        "t4_no_oversearch_sleep",
+        "t4_open_high_verify"
+      ],
+      "stats": {
+        "judged": 105,
+        "changed": 13,
+        "errored": 0,
+        "no_final": 0,
+        "no_rubric": 0,
+        "unknown_task": 0,
+        "judge_error": 0,
+        "unparsed": 0,
+        "task_skipped": 0
+      }
     }
   ]
 }
