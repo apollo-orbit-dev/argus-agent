@@ -1018,7 +1018,15 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
                             f"failed — this install needs manual attention.")
             else:
                 headline = "❌ Update failed: " + _esc(res.get("detail") or "unknown error")
-            body = [headline, "", f"<pre>{_esc(tail)}</pre>"]
+            body = [headline]
+            # ABOVE the log tail, not inside it. Only the last 20 lines are quoted, and the rollback
+            # writes this one first — so as a log line it fell off the top exactly when the update
+            # produced enough output to matter.
+            if res.get("stash"):
+                body += ["", "Your version of the files it replaced was saved to the git stash as "
+                             f"<code>{_esc(str(res['stash']))}</code> — list it with "
+                             f"<code>git stash list</code>."]
+            body += ["", f"<pre>{_esc(tail)}</pre>"]
             cmd = res.get("revert_command") or (res.get("commands") or [None])[0]
             if cmd:
                 body += ["", "To put it back by hand:", f"<code>{_esc(cmd)}</code>"]

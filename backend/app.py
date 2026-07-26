@@ -663,18 +663,41 @@ def create_app(engine: Engine) -> FastAPI:
             raise HTTPException(409, "An update is being installed right now — restarting would "
                                      "kill it halfway through. Wait for it to finish.")
         info = await run_in_threadpool(updater.restart_strategy)
+        # The check above is a POINT-IN-TIME read, and it is followed by an await (the threadpool
+        # dispatch) and then by a >=0.6s wait inside the task below. An apply started from Telegram
+        # anywhere in that window takes the lock legitimately, AFTER the check, and is killed
+        # mid-pip. So the gate is asked three times: here, again immediately before the process is
+        # actually replaced, and — for the other direction, an apply arriving after this point —
+        # from apply_update_async, via the restart_pending flag set below.
+        if updater.update_in_progress():
+            raise HTTPException(409, "An update is being installed right now — restarting would "
+                                     "kill it halfway through. Wait for it to finish.")
+        if info["strategy"] == "manual":
+            # Windows: no restart is attempted. The instruction is the whole answer — and nothing is
+            # scheduled, so nothing has to be fenced off.
+            updater.write_state(state="restarting", before_restart=state.get("state"),
+                                strategy=info["strategy"],
+                                pending_notice=state.get("pending_notice"))
+            return {"restarting": False, **info}
+
+        updater.mark_restart_pending()
         # before_restart carries the outcome we are restarting INTO across the restart: the boot-side
         # settle (deliver_pending_update_notice) has to put it back, and hardcoding "applied" there
         # turns a revert into an "applied" record that offers to revert to the release already running.
         updater.write_state(state="restarting", before_restart=state.get("state"),
                             strategy=info["strategy"],
                             pending_notice=state.get("pending_notice"))
-        if info["strategy"] == "manual":
-            # Windows: no restart is attempted. The instruction is the whole answer.
-            return {"restarting": False, **info}
 
         async def _do():
             await asyncio.sleep(0.6)          # let the HTTP response flush first
+            if updater.update_in_progress():
+                # An update took the lock before the flag went up. Killing it here is the exact
+                # brick this route refuses at the door, so stand down and put the state back.
+                updater.clear_restart_pending()
+                updater.write_state(state=state.get("state") or "none",
+                                    before_restart=None,
+                                    pending_notice=state.get("pending_notice"))
+                return
             updater.perform_restart(info)
         asyncio.create_task(_do())
         return {"restarting": True, **info}

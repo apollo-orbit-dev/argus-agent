@@ -1560,6 +1560,15 @@
       el.innerHTML = updBad('Update failed at ' + (result.failed_step || '?') + ' — state: '
         + (result.state || '?') + (result.state === 'reverted' ? ' (rolled back; still running v'
         + wasVersion + ')' : ''));
+      // Where the rollback put the tree it found. This is a CARD line, not a log line: the output
+      // pane can be scrolled past or closed, and nothing else in either UI ever mentions it.
+      if (result.stash){
+        el.innerHTML += '<span>Your version of the files it replaced was saved to the git stash as "'
+          + esc(result.stash) + '" — recover it with: git stash list</span>';
+        out.textContent += '\nYour version of the files it replaced was saved to the git stash as "'
+          + result.stash + '":\n  git stash list\n  git stash show -p "stash@{0}"\n'
+          + '  git stash pop\n';
+      }
       var cmds = (result.commands && result.commands.length) ? result.commands
                  : (result.revert_command ? [result.revert_command] : []);
       if (cmds.length) out.textContent += '\nTo put this install back by hand:\n' + cmds.join('\n') + '\n';

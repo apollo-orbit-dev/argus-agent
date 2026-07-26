@@ -541,20 +541,9 @@ def test_apply_detects_a_partial_checkout_and_rolls_back(tmp_path, monkeypatch):
     assert len(pip_calls) == 2, "pip ran forward and then again for the rollback"
 
 
-@needs_git
-def test_rollback_preserves_a_file_the_maintainer_edited_during_the_update(tmp_path, monkeypatch):
-    """THE data-loss sequence, exactly:
-
-      1. preflight passes on a clean tree.
-      2. during the multi-minute fetch/checkout/pip window the maintainer edits a tracked file that
-         is IDENTICAL in both refs — so `git checkout <target>` CARRIES THE EDIT OVER and exits 0.
-      3. verification then sees a dirty tree and cannot tell that edit from a file git failed to
-         write, so it rolls back.
-      4. the rollback checks out --force, which discards it.
-
-    The edit must survive. `_verify` cannot diagnose the dirt, so the rollback must not destroy
-    either explanation of it: it copies the file aside first and says where.
-    """
+def _two_release_clone(tmp_path, monkeypatch) -> Path:
+    """A clone at v0.1.0 whose SETTINGS.md is IDENTICAL in both releases — so a checkout of v0.2.0
+    carries a mid-update edit of it straight across and exits 0."""
     origin = tmp_path / "origin"
     origin.mkdir()
     _git(origin, "init", "-b", "main")
@@ -567,7 +556,25 @@ def test_rollback_preserves_a_file_the_maintainer_edited_during_the_update(tmp_p
         _git(origin, "tag", f"v{v}")
     clone = _make_clone(tmp_path, origin, at="v0.1.0")
     _pin(monkeypatch, clone)
+    return clone
 
+
+@needs_git
+def test_rollback_stashes_a_file_the_maintainer_edited_during_the_update(tmp_path, monkeypatch):
+    """THE data-loss sequence, exactly:
+
+      1. preflight passes on a clean tree.
+      2. during the multi-minute fetch/checkout/pip window the maintainer edits a tracked file that
+         is IDENTICAL in both refs — so `git checkout <target>` CARRIES THE EDIT OVER and exits 0.
+      3. verification then sees a dirty tree and cannot tell that edit from a file git failed to
+         write, so it rolls back.
+      4. the rollback puts the release back over it.
+
+    The edit must survive. `_verify` cannot diagnose the dirt, so the rollback must not destroy
+    either explanation of it: it hands the tree to `git stash` first and says what the stash is
+    called.
+    """
+    clone = _two_release_clone(tmp_path, monkeypatch)
     mine = "the note I was in the middle of writing\n"
     real_stream = updater._stream
     pip = {"n": 0}
@@ -589,13 +596,13 @@ def test_rollback_preserves_a_file_the_maintainer_edited_during_the_update(tmp_p
     assert _git(clone, "rev-parse", "HEAD") == _git(clone, "rev-parse", "v0.1.0^{commit}")
     assert (clone / "SETTINGS.md").read_text() == "shipped default\n", "the rollback did run"
 
-    # ...but the maintainer's bytes are still on disk, and the report says where.
-    saved = sorted((clone / updater.RESCUE_DIR).rglob("SETTINGS.md"))
-    assert saved, "the rollback DESTROYED a file the maintainer had edited — no stash, no backup"
-    assert saved[0].read_text() == mine
-    where = str(saved[0].parent)
-    assert where in res["detail"], "the failure report must say where the preserved copy is"
-    assert any(where in str(e.get("line", "")) for e in events if e["type"] == "log")
+    # ...but the maintainer's bytes are in git's own stash, under a name the report gives back.
+    name = "argus-update-v0.1.0-v0.2.0"
+    assert res["stash"] == name, "the result must name the stash — both UIs render this field"
+    assert name in _git(clone, "stash", "list"), "the stash is not discoverable from git stash list"
+    assert _git(clone, "show", "stash@{0}:SETTINGS.md") == mine.strip()
+    assert name in res["detail"]
+    assert any(name in str(e.get("line", "")) for e in events if e["type"] == "log")
 
     # And it must not misdiagnose whose fault it was: git wrote the file perfectly well.
     assert "git reported success but could not write" not in res["detail"]
@@ -604,72 +611,57 @@ def test_rollback_preserves_a_file_the_maintainer_edited_during_the_update(tmp_p
 
 
 @needs_git
-def test_rollback_preserves_user_data_at_a_path_the_old_release_shipped(tmp_path, monkeypatch):
-    """The once-tracked-now-runtime-data shape, which `--force` makes WORSE rather than better.
-
-    A release that turns a shipped path into a runtime data dir (.gitignore already carries three:
-    /routines/, agent-created tools and skills, model_presets.json) leaves the user's own data at a
-    path the OLD ref still tracks. Rolling back writes the shipped file over it: a plain checkout
-    refuses that for an untracked file and clobbers an IGNORED one silently, and --force clobbers
-    both without a word. The bytes must be recoverable either way.
-    """
-    origin = tmp_path / "origin"
-    origin.mkdir()
-    _git(origin, "init", "-b", "main")
-    ignore = ".argus-update.json\n.argus-rescue/\n"
-    (origin / ".gitignore").write_text(ignore)
-    (origin / "pyproject.toml").write_text('[project]\nname = "argus"\nversion = "0.1.0"\n')
-    (origin / "routines").mkdir()
-    (origin / "routines" / "daily.json").write_text("shipped example\n")
-    _git(origin, "add", "-A")
-    _git(origin, "commit", "-m", "release 0.1.0")
-    _git(origin, "tag", "v0.1.0")
-    # 0.2.0 stops shipping routines/ and declares it a runtime data dir.
-    (origin / ".gitignore").write_text(ignore + "/routines/\n")
-    (origin / "pyproject.toml").write_text('[project]\nname = "argus"\nversion = "0.2.0"\n')
-    _git(origin, "rm", "-q", "routines/daily.json")
-    _git(origin, "add", "-A")
-    _git(origin, "commit", "-m", "release 0.2.0")
-    _git(origin, "tag", "v0.2.0")
-    clone = _make_clone(tmp_path, origin, at="v0.1.0")
-    _pin(monkeypatch, clone)
-
-    mine = '{"my": "routine"}\n'
-    real_stream = updater._stream
+def test_a_rollback_whose_stash_fails_changes_nothing_at_all(tmp_path, monkeypatch):
+    """FAIL SAFE — the one thing worse than no rollback is a rollback that checks out over work it
+    failed to preserve. If `git stash push` returns non-zero, the checkout must not run: HEAD stays
+    where it is, the tree is left alone, and the report says needs_manual with git's own words."""
+    clone = _two_release_clone(tmp_path, monkeypatch)
+    mine = "the note I was in the middle of writing\n"
+    at_target = _git(clone, "rev-parse", "v0.2.0^{commit}")
+    real_stream, real_run = updater._stream, updater._run
+    checkouts: list = []
     pip = {"n": 0}
 
-    def fake(argv, cwd=updater.ROOT, timeout=updater.PIP_TIMEOUT, emit=None):
+    def fake_stream(argv, cwd=updater.ROOT, timeout=updater.PIP_TIMEOUT, emit=None):
         if "pip" in argv:
             pip["n"] += 1
             if pip["n"] == 1:
-                # The new release owns routines/ as user data now — this is the user's file.
-                (clone / "routines").mkdir(exist_ok=True)
-                (clone / "routines" / "daily.json").write_text(mine)
-                return 1                                     # ...and then the install fails
+                (clone / "SETTINGS.md").write_text(mine)
             return 0
+        if "checkout" in argv:
+            checkouts.append(list(argv))
         return real_stream(argv, cwd, timeout, emit)
-    monkeypatch.setattr(updater, "_stream", fake)
+
+    def fake_run(argv, cwd=updater.ROOT, timeout=20.0):
+        if argv[:3] == ["git", "stash", "push"]:
+            return 1, "", "fatal: cannot save the current worktree state: Disk quota exceeded"
+        return real_run(argv, cwd, timeout)
+    monkeypatch.setattr(updater, "_stream", fake_stream)
+    monkeypatch.setattr(updater, "_run", fake_run)
 
     res = updater.apply_update("v0.2.0", clone)
-    assert res["state"] == "reverted" and res["failed_step"] == "pip"
-    # The rollback restores the old release's file — that part is correct, it is what v0.1.0 says.
-    assert (clone / "routines" / "daily.json").read_text() == "shipped example\n"
-    # The user's data was copied aside first rather than destroyed.
-    saved = sorted((clone / updater.RESCUE_DIR).rglob("daily.json"))
-    assert saved, "--force overwrote the user's data at a path the old release shipped"
-    assert saved[0].read_text() == mine
-    assert str(saved[0].parents[1]) in res["detail"]
+
+    assert res["state"] == "needs_manual" and res["failed_step"] == "verify"
+    assert res["stash"] is None
+    assert [c for c in checkouts if "v0.1.0" in c] == [], (
+        "the rollback checked out over a tree it had just failed to preserve")
+    assert _git(clone, "rev-parse", "HEAD") == at_target, "HEAD was moved after a failed stash"
+    assert (clone / "SETTINGS.md").read_text() == mine, "the unsaved edit was destroyed"
+    assert "Disk quota exceeded" in res["detail"], "git's own error must be quoted verbatim"
+    assert "nothing here has been changed" in res["detail"]
+    assert any("git stash push" in c for c in res["commands"]), "no way forward was offered"
 
 
 @needs_git
-def test_a_rollback_with_nothing_at_risk_leaves_no_rescue_directory(repo, monkeypatch):
-    """The preserve step must be silent when there is nothing to preserve — a rescue directory
-    appearing after every failed update would train the maintainer to ignore it."""
+def test_a_rollback_with_a_clean_tree_creates_no_stash(repo, monkeypatch):
+    """The preserve step must be silent when there is nothing to preserve — a stash appearing after
+    every failed update would train the maintainer to ignore the ones that matter."""
     _stub_pip(monkeypatch, rc=1, fail_first_only=True)
     res = updater.apply_update("v0.2.0", repo)
     assert res["state"] == "reverted"
-    assert not (repo / updater.RESCUE_DIR).exists()
-    assert "copies of the files it overwrote" not in res["detail"]
+    assert res["stash"] is None
+    assert _git(repo, "stash", "list") == "", "a rollback with nothing to save left a stash behind"
+    assert "git stash" not in res["detail"]
 
 
 @needs_git
@@ -777,6 +769,44 @@ def test_stream_bounds_wall_clock_when_a_descendant_still_holds_the_pipe(tmp_pat
         pytest.fail(f"the descendant ({descendant}) outlived the timeout — the group was not killed")
 
 
+def test_stream_watchdog_never_signals_a_child_that_has_already_been_reaped(tmp_path, monkeypatch):
+    """`done.wait(timeout)` returning False does NOT prove the child is still running: it can lose
+    that race by microseconds to the main thread's p.wait(). killpg would then send SIGKILL to
+    whatever process group has since inherited that pgid — someone else's processes. Ask the
+    process, not the event."""
+    killed: list = []
+    decided = threading.Event()          # the watchdog has finished making up its mind
+
+    def _blocking_stdout():
+        # Holds the read loop open until the watchdog has decided, so the assertion below is about
+        # the guard and not about which thread won a race.
+        decided.wait(5.0)
+        return
+        yield                            # pragma: no cover - generator, never reached
+
+    class _AlreadyExited:
+        """A child that finished — and was reaped by the main thread — just as the deadline fired."""
+        pid = 4242424
+        stdout = _blocking_stdout()
+
+        def poll(self):
+            decided.set()                # the guard asked; that IS the decision
+            return 0
+
+        def wait(self):
+            return 0
+
+        def kill(self):
+            killed.append("kill")
+            decided.set()
+
+    proc = _AlreadyExited()
+    monkeypatch.setattr(updater.subprocess, "Popen", lambda *a, **kw: proc)
+    monkeypatch.setattr(updater.os, "killpg", lambda pid, sig: (killed.append(pid), decided.set()))
+    updater._stream([sys.executable, "-c", "pass"], tmp_path, 0.05)
+    assert killed == [], "the watchdog signalled a process group it may no longer own"
+
+
 def test_stream_still_returns_the_real_exit_code_of_a_quick_command(tmp_path):
     lines: list = []
     rc = updater._stream([sys.executable, "-c", "print('hello'); raise SystemExit(3)"],
@@ -832,6 +862,28 @@ async def test_an_update_refused_as_busy_touches_nothing(repo, monkeypatch):
     # Released on the way out, so the next attempt is not blocked forever.
     assert updater.update_in_progress() is False
     assert (await updater.apply_update_async("v0.2.0", repo))["ok"] is True
+
+
+async def test_an_apply_is_refused_once_a_restart_has_been_scheduled(tmp_path, monkeypatch):
+    """The CONVERSE of the lock, and the half that was missing. /update/restart answers the request
+    first and replaces the process ~0.6s later; the lock is not held across that gap. An apply
+    starting inside it takes the lock legitimately and is then killed mid-pip — HEAD already on the
+    new tag, the rollback never reached. So a scheduled restart refuses new work too."""
+    monkeypatch.setattr(updater, "_RESTART_PENDING", False)
+    monkeypatch.setattr(updater, "apply_update",
+                        lambda *a, **k: pytest.fail("an update started into a pending restart"))
+    monkeypatch.setattr(updater, "revert",
+                        lambda *a, **k: pytest.fail("a revert started into a pending restart"))
+    updater.mark_restart_pending()
+    events: list = []
+    res = await updater.apply_update_async("v0.2.0", tmp_path, events.append)
+    assert res["state"] == "busy" and res["ok"] is False
+    assert "restarting" in res["detail"]
+    assert [e["type"] for e in events] == ["done"], "the refusal is a terminal done event"
+    assert (await updater.revert_async(tmp_path))["state"] == "busy"
+    assert updater.update_in_progress() is False, "the refusal must not take the lock"
+    updater.clear_restart_pending()
+    assert updater.restart_pending() is False
 
 
 async def test_the_exclusion_never_queues(tmp_path):
@@ -981,9 +1033,9 @@ def test_state_file_is_gitignored():
     # Never written any more (the exclusion is an asyncio.Lock), but a file left behind by an older
     # version must still not show up as a change.
     assert ".argus-update.lock" in text
-    # What a failed update copies aside before rolling the tree back. Ignored, or the very next
-    # preflight would refuse the retry because of it.
-    assert f"{updater.RESCUE_DIR}/" in text
+    # There is nothing else to ignore: a failed rollback saves the tree with `git stash`, which
+    # keeps it inside .git rather than in a directory of its own.
+    assert ".argus-rescue" not in text
 
 
 def test_revert_command_is_literal_and_runnable(tmp_path):

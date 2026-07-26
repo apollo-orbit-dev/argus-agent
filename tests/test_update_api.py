@@ -64,6 +64,9 @@ def upd(monkeypatch, tmp_path):
                                                         "instruction": "re-exec"})
     monkeypatch.setattr(updater, "perform_restart", lambda info: state.update(restarted=True))
     monkeypatch.setattr(updater, "can_revert", lambda clone_dir=updater.ROOT: (True, ""))
+    # A module-level flag set by /update/restart. monkeypatch owns it here so a test that schedules
+    # a restart cannot leak "a restart is pending" into every test that runs after it.
+    monkeypatch.setattr(updater, "_RESTART_PENDING", False)
     updater._test_state = state
     return updater
 
@@ -270,6 +273,41 @@ async def test_restart_refuses_while_an_update_is_being_applied(tmp_path, upd, m
     assert calls == [], "no restart may be attempted while an update is in flight"
 
 
+async def test_restart_stands_down_if_an_update_starts_inside_the_handoff_window(tmp_path, upd,
+                                                                                 monkeypatch):
+    """The refusal above is a POINT-IN-TIME read, and the restart it guards happens at least 0.6s
+    later — after the response has flushed. An apply started from Telegram anywhere in that window
+    takes the lock legitimately, AFTER the check, and `pip install -e .` is then killed halfway
+    through writing site-packages with HEAD already on the new tag. Asking once is not a gate."""
+    calls: list = []
+    monkeypatch.setattr(upd, "perform_restart", calls.append)
+    async with _client(tmp_path) as c:
+        r = await c.post("/update/restart")
+        assert r.status_code == 200 and r.json()["restarting"] is True
+        assert upd._test_state["state"] == "restarting"
+        async with upd.exclusive():          # an update starts inside the handoff window
+            await asyncio.sleep(1.0)         # ...and is still running when the restart would fire
+    assert calls == [], "the restart killed an update that started after the check"
+    assert upd._test_state["state"] != "restarting", (
+        "standing down must put the recorded state back, or the boot-side settle is left waiting")
+    assert upd.restart_pending() is False, "a restart that stood down must unblock the next update"
+
+
+async def test_an_apply_is_refused_once_a_restart_has_been_scheduled(tmp_path, upd, monkeypatch):
+    """The other direction: an apply that arrives AFTER the restart was decided. The lock is free —
+    the restart does not hold it — so only the pending-restart flag can refuse this."""
+    monkeypatch.setattr(upd, "perform_restart", lambda info: None)
+    monkeypatch.setattr(upd, "apply_update",
+                        lambda *a, **k: pytest.fail("an update started into a pending restart"))
+    async with _client(tmp_path) as c:
+        assert (await c.post("/update/restart")).json()["restarting"] is True
+        r = await c.post("/update/apply", json={"target": "v0.2.0", "confirm": "v0.2.0"})
+        evs = _events(r.text)
+    assert [e["type"] for e in evs] == ["done"]
+    assert evs[-1]["state"] == "busy" and evs[-1]["ok"] is False
+    assert "restarting" in evs[-1]["detail"]
+
+
 async def test_restart_is_not_bricked_by_an_applying_left_over_from_a_crash(tmp_path, upd,
                                                                            monkeypatch):
     """state="applying" is written before the work begins and cleared only by finish(). A process
@@ -344,3 +382,38 @@ async def test_revert_streams_sse(tmp_path, upd, monkeypatch):
         r = await c.post("/update/revert", json={"confirm": "revert"})
     assert r.headers["content-type"].startswith("text/event-stream")
     assert _events(r.text)[-1]["state"] == "reverted"
+
+
+# --------------------------------------------------------------------------
+# the stash has to reach the person who pressed the button
+# --------------------------------------------------------------------------
+async def test_a_rolled_back_update_streams_the_stash_name_as_a_field(tmp_path, upd, monkeypatch):
+    """`detail` is a paragraph neither UI renders in full, and a log line is one of hundreds. The
+    name of the stash the rollback made is its own field on the terminal `done` event, so the card
+    can show it without parsing prose."""
+    def fake_apply(target, clone_dir=upd.ROOT, emit=None):
+        emit({"type": "done", "ok": False, "state": "reverted", "failed_step": "verify",
+              "stash": "argus-update-v0.1.0-v0.2.0", "restart": None, "commands": [],
+              "detail": "verification failed — rolled back to v0.1.0."})
+        return {}
+    monkeypatch.setattr(upd, "apply_update", fake_apply)
+    async with _client(tmp_path) as c:
+        r = await c.post("/update/apply", json={"target": "v0.2.0", "confirm": "v0.2.0"})
+    assert _events(r.text)[-1]["stash"] == "argus-update-v0.1.0-v0.2.0"
+
+
+def test_the_update_card_shows_the_stash_name():
+    """Round 3 MED-5: the rescue path went into `res["detail"]`, which NEITHER UI renders — so the
+    one message telling a user where their work went was never displayed anywhere. A non-CLI user
+    lives in this card; if it is not here, it does not exist. (A source assertion because the
+    dashboard has no JS test harness — it is still the only thing that fails if the line is
+    deleted.)"""
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "dashboard" / "app.js").read_text(encoding="utf-8")
+    failure_branch = js.split("async function finishUpdate", 1)[1] \
+                       .split("if (!result.ok)", 1)[1] \
+                       .split("el.innerHTML = updOk", 1)[0]
+    assert "result.stash" in failure_branch, "the update card never mentions the stash"
+    assert "el.innerHTML +=" in failure_branch and "esc(result.stash)" in failure_branch, (
+        "the stash name must land in the CARD (escaped), not only in the scrollback pane")
+    assert "git stash list" in failure_branch, "and it must say how to get the files back"

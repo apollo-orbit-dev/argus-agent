@@ -16,13 +16,25 @@ guarantee hold is that `.env`, `*.db`, `model_presets.json`, `workspaces/`, `cre
 `SOUL.md`, `trusted_tools.json` … are gitignored AND tracked by no release, so nothing a checkout
 writes ever lands on them. There is deliberately no "clean the tree" step anywhere in here.
 
-The one shape that breaks that property is a release that turns a formerly-shipped path into a
-runtime data dir (.gitignore already carries three: /routines/, agent-created tools/skills,
-model_presets.json). Going FORWARD is still safe — the new tag does not track the path. Rolling BACK
-is not: the old ref does track it, so the checkout writes the shipped file over the user's data.
-`_rescue()` copies every such path — and every tracked file the user has modified — aside before the
-rollback runs, so nothing is ever destroyed, only moved. tests/test_updater.py proves both halves
-against the real .gitignore.
+THE ROLLBACK PRESERVES THE TREE WITH GIT'S OWN STASH, not a bespoke copy-aside. Before the rollback
+checkout, `git stash push --include-untracked` hands the whole working tree to git; only then does a
+PLAIN checkout of the previous ref run. Git already gets right every case a hand-rolled copy got
+wrong — a path that changed between file and directory, paths git quotes for spaces or non-ASCII,
+symlinks (saved as links, not as dereferenced content), permissions and modes — and what it saves is
+discoverable through a documented interface (`git stash list`) rather than a directory nobody was
+told about. It is also what makes the PLAIN checkout viable: the stash leaves the tree clean, so
+there is nothing for the checkout to refuse and no reason to reach for `--force`.
+
+If the stash FAILS, the rollback does not run at all. A rollback that cannot preserve the tree is
+the one thing worse than no rollback, so the result is state="needs_manual" with the stash error
+verbatim, HEAD left exactly where it is and nothing on disk touched.
+
+KNOWN LIMIT, stated because it is a deliberate trade: `--include-untracked` does not save IGNORED
+files (`--all` would, but it would also strip .env, every *.db and .venv/ out of a live install —
+categorically worse). So the one shape still unprotected is a release that turns a formerly-shipped
+path into a *gitignored* runtime data dir: rolling back writes the old release's shipped file over
+the user's data there, silently, because that is what `git checkout` does to an ignored file. Going
+FORWARD is unaffected, and it needs a failed update to be reached at all.
 
 Every subprocess call goes through `_run` (capture) or `_stream` (line-by-line) — the two seams the
 suite monkeypatches, so tests never invoke real git/pip against the network.
@@ -34,7 +46,6 @@ import contextlib
 import json
 import os
 import re
-import shutil
 import signal
 import subprocess
 import sys
@@ -55,7 +66,6 @@ ROOT = Path(__file__).resolve().parents[1]          # clone dir (holds main.py, 
 NEWEST_TAG_ARGV = ["git", "tag", "-l", "v*", "--sort=-v:refname"]
 
 STATE_FILE = ROOT / ".argus-update.json"            # gitignored; see state_path()
-RESCUE_DIR = ".argus-rescue"                        # gitignored; see _rescue()
 CHANGELOG_CAP = 8000
 PIP_TIMEOUT = 600.0                                 # a cold-cache wheel build is slow (matches sandbox setup)
 FETCH_TIMEOUT = 120.0
@@ -120,11 +130,23 @@ def _stream(argv: list[str], cwd: Path = ROOT, timeout: float = PIP_TIMEOUT,
 
     def _watchdog() -> None:
         if not done.wait(timeout):
+            # `done` being unset does NOT prove the child is still unreaped: the wait can return
+            # False microseconds before the main thread's p.wait() reaps it, and killpg would then
+            # signal whatever process group has since inherited that pgid. So ask the process. A
+            # child that has already exited is not a timeout at all — the read loop is about to end
+            # and return its real exit code. (poll() is safe from this thread: Popen serialises
+            # reaping on its own _waitpid_lock.)
+            #
+            # This narrows the recycled-pgid window to the gap between the poll and the signal; it
+            # does not close it, and nothing available here would. The cost is real and named: if
+            # the leader has exited while a DESCENDANT still holds the stdout pipe, this returns
+            # without killing the group and the read loop stays blocked.
+            if p.poll() is not None:
+                return
             timed_out.set()
             try:
                 # p.pid IS the group id: start_new_session made the child a session/group leader, so
-                # this needs no getpgid round-trip that could race. The child has not been waited on
-                # (done is unset), so its pid cannot have been recycled.
+                # this needs no getpgid round-trip that could race.
                 if hasattr(os, "killpg"):
                     os.killpg(p.pid, signal.SIGKILL)
                 else:
@@ -465,6 +487,34 @@ BUSY_DETAIL = ("Another update is already running. Wait for it to finish — run
 _EXCLUSIVE = asyncio.Lock()
 
 
+# The other half of the exclusion, and the converse of the lock: a restart that has been DECIDED but
+# has not happened yet. /update/restart answers the HTTP request first and replaces the process ~0.6s
+# later, and the update lock is not held across that gap — so an apply started from Telegram inside
+# it takes the lock legitimately and is then killed mid-pip, which is the precise way to brick an
+# install. In-process and one-way on purpose: it is only ever set by a process that is about to stop
+# existing, so there is nothing to expire and nothing to clean up on disk.
+_RESTART_PENDING = False
+
+RESTART_PENDING_DETAIL = ("Argus is restarting right now — starting an update in the moment before "
+                          "the process is replaced would kill it halfway through. Try again once it "
+                          "is back.")
+
+
+def restart_pending() -> bool:
+    return _RESTART_PENDING
+
+
+def mark_restart_pending() -> None:
+    global _RESTART_PENDING
+    _RESTART_PENDING = True
+
+
+def clear_restart_pending() -> None:
+    """Only for the caller that decided NOT to go through with the restart after all."""
+    global _RESTART_PENDING
+    _RESTART_PENDING = False
+
+
 def update_in_progress() -> bool:
     """Is an update or revert running RIGHT NOW? The only honest answer to "would restarting kill an
     install halfway through" — the state file cannot answer it, because a process that died
@@ -563,63 +613,39 @@ def _tree_is_clean(clone_dir: Path) -> tuple[bool, str]:
     return False, f"{len(names)} file(s) do not match the checked-out release ({shown})"
 
 
-def _at_risk_paths(clone_dir: Path, from_ref: str) -> list[str]:
-    """Every path on disk whose content `git checkout --force <from_ref>` is about to destroy.
+def _stash_ref(clone_dir: Path) -> str:
+    """The sha refs/stash points at, or "" when this clone has no stash at all. Compared either
+    side of the push because `git stash push` EXITS 0 on a clean tree without creating anything
+    ("No local changes to save") — the return code alone cannot say whether a stash exists."""
+    rc, out, _ = _run(["git", "rev-parse", "--verify", "--quiet", "refs/stash"], clone_dir)
+    return out.strip() if rc == 0 else ""
 
-    Two sources, and both are real:
-      1. TRACKED FILES THAT DIFFER from what is checked out. The rollback runs precisely because
-         verification found some, and it cannot tell a file git failed to write from one the
-         maintainer edited while pip was running. --force discards both.
-      2. PATHS `from_ref` TRACKS THAT HEAD DOES NOT. When a release turns a shipped file into a
-         runtime data dir, the user's data now sits at a path the OLD ref owns. A plain checkout
-         REFUSES to overwrite an untracked file there (and clobbers an ignored one silently);
-         --force overwrites both without a word.
+
+def _stash_working_tree(clone_dir: Path, name: str,
+                        log: Callable[[str], None]) -> tuple[bool, bool, str]:
+    """Hand the working tree to `git stash push --include-untracked` before the rollback checkout.
+
+    Returns (ok, created, error). `ok` false means the tree could NOT be preserved and the caller
+    must not check anything out — see rollback(). `created` false with ok true means there was
+    nothing to save.
+
+    Git, not a hand-rolled copy, because git is what already handles a path that swapped between
+    file and directory, paths it quotes for spaces or non-ASCII, symlinks, and modes — and because
+    `git stash list` is an interface a user can be pointed at. It is also what lets the rollback use
+    a PLAIN checkout: the stash leaves the tree clean, so there is nothing left to force past.
     """
-    candidates: list[str] = []
-    rc, porcelain, _ = _run(["git", "status", "--porcelain", "--untracked-files=no"], clone_dir)
-    if rc == 0:
-        candidates += [ln.strip().split(None, 1)[-1] for ln in porcelain.splitlines() if ln.strip()]
-    rc_then, then, _ = _run(["git", "ls-tree", "-r", "--name-only", from_ref], clone_dir, timeout=60.0)
-    rc_now, now, _ = _run(["git", "ls-files"], clone_dir, timeout=60.0)
-    if rc_then == 0 and rc_now == 0:
-        tracked_now = set(now.splitlines())
-        candidates += [p for p in then.splitlines() if p and p not in tracked_now]
-    out: list[str] = []
-    for rel in candidates:
-        # A deleted file has nothing to preserve, and the checkout is about to restore it anyway.
-        if rel not in out and (clone_dir / rel).is_file():
-            out.append(rel)
-    return out
-
-
-def _rescue(clone_dir: Path, from_ref: str, log: Callable[[str], None]) -> Optional[Path]:
-    """Copy aside everything the forced rollback is about to overwrite, and say where it went.
-
-    Recoverability is the requirement. `_verify` cannot distinguish "git could not write this" from
-    "the maintainer edited it during the pip step", so the rollback must assume the second and
-    destroy neither. A plain copy rather than `git stash`: a stash can only hold paths tracked at
-    HEAD, which leaves out source 2 of _at_risk_paths entirely, and it puts recovery behind git
-    plumbing the maintainer would have to know to look for. A directory of files is inert and
-    obvious. Returns the directory, or None if there was nothing at risk.
-    """
-    rels = _at_risk_paths(clone_dir, from_ref)
-    if not rels:
-        return None
-    dest = clone_dir / RESCUE_DIR / time.strftime("%Y%m%d-%H%M%S")
-    saved: list[str] = []
-    for rel in rels:
-        try:
-            (dest / rel).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(clone_dir / rel, dest / rel)
-            saved.append(rel)
-        except OSError as e:
-            log(f"COULD NOT PRESERVE {rel}: {e}")
-    if not saved:
-        return None
-    shown = ", ".join(saved[:8]) + (f", and {len(saved) - 8} more" if len(saved) > 8 else "")
-    log(f"the tree does not match the release; before putting it back, your copy of "
-        f"{len(saved)} file(s) ({shown}) was saved to {dest} — nothing has been discarded")
-    return dest
+    before = _stash_ref(clone_dir)
+    rc, out, err = _run(["git", "stash", "push", "--include-untracked", "-m", name],
+                        clone_dir, timeout=120.0)
+    if rc != 0:
+        return False, False, (err or out or f"git stash push exited {rc}")
+    after = _stash_ref(clone_dir)
+    if not after or after == before:
+        return True, False, ""                  # clean tree — nothing needed saving
+    log(f'the tree does not match the release, so your version of it was saved to the git stash as '
+        f'"{name}" before putting the release back — nothing has been discarded. Recover it with: '
+        f'git stash list  /  git stash show -p "stash@{{0}}"  /  git stash pop')
+    return True, True, ""
 
 
 def _verify(clone_dir: Path, target: str) -> tuple[bool, str]:
@@ -669,6 +695,10 @@ async def apply_update_async(target: str, clone_dir: Path = ROOT,
     thread. `emit` is therefore called FROM that thread — every caller already crosses back to the
     loop itself (call_soon_threadsafe in the SSE bridge, a plain list append in the bot)."""
     say: Emit = emit or (lambda _ev: None)
+    if restart_pending():
+        # The converse of the lock. Taking it here would be legitimate and still fatal: the restart
+        # is already scheduled and will land in the middle of pip.
+        return _busy(say, RESTART_PENDING_DETAIL)
     try:
         async with exclusive():
             return await asyncio.to_thread(apply_update, target, clone_dir, emit)
@@ -680,6 +710,8 @@ async def revert_async(clone_dir: Path = ROOT, emit: Optional[Emit] = None) -> d
     """revert() under the same exclusion as apply_update_async — a revert racing an apply is two pip
     installs into one venv and two writers of the state file."""
     say: Emit = emit or (lambda _ev: None)
+    if restart_pending():
+        return _busy(say, RESTART_PENDING_DETAIL)
     try:
         async with exclusive():
             return await asyncio.to_thread(revert, clone_dir, emit)
@@ -718,10 +750,15 @@ def apply_update(target: str, clone_dir: Path = ROOT, emit: Optional[Emit] = Non
     log(f"previous ref: {from_ref} ({from_tag})")
 
     def finish(ok: bool, state: str, failed_step: Optional[str], detail: str,
-               restart: Optional[dict], commands: Optional[list[str]] = None) -> dict:
-        write_state(clone_dir, state=state, failed_step=failed_step)
+               restart: Optional[dict], commands: Optional[list[str]] = None,
+               stash: Optional[str] = None) -> dict:
+        write_state(clone_dir, state=state, failed_step=failed_step, stash=stash)
         result = {"ok": ok, "state": state, "failed_step": failed_step, "detail": detail,
                   "from_tag": from_tag, "from_ref": from_ref, "to_tag": target,
+                  # `stash` is a FIELD, not a line buried in `detail`: the dashboard card and the
+                  # Telegram reply both render it, because a user who never opens a terminal is the
+                  # one this has to reach.
+                  "stash": stash,
                   "restart": restart, "revert_command": revert_command(clone_dir, from_ref),
                   "commands": commands or []}
         say({"type": "done", **result})
@@ -730,19 +767,32 @@ def apply_update(target: str, clone_dir: Path = ROOT, emit: Optional[Emit] = Non
     def rollback(failed_step: str, detail: str) -> dict:
         step("rollback", f"{failed_step} failed — putting this install back on {from_ref}")
         log(detail)
-        # PRESERVE FIRST, always. The rollback below runs --force, which DISCARDS tracked
-        # modifications and silently overwrites an untracked file at a path from_ref tracks. The
-        # tree being dirty is the normal reason we are here, and it does NOT mean git wrote it: a
-        # maintainer editing a file during the multi-minute pip step lands in exactly this branch,
-        # and that edit is theirs. _rescue copies every at-risk byte aside and logs where.
-        rescued = _rescue(clone_dir, from_ref, log)
-        kept = f" Your copies of the files it overwrote are in {rescued}." if rescued else ""
-        # --force, and only here. A plain checkout REFUSES to move when a tracked file differs from
-        # the index — which is exactly the state a partially-written checkout leaves behind, so the
-        # rollback would fail precisely in the case that needs it most. What makes that acceptable
-        # is the rescue above, not any protection --force offers: it offers none.
-        rc_co = _stream(["git", "-c", "advice.detachedHead=false", "checkout", "-q", "--force",
-                         from_ref], clone_dir, 120.0, log)
+        # PRESERVE FIRST, always. The tree being dirty is the normal reason we are here, and it does
+        # NOT mean git wrote it: a maintainer editing a file during the multi-minute pip step lands
+        # in exactly this branch, and that edit is theirs. `git stash push --include-untracked` puts
+        # the whole tree somewhere git can give it back, and leaves it clean enough that the
+        # checkout below needs no --force.
+        stash_name = f"argus-update-{from_ref}-{target}"
+        ok_stash, created, stash_err = _stash_working_tree(clone_dir, stash_name, log)
+        stash = stash_name if created else None
+        if not ok_stash:
+            # FAIL SAFE. A rollback that cannot preserve the tree must not run: checking out over
+            # unsaved work is the one outcome worse than staying broken. HEAD is untouched.
+            log(f"COULD NOT SAVE THE WORKING TREE: {stash_err}")
+            log("the rollback was NOT run — nothing on disk has been changed")
+            return finish(False, "needs_manual", failed_step,
+                          f"{detail} — and the working tree could not be saved first "
+                          f"(git stash push failed: {stash_err}), so the rollback was NOT run and "
+                          f"nothing here has been changed. HEAD is still on {target}.", None,
+                          commands=[f'cd "{clone_dir}" && git stash push --include-untracked '
+                                    f'-m "{stash_name}"',
+                                    revert_command(clone_dir, from_ref)])
+        kept = (f' Your version of the files it replaced was saved to the git stash as '
+                f'"{stash_name}" — see `git stash list`.') if created else ""
+        # A PLAIN checkout. The stash above already emptied the tree of anything git would refuse to
+        # overwrite, so --force would only add the power to destroy something without saying so.
+        rc_co = _stream(["git", "-c", "advice.detachedHead=false", "checkout", "-q", from_ref],
+                        clone_dir, 120.0, log)
         rc_pip = _stream(_pip_argv(), clone_dir, PIP_TIMEOUT, log) if rc_co == 0 else 1
         clean, why = _tree_is_clean(clone_dir) if rc_co == 0 else (False, "the checkout failed")
         if not clean:
@@ -750,11 +800,11 @@ def apply_update(target: str, clone_dir: Path = ROOT, emit: Optional[Emit] = Non
         if rc_co == 0 and rc_pip == 0 and clean:
             log(f"rolled back to {from_ref} — still running {from_tag}")
             return finish(False, "reverted", failed_step,
-                          f"{detail} — rolled back to {from_tag}.{kept}", None)
+                          f"{detail} — rolled back to {from_tag}.{kept}", None, stash=stash)
         log("ROLLBACK FAILED — this install needs manual attention")
         return finish(False, "needs_manual", failed_step,
                       f"{detail} — and the automatic rollback also failed.{kept}", None,
-                      commands=[revert_command(clone_dir, from_ref)])
+                      commands=[revert_command(clone_dir, from_ref)], stash=stash)
 
     # 2. checkout
     step("checkout", f"checking out {target}")

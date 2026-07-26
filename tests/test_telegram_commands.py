@@ -238,18 +238,20 @@ def _upd_preview(**over):
     return base
 
 
-def _stub_updater(monkeypatch, preview, apply_result=None, applied=None):
+def _stub_updater(monkeypatch, preview, apply_result=None, applied=None, log_lines=None):
     from engine import updater
     monkeypatch.setattr(updater, "preview", lambda clone_dir=updater.ROOT: preview)
     monkeypatch.setattr(updater, "write_state", lambda clone_dir=updater.ROOT, **f: dict(f))
     monkeypatch.setattr(updater, "read_state", lambda clone_dir=updater.ROOT: {})
     monkeypatch.setattr(updater, "perform_restart", lambda info: None)
+    monkeypatch.setattr(updater, "_RESTART_PENDING", False)
 
     def fake_apply(target, clone_dir=updater.ROOT, emit=None):
         if applied is not None:
             applied.append(target)
         if emit:
-            emit({"type": "log", "line": "Successfully installed argus"})
+            for line in (log_lines or ["Successfully installed argus"]):
+                emit({"type": "log", "line": line})
         return apply_result or {"ok": True, "state": "applied", "to_tag": target,
                                 "restart": {"strategy": "exec", "unit": None, "instruction": "x"}}
     monkeypatch.setattr(updater, "apply_update", fake_apply)
@@ -366,6 +368,28 @@ async def test_update_failure_reports_rollback_and_the_way_back(monkeypatch):
     assert "rolled back" in body and "pip" in body
     assert "git checkout v0.1.0" in body
     assert "Restarting" not in body, "a failed update must not offer a restart"
+
+
+async def test_update_failure_names_the_stash_outside_the_log_tail(monkeypatch):
+    """Round 3 MED-5, the Telegram half. Where the rollback put the user's files was only ever a LOG
+    LINE — and the reply quotes the last 20 lines, while the rollback writes that line FIRST. On any
+    update that produced real output it fell off the top and the user was never told. It is now part
+    of the message itself."""
+    from types import SimpleNamespace as NS
+    name = "argus-update-v0.1.0-v0.2.0"
+    noisy = [f'saved your files to the git stash as "{name}"'] + [f"pip line {i}" for i in range(40)]
+    _stub_updater(monkeypatch, _upd_preview(), log_lines=noisy, apply_result={
+        "ok": False, "state": "reverted", "failed_step": "verify", "restart": None,
+        "stash": name, "revert_command": "cd /opt/argus && git checkout v0.1.0", "commands": []})
+    msg = _Msg()
+    await _handlers()["update"](NS(effective_chat=NS(id=1), effective_message=msg),
+                                NS(args=["confirm"]))
+    body = msg.sent[-1]
+    assert "pip line 39" in body and "pip line 5" not in body, "the tail is still the last 20 lines"
+    assert name in body, "the user was never told where their files went"
+    assert "git stash list" in body, "and never told how to get them back"
+    assert body.index(name) < body.index("<pre>"), (
+        "the stash must be named ABOVE the tail — inside it, it is the line that gets cut")
 
 
 async def test_update_revert_needs_its_own_confirm(monkeypatch):

@@ -31,8 +31,6 @@ custom_commands.yaml
 # in-app updater mutual exclusion — no longer written (it is an asyncio.Lock now); still ignored so
 # a file left behind by an older version does not show up as a change
 .argus-update.lock
-# what a failed update copied aside before rolling the tree back (engine/updater.py::_rescue)
-.argus-rescue/
 # user-authored routines (repo-root runtime data dir only — not engine/routines/ source)
 /routines/
 # agent-created tools / skills
