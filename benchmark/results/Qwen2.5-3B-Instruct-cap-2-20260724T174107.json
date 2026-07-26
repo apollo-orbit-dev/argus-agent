@@ -10,9 +10,9 @@
   "per_tier": {
     "1": {
       "chain_pass": 1.0,
-      "judge_mean": 2.476190476190476,
-      "solved": 0.7857142857142857,
-      "answered": 0.7857142857142857,
+      "judge_mean": 2.642857142857143,
+      "solved": 0.8571428571428571,
+      "answered": 0.8571428571428571,
       "abort_rate": null,
       "n": 14,
       "skipped": 0
@@ -47,9 +47,9 @@
   },
   "overall": {
     "chain_pass": 0.4230769230769231,
-    "judge_mean": 1.3928571428571428,
-    "solved": 0.375,
-    "answered": 0.39285714285714285,
+    "judge_mean": 1.4345238095238095,
+    "solved": 0.39285714285714285,
+    "answered": 0.4107142857142857,
     "abort_rate": null,
     "n": 56,
     "skipped": 0
@@ -301,8 +301,8 @@
       "category": "tool-selection",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 0.6666666666666666,
-      "solved": false,
+      "judge_mean": 3.0,
+      "solved": true,
       "runs": [
         {
           "tools": [
@@ -311,7 +311,7 @@
           "error": null,
           "final": "The current price of Bitcoin in US dollars is $64,100.00.",
           "chain_correct": true,
-          "judge_score": 0
+          "judge_score": 3
         },
         {
           "tools": [
@@ -320,7 +320,7 @@
           "error": null,
           "final": "The current price of Bitcoin in US dollars is $64,100.",
           "chain_correct": true,
-          "judge_score": 1
+          "judge_score": 3
         },
         {
           "tools": [
@@ -329,10 +329,10 @@
           "error": null,
           "final": "The current price of Bitcoin in US dollars is $64,100.",
           "chain_correct": true,
-          "judge_score": 1
+          "judge_score": 3
         }
       ],
-      "answered": false,
+      "answered": true,
       "abort_rate": null
     },
     {
@@ -2371,6 +2371,26 @@
       "stats": {
         "judged": 105,
         "changed": 21,
+        "errored": 0,
+        "no_final": 0,
+        "no_rubric": 0,
+        "unknown_task": 0,
+        "judge_error": 0,
+        "unparsed": 0,
+        "task_skipped": 0
+      }
+    },
+    {
+      "date": "2026-07-26T21:40:15+00:00",
+      "judge": "claude:opus",
+      "tasks": [
+        "t1_pick_crypto",
+        "t1_pick_currency",
+        "t2_convert_currency"
+      ],
+      "stats": {
+        "judged": 9,
+        "changed": 3,
         "errored": 0,
         "no_final": 0,
         "no_rubric": 0,

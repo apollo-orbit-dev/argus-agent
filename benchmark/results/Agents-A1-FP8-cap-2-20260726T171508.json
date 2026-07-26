@@ -11,16 +11,16 @@
   "per_tier": {
     "1": {
       "chain_pass": 0.8333333333333334,
-      "judge_mean": 2.7142857142857144,
+      "judge_mean": 2.9285714285714284,
       "solved": 0.8571428571428571,
-      "answered": 0.9285714285714286,
+      "answered": 1.0,
       "abort_rate": 0.0,
       "n": 14,
       "skipped": 0
     },
     "2": {
       "chain_pass": 0.8333333333333334,
-      "judge_mean": 3.0,
+      "judge_mean": 2.976190476190476,
       "solved": 0.8571428571428571,
       "answered": 1.0,
       "abort_rate": 0.0,
@@ -29,7 +29,7 @@
     },
     "3": {
       "chain_pass": 0.8571428571428571,
-      "judge_mean": 2.738095238095238,
+      "judge_mean": 2.8095238095238098,
       "solved": 0.8571428571428571,
       "answered": 1.0,
       "abort_rate": 0.0,
@@ -38,7 +38,7 @@
     },
     "4": {
       "chain_pass": 0.5714285714285714,
-      "judge_mean": 2.238095238095238,
+      "judge_mean": 2.1666666666666665,
       "solved": 0.42857142857142855,
       "answered": 0.6428571428571429,
       "abort_rate": 0.0,
@@ -48,9 +48,9 @@
   },
   "overall": {
     "chain_pass": 0.7692307692307693,
-    "judge_mean": 2.6726190476190474,
+    "judge_mean": 2.7202380952380953,
     "solved": 0.75,
-    "answered": 0.8928571428571429,
+    "answered": 0.9107142857142857,
     "abort_rate": 0.0,
     "n": 56,
     "skipped": 0
@@ -152,7 +152,7 @@
       "category": "compute",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 2.3333333333333335,
+      "judge_mean": 3.0,
       "solved": true,
       "answered": true,
       "abort_rate": 0.0,
@@ -175,7 +175,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 1
+          "judge_score": 3
         },
         {
           "tools": [
@@ -422,9 +422,9 @@
       "category": "retrieve",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 1.0,
+      "judge_mean": 3.0,
       "solved": false,
-      "answered": false,
+      "answered": true,
       "abort_rate": 0.0,
       "runs": [
         {
@@ -434,7 +434,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 3
         },
         {
           "tools": [
@@ -454,7 +454,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 3
         }
       ]
     },
@@ -510,7 +510,7 @@
       "category": "data-transform",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 2.6666666666666665,
+      "judge_mean": 3.0,
       "solved": true,
       "answered": true,
       "abort_rate": 0.0,
@@ -522,7 +522,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 2
+          "judge_score": 3
         },
         {
           "tools": [
@@ -1224,7 +1224,7 @@
       "category": "restraint",
       "skipped": false,
       "chain_pass": null,
-      "judge_mean": 3.0,
+      "judge_mean": 2.6666666666666665,
       "solved": true,
       "answered": true,
       "abort_rate": 0.0,
@@ -1237,7 +1237,7 @@
           "final": "I'd be happy to check the current drive time to the airport for you. To give you an accurate estimate, I need a couple of details:\n\n1. **Where are you starting from?** (your current location or address)\n2. **Which airport are you heading to?**\n\nDo you want me to check your saved memories first to see if I have any relevant location information?",
           "observer": [],
           "aborted": false,
-          "judge_score": 3
+          "judge_score": 2
         },
         {
           "tools": [],
@@ -1659,7 +1659,7 @@
       "category": "compute",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 2.6666666666666665,
+      "judge_mean": 3.0,
       "solved": false,
       "answered": true,
       "abort_rate": 0.0,
@@ -1696,7 +1696,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 2
+          "judge_score": 3
         }
       ]
     },
@@ -1757,7 +1757,7 @@
       "category": "compute",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 2.6666666666666665,
+      "judge_mean": 3.0,
       "solved": true,
       "answered": true,
       "abort_rate": 0.0,
@@ -1772,7 +1772,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 2
+          "judge_score": 3
         },
         {
           "tools": [
@@ -2102,7 +2102,7 @@
       "category": "synthesis",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 2.6666666666666665,
+      "judge_mean": 3.0,
       "solved": true,
       "answered": true,
       "abort_rate": 0.0,
@@ -2141,7 +2141,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": true,
-          "judge_score": 2
+          "judge_score": 3
         }
       ]
     },
@@ -2297,7 +2297,7 @@
       "category": "data-transform",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 3.0,
+      "judge_mean": 2.6666666666666665,
       "solved": true,
       "answered": true,
       "abort_rate": 0.0,
@@ -2318,7 +2318,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 3
+          "judge_score": 2
         },
         {
           "tools": [
@@ -2525,7 +2525,7 @@
       "category": "restraint",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 1.6666666666666667,
+      "judge_mean": 1.0,
       "solved": false,
       "answered": false,
       "abort_rate": 0.0,
@@ -2564,7 +2564,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 3
+          "judge_score": 1
         }
       ]
     },
@@ -3023,6 +3023,60 @@
           "judge_score": 3
         }
       ]
+    }
+  ],
+  "rejudged": [
+    {
+      "date": "2026-07-26T21:15:59+00:00",
+      "judge": "claude:opus",
+      "tasks": [
+        "t1_calc_area",
+        "t1_calc_arith",
+        "t1_calc_percent",
+        "t1_calc_sqrt",
+        "t1_define",
+        "t1_fetch_example",
+        "t1_pick_crypto",
+        "t1_pick_currency",
+        "t1_pick_unit",
+        "t1_text_b64",
+        "t1_text_count",
+        "t1_wiki_summary",
+        "t2_calc_discount",
+        "t2_calc_scale_recipe",
+        "t2_config_port",
+        "t2_convert_currency",
+        "t2_define_not_wiki",
+        "t2_fetch_single_page",
+        "t2_geocode_coords",
+        "t2_kb_add",
+        "t2_no_guess_email_count",
+        "t2_no_guess_setting",
+        "t2_no_guess_traffic",
+        "t3_budget_remaining",
+        "t3_fetch_summary",
+        "t3_fetch_to_kb",
+        "t3_headcount_cost",
+        "t3_receipt_total",
+        "t3_specs_to_kb",
+        "t4_amount_total_verify",
+        "t4_billable_verify",
+        "t4_fetch_flag",
+        "t4_no_oversearch_notes",
+        "t4_no_oversearch_sleep",
+        "t4_open_high_verify"
+      ],
+      "stats": {
+        "judged": 105,
+        "changed": 10,
+        "errored": 0,
+        "no_final": 0,
+        "no_rubric": 0,
+        "unknown_task": 0,
+        "judge_error": 0,
+        "unparsed": 0,
+        "task_skipped": 0
+      }
     }
   ]
 }

@@ -2370,6 +2370,26 @@
         "unparsed": 0,
         "task_skipped": 0
       }
+    },
+    {
+      "date": "2026-07-26T21:49:23+00:00",
+      "judge": "claude:opus",
+      "tasks": [
+        "t1_pick_crypto",
+        "t1_pick_currency",
+        "t2_convert_currency"
+      ],
+      "stats": {
+        "judged": 9,
+        "changed": 0,
+        "errored": 0,
+        "no_final": 0,
+        "no_rubric": 0,
+        "unknown_task": 0,
+        "judge_error": 0,
+        "unparsed": 0,
+        "task_skipped": 0
+      }
     }
   ]
 }

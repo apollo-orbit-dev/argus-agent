@@ -10,7 +10,7 @@
   "per_tier": {
     "1": {
       "chain_pass": 1.0,
-      "judge_mean": 2.9047619047619047,
+      "judge_mean": 2.9523809523809526,
       "solved": 1.0,
       "answered": 1.0,
       "abort_rate": 0.0,
@@ -47,7 +47,7 @@
   },
   "overall": {
     "chain_pass": 0.5384615384615384,
-    "judge_mean": 1.9047619047619049,
+    "judge_mean": 1.9166666666666665,
     "solved": 0.5535714285714286,
     "answered": 0.6071428571428571,
     "abort_rate": 0.0,
@@ -337,7 +337,7 @@
       "category": "tool-selection",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 2.3333333333333335,
+      "judge_mean": 3.0,
       "solved": true,
       "abort_rate": 0.0,
       "runs": [
@@ -372,7 +372,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": true,
-          "judge_score": 1
+          "judge_score": 3
         }
       ],
       "answered": true
@@ -2690,6 +2690,26 @@
       "stats": {
         "judged": 105,
         "changed": 18,
+        "errored": 0,
+        "no_final": 0,
+        "no_rubric": 0,
+        "unknown_task": 0,
+        "judge_error": 0,
+        "unparsed": 0,
+        "task_skipped": 0
+      }
+    },
+    {
+      "date": "2026-07-26T21:49:58+00:00",
+      "judge": "claude:opus",
+      "tasks": [
+        "t1_pick_crypto",
+        "t1_pick_currency",
+        "t2_convert_currency"
+      ],
+      "stats": {
+        "judged": 9,
+        "changed": 1,
         "errored": 0,
         "no_final": 0,
         "no_rubric": 0,

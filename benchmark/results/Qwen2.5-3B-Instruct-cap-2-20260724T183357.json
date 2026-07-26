@@ -10,9 +10,9 @@
   "per_tier": {
     "1": {
       "chain_pass": 1.0,
-      "judge_mean": 2.261904761904762,
-      "solved": 0.7142857142857143,
-      "answered": 0.7142857142857143,
+      "judge_mean": 2.357142857142857,
+      "solved": 0.7857142857142857,
+      "answered": 0.7857142857142857,
       "abort_rate": null,
       "n": 14,
       "skipped": 0
@@ -47,9 +47,9 @@
   },
   "overall": {
     "chain_pass": 0.46153846153846156,
-    "judge_mean": 1.1547619047619049,
-    "solved": 0.35714285714285715,
-    "answered": 0.35714285714285715,
+    "judge_mean": 1.1785714285714286,
+    "solved": 0.375,
+    "answered": 0.375,
     "abort_rate": null,
     "n": 56,
     "skipped": 0
@@ -301,8 +301,8 @@
       "category": "tool-selection",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 1.6666666666666667,
-      "solved": false,
+      "judge_mean": 3.0,
+      "solved": true,
       "runs": [
         {
           "tools": [
@@ -311,7 +311,7 @@
           "error": null,
           "final": "The current price of Bitcoin in US dollars is $64,098.00.",
           "chain_correct": true,
-          "judge_score": 1
+          "judge_score": 3
         },
         {
           "tools": [
@@ -329,10 +329,10 @@
           "error": null,
           "final": "The current price of Bitcoin in US dollars is $64,098.00.",
           "chain_correct": true,
-          "judge_score": 1
+          "judge_score": 3
         }
       ],
-      "answered": false,
+      "answered": true,
       "abort_rate": null
     },
     {
@@ -2758,6 +2758,26 @@
       "stats": {
         "judged": 105,
         "changed": 8,
+        "errored": 0,
+        "no_final": 0,
+        "no_rubric": 0,
+        "unknown_task": 0,
+        "judge_error": 0,
+        "unparsed": 0,
+        "task_skipped": 0
+      }
+    },
+    {
+      "date": "2026-07-26T21:40:48+00:00",
+      "judge": "claude:opus",
+      "tasks": [
+        "t1_pick_crypto",
+        "t1_pick_currency",
+        "t2_convert_currency"
+      ],
+      "stats": {
+        "judged": 9,
+        "changed": 2,
         "errored": 0,
         "no_final": 0,
         "no_rubric": 0,

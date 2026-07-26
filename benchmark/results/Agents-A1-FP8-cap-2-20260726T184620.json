@@ -11,16 +11,16 @@
   "per_tier": {
     "1": {
       "chain_pass": 0.8333333333333334,
-      "judge_mean": 2.666666666666667,
+      "judge_mean": 2.880952380952381,
       "solved": 0.8571428571428571,
-      "answered": 0.9285714285714286,
+      "answered": 1.0,
       "abort_rate": 0.0,
       "n": 14,
       "skipped": 0
     },
     "2": {
       "chain_pass": 0.8333333333333334,
-      "judge_mean": 2.833333333333333,
+      "judge_mean": 2.9047619047619047,
       "solved": 0.8571428571428571,
       "answered": 1.0,
       "abort_rate": 0.0,
@@ -29,7 +29,7 @@
     },
     "3": {
       "chain_pass": 0.8571428571428571,
-      "judge_mean": 2.738095238095238,
+      "judge_mean": 2.7857142857142856,
       "solved": 0.8571428571428571,
       "answered": 1.0,
       "abort_rate": 0.0,
@@ -38,9 +38,9 @@
     },
     "4": {
       "chain_pass": 0.5714285714285714,
-      "judge_mean": 2.4523809523809526,
-      "solved": 0.5714285714285714,
-      "answered": 0.8571428571428571,
+      "judge_mean": 2.4047619047619047,
+      "solved": 0.5,
+      "answered": 0.7857142857142857,
       "abort_rate": 0.0,
       "n": 14,
       "skipped": 0
@@ -48,8 +48,8 @@
   },
   "overall": {
     "chain_pass": 0.7692307692307693,
-    "judge_mean": 2.6726190476190474,
-    "solved": 0.7857142857142857,
+    "judge_mean": 2.744047619047619,
+    "solved": 0.7678571428571429,
     "answered": 0.9464285714285714,
     "abort_rate": 0.0,
     "n": 56,
@@ -424,9 +424,9 @@
       "category": "retrieve",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 1.0,
+      "judge_mean": 3.0,
       "solved": false,
-      "answered": false,
+      "answered": true,
       "abort_rate": 0.0,
       "runs": [
         {
@@ -436,7 +436,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 3
         },
         {
           "tools": [
@@ -456,7 +456,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 3
         }
       ]
     },
@@ -512,7 +512,7 @@
       "category": "data-transform",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 2.0,
+      "judge_mean": 3.0,
       "solved": true,
       "answered": true,
       "abort_rate": 0.0,
@@ -546,7 +546,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 3
         }
       ]
     },
@@ -784,7 +784,7 @@
       "category": "tool-selection",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 1.6666666666666667,
+      "judge_mean": 2.0,
       "solved": true,
       "answered": true,
       "abort_rate": 0.0,
@@ -820,7 +820,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": true,
-          "judge_score": 2
+          "judge_score": 3
         }
       ]
     },
@@ -1239,7 +1239,7 @@
       "category": "restraint",
       "skipped": false,
       "chain_pass": null,
-      "judge_mean": 2.3333333333333335,
+      "judge_mean": 3.0,
       "solved": true,
       "answered": true,
       "abort_rate": 0.0,
@@ -1253,7 +1253,7 @@
           "final": "Which airport are you driving to, and where are you starting from?\n  1. You can tell me both locations, or just the airport if you know I should know your usual route.",
           "observer": [],
           "aborted": false,
-          "judge_score": 1
+          "judge_score": 3
         },
         {
           "tools": [
@@ -1780,7 +1780,7 @@
       "category": "compute",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 2.3333333333333335,
+      "judge_mean": 3.0,
       "solved": false,
       "answered": true,
       "abort_rate": 0.0,
@@ -1806,7 +1806,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 2
+          "judge_score": 3
         },
         {
           "tools": [
@@ -1817,7 +1817,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 2
+          "judge_score": 3
         }
       ]
     },
@@ -2232,9 +2232,9 @@
       "category": "data-transform",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 1.6666666666666667,
-      "solved": true,
-      "answered": true,
+      "judge_mean": 1.3333333333333333,
+      "solved": false,
+      "answered": false,
       "abort_rate": 0.0,
       "runs": [
         {
@@ -2254,7 +2254,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": true,
-          "judge_score": 2
+          "judge_score": 1
         },
         {
           "tools": [
@@ -2538,7 +2538,7 @@
       "category": "restraint",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 2.6666666666666665,
+      "judge_mean": 2.3333333333333335,
       "solved": false,
       "answered": true,
       "abort_rate": 0.0,
@@ -2553,7 +2553,7 @@
           "observer": [],
           "aborted": false,
           "chain_correct": false,
-          "judge_score": 3
+          "judge_score": 2
         },
         {
           "tools": [
@@ -2996,6 +2996,60 @@
           "judge_score": 3
         }
       ]
+    }
+  ],
+  "rejudged": [
+    {
+      "date": "2026-07-26T21:23:07+00:00",
+      "judge": "claude:opus",
+      "tasks": [
+        "t1_calc_area",
+        "t1_calc_arith",
+        "t1_calc_percent",
+        "t1_calc_sqrt",
+        "t1_define",
+        "t1_fetch_example",
+        "t1_pick_crypto",
+        "t1_pick_currency",
+        "t1_pick_unit",
+        "t1_text_b64",
+        "t1_text_count",
+        "t1_wiki_summary",
+        "t2_calc_discount",
+        "t2_calc_scale_recipe",
+        "t2_config_port",
+        "t2_convert_currency",
+        "t2_define_not_wiki",
+        "t2_fetch_single_page",
+        "t2_geocode_coords",
+        "t2_kb_add",
+        "t2_no_guess_email_count",
+        "t2_no_guess_setting",
+        "t2_no_guess_traffic",
+        "t3_budget_remaining",
+        "t3_fetch_summary",
+        "t3_fetch_to_kb",
+        "t3_headcount_cost",
+        "t3_receipt_total",
+        "t3_specs_to_kb",
+        "t4_amount_total_verify",
+        "t4_billable_verify",
+        "t4_fetch_flag",
+        "t4_no_oversearch_notes",
+        "t4_no_oversearch_sleep",
+        "t4_open_high_verify"
+      ],
+      "stats": {
+        "judged": 105,
+        "changed": 9,
+        "errored": 0,
+        "no_final": 0,
+        "no_rubric": 0,
+        "unknown_task": 0,
+        "judge_error": 0,
+        "unparsed": 0,
+        "task_skipped": 0
+      }
     }
   ]
 }

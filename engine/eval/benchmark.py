@@ -486,7 +486,19 @@ def render_report(battery_version: str) -> tuple[str, bool]:
               "`abort` = share of runs the loop itself ended on `stuck_repeating` (an exact-repeat "
               "tool-call thrash); diagnostic only, not part of `solved`. `—` = predates the metric "
               "(no observer data was ever recorded for that result). `n/a` = observer disabled "
-              "(baseline arm — `--baseline` turns `enable_observer` off, so it can't fire)."]
+              "(baseline arm — `--baseline` turns `enable_observer` off, so it can't fire).",
+              # Two cells measure a serving bug, not a model. Without this note a reader takes
+              # 25% as Qwen3.6-35B's score. Remove each line once that cell has been re-run
+              # under the corrected chat template (see argus-1ib).
+              "**KNOWN-INVALID CELLS — do not read these as model capability.** "
+              "`Qwen3.6-35B-A3B-FP8 native/off` (115 of 168 runs) and "
+              "`Qwen3.6-27B-FP8 native/on` (95 of 168) emitted malformed tool-call markup that the "
+              "serving stack could not parse, so the tool call was dropped and the run scored as a "
+              "failure. Root cause was a broken default chat template shipped with the Qwen3.6 "
+              "models, not the battery, the harness, or the models' capability; swapping the vLLM "
+              "tool-call parser did not fix it. Both models' `manual` cells are unaffected — manual "
+              "mode never relies on the provider extracting a structured call. These two cells stay "
+              "invalid until re-generated (not re-judged) under the corrected template."]
     return "\n".join(lines) + "\n", True
 
 

@@ -10,7 +10,7 @@
   "per_tier": {
     "1": {
       "chain_pass": 0.8333333333333334,
-      "judge_mean": 2.5952380952380953,
+      "judge_mean": 2.642857142857143,
       "solved": 0.7142857142857143,
       "answered": 0.8571428571428571,
       "abort_rate": null,
@@ -47,7 +47,7 @@
   },
   "overall": {
     "chain_pass": 0.46153846153846156,
-    "judge_mean": 1.6547619047619049,
+    "judge_mean": 1.6666666666666665,
     "solved": 0.42857142857142855,
     "answered": 0.5178571428571429,
     "abort_rate": null,
@@ -297,7 +297,7 @@
       "category": "tool-selection",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 2.3333333333333335,
+      "judge_mean": 3.0,
       "solved": true,
       "runs": [
         {
@@ -307,7 +307,7 @@
           "error": null,
           "final": "The current price of Bitcoin in US dollars is $64,233.00.",
           "chain_correct": true,
-          "judge_score": 1
+          "judge_score": 3
         },
         {
           "tools": [
@@ -2471,6 +2471,26 @@
         "judged": 104,
         "changed": 20,
         "errored": 1,
+        "no_final": 0,
+        "no_rubric": 0,
+        "unknown_task": 0,
+        "judge_error": 0,
+        "unparsed": 0,
+        "task_skipped": 0
+      }
+    },
+    {
+      "date": "2026-07-26T21:39:04+00:00",
+      "judge": "claude:opus",
+      "tasks": [
+        "t1_pick_crypto",
+        "t1_pick_currency",
+        "t2_convert_currency"
+      ],
+      "stats": {
+        "judged": 9,
+        "changed": 1,
+        "errored": 0,
         "no_final": 0,
         "no_rubric": 0,
         "unknown_task": 0,
