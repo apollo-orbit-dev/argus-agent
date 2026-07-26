@@ -40,11 +40,24 @@ def run_aborted(observer) -> bool:
 
 
 def task_verdict(runs: list, k: int) -> dict:
-    """Collapse a task's k runs into {chain_pass, judge_mean, solved, abort_rate}. chain_pass is None
-    when the task has no `expect` (judge-only). solved = chained-correctly (vacuous if no chain) AND
-    judge >= JUDGE_SOLVED_MIN (vacuous if unjudged), per run, then collapsed like chain_pass
-    (>=ceil(k*frac)). abort_rate is the fraction of runs the loop itself gave up on (stuck_repeating);
-    it does NOT enter solved/chain_pass — it's diagnostic only. None when no run carries observer
+    """Collapse a task's k runs into {chain_pass, judge_mean, solved, answered, abort_rate}.
+    chain_pass is None when the task has no `expect` (judge-only). solved = chained-correctly
+    (vacuous if no chain) AND judge >= JUDGE_SOLVED_MIN (vacuous if unjudged), per run, then
+    collapsed like chain_pass (>=ceil(k*frac)).
+
+    answered = the judge scored the run >= JUDGE_SOLVED_MIN, IGNORING chain_correct entirely,
+    collapsed the same way. It is the second headline metric (argus-3zn): a capable model can
+    answer a trivial task inside its reasoning pass instead of calling the declared tool, scoring
+    judge=3 with an empty tool list — right, but `solved` False. The GAP between answered and
+    solved is exactly that population.
+
+    DELIBERATE ASYMMETRY WITH solved, do not "harmonise" it: solved treats a missing judge score
+    as vacuously true, but answered is **None** — not True — when a task has no judge verdict at
+    all. answered IS the judge axis; with no judge there is no verdict, and vacuous-true would
+    silently inflate the metric for unjudged tasks.
+
+    abort_rate is the fraction of runs the loop itself gave up on (stuck_repeating); it does NOT
+    enter solved/answered/chain_pass — it's diagnostic only. None when no run carries observer
     data (legacy runs), never fabricated as 0.0."""
     thr = math.ceil(k * PASS_FRACTION)
     chained = [r for r in runs if r.get("chain_correct") is not None]
@@ -58,6 +71,7 @@ def task_verdict(runs: list, k: int) -> dict:
         judge_ok = True if j is None else (j >= JUDGE_SOLVED_MIN)
         return chain_ok and judge_ok
     solved = (sum(1 for r in runs if _run_solved(r)) >= thr) if runs else None
+    answered = (sum(1 for j in js if j >= JUDGE_SOLVED_MIN) >= thr) if js else None
 
     aborts = []
     for r in runs:
@@ -66,24 +80,28 @@ def task_verdict(runs: list, k: int) -> dict:
         elif "observer" in r:
             aborts.append(run_aborted(r["observer"]))
     abort_rate = (sum(1 for a in aborts if a) / len(aborts)) if aborts else None
-    return {"chain_pass": chain_pass, "judge_mean": judge_mean, "solved": solved, "abort_rate": abort_rate}
+    return {"chain_pass": chain_pass, "judge_mean": judge_mean, "solved": solved,
+            "answered": answered, "abort_rate": abort_rate}
 
 
 def aggregate(tasks: list) -> dict:
     """tasks: [{tier, chain_pass: bool|None, judge_mean: float|None, abort_rate: float|None, skipped:
     bool}]. Returns per-tier and overall {chain_pass: rate over tasks-with-a-chain-verdict, judge_mean:
     mean over judged tasks, solved: rate of chain-AND-judge>=2 over tasks with a solved verdict,
-    abort_rate: MEAN (not thresholded) of non-None task abort_rates — a rate stays a rate, unlike the
-    binary chain_pass/solved collapse, n, skipped}."""
+    answered: rate of judge>=2 (chain ignored) over tasks with an answered verdict — i.e. skipping the
+    Nones, which are the unjudged tasks, abort_rate: MEAN (not thresholded) of non-None task
+    abort_rates — a rate stays a rate, unlike the binary chain_pass/solved collapse, n, skipped}."""
     def roll(items):
         active = [t for t in items if not t.get("skipped")]
         cp = [t["chain_pass"] for t in active if t.get("chain_pass") is not None]
         jm = [t["judge_mean"] for t in active if t.get("judge_mean") is not None]
         sv = [t["solved"] for t in active if t.get("solved") is not None]
+        an = [t["answered"] for t in active if t.get("answered") is not None]
         ar = [t["abort_rate"] for t in active if t.get("abort_rate") is not None]
         return {"chain_pass": (sum(1 for x in cp if x) / len(cp)) if cp else None,
                 "judge_mean": (sum(jm) / len(jm)) if jm else None,
                 "solved": (sum(1 for x in sv if x) / len(sv)) if sv else None,
+                "answered": (sum(1 for x in an if x) / len(an)) if an else None,
                 "abort_rate": (sum(ar) / len(ar)) if ar else None,
                 "n": len(active), "skipped": sum(1 for t in items if t.get("skipped"))}
     per_tier = {}
@@ -93,25 +111,41 @@ def aggregate(tasks: list) -> dict:
 
 
 def _backfill_solved(result: dict) -> dict:
-    """Ensure per_tier/overall carry a `solved` rate. Fresh runs already do (Task 1); older results
-    predate the metric, so recompute it from each task's stored per-run chain_correct/judge_score.
+    """Ensure per_tier/overall carry both headline rates, `solved` and `answered`, recomputing what
+    is missing from each task's stored per-run chain_correct/judge_score. Fresh runs already carry
+    both; older results predate one or the other.
+
+    EACH METRIC IS GUARDED INDEPENDENTLY, deliberately: every committed result already has a
+    non-None overall.solved, so a single `if solved is None: return` guard (what this used to be)
+    would early-return for the whole corpus and backfill `answered` for nothing — the new column
+    would render `—` on every published row. Because every stored run carries judge_score, all
+    committed results ARE fully back-derivable for answered, with no re-runs.
 
     abort-rate is NOT backfillable: unlike chain_correct/judge_score, no observer data was ever
     written to disk for pre-argus-92a results (_run_task dropped it before serialization), so there
-    is nothing here to recompute from. This early-returns for every committed result (they all have
-    a non-None overall.solved), so legacy files simply keep abort_rate absent -> None at render time."""
-    if result.get("overall", {}).get("solved") is not None:
+    is nothing here to recompute from. Legacy files simply keep abort_rate absent -> None at render
+    time; the answered-only path below never touches it."""
+    overall = result.get("overall") or {}
+    need_solved = overall.get("solved") is None
+    need_answered = overall.get("answered") is None
+    if not (need_solved or need_answered):
         return result
+
     k = result.get("k", 3)
     tasks = []
     for t in result.get("tasks", []):
         v = task_verdict(t.get("runs", []), k) if t.get("runs") else {}
         tasks.append({"tier": t["tier"], "chain_pass": t.get("chain_pass"),
                       "judge_mean": t.get("judge_mean"), "solved": v.get("solved"),
-                      "abort_rate": v.get("abort_rate"),
+                      "answered": v.get("answered"), "abort_rate": v.get("abort_rate"),
                       "skipped": t.get("skipped", False)})
     agg = aggregate(tasks)
-    result["per_tier"], result["overall"] = agg["per_tier"], agg["overall"]
+    if need_solved:      # legacy: nothing trustworthy in per_tier/overall — replace wholesale
+        result["per_tier"], result["overall"] = agg["per_tier"], agg["overall"]
+    elif need_answered:  # published rows: graft answered on, leave every existing number alone
+        result["overall"]["answered"] = agg["overall"].get("answered")
+        for tier, pt in (result.get("per_tier") or {}).items():
+            pt["answered"] = agg["per_tier"].get(tier, {}).get("answered")
     return result
 
 
@@ -311,8 +345,8 @@ def render_report(battery_version: str) -> tuple[str, bool]:
     lines = [f"# Model-Capability Benchmark — `{battery_version}`", "",
              f"{len(results)} model(s), by param count. Chain = deterministic tool-chain pass-rate; "
              "Judge = Opus quality mean (0–3). A tier's line falling off below some size is the shelf.", "",
-             "| model | params (B) | mode | scaffold | disclosure | max_tok | solved | abort | " + " | ".join(f"T{t} chain / judge" for t in tiers) + " | overall |",
-             "|---|---|---|---|---|---|---|---|" + "|".join(["---"] * (len(tiers) + 1)) + "|"]
+             "| model | params (B) | mode | scaffold | disclosure | max_tok | solved | answered | abort | " + " | ".join(f"T{t} chain / judge" for t in tiers) + " | overall |",
+             "|---|---|---|---|---|---|---|---|---|" + "|".join(["---"] * (len(tiers) + 1)) + "|"]
     def _pct(x):
         return "—" if x is None else f"{x:.0%}"
 
@@ -333,12 +367,18 @@ def render_report(battery_version: str) -> tuple[str, bool]:
         abort_cell = "n/a" if r.get("scaffold") == "off" else _pct(ov.get("abort_rate"))
         lines.append(f"| {r['model']} | {r['params']} | {r.get('mode', '?')} | {r.get('scaffold', 'on')} | "
                      f"{r.get('disclosure', 'off')} | "
-                     f"{mt if mt is not None else '—'} | {_pct(solved)} | {abort_cell} | " + " | ".join(cells) + " |")
+                     f"{mt if mt is not None else '—'} | {_pct(solved)} | {_pct(ov.get('answered'))} | "
+                     f"{abort_cell} | " + " | ".join(cells) + " |")
     lines += ["",
               "`max_tok` = the completion-token cap for the run. `—` = not recorded (runs predating this "
               "field; the standard-config default is 2048). Runs at different caps are not strictly "
               "comparable — a reasoning model can exhaust a low cap mid-thought, so a higher cap is a "
               "fairer read of its capability but a looser comparison across sizes.",
+              "`answered` = the judge accepted the answer (>= 2), whether or not the declared tools "
+              "were used; `solved` additionally requires the tool chain. The GAP between `answered` "
+              "and `solved` is the share of tasks the model got RIGHT WITHOUT using the declared "
+              "tools — a reasoning model answering inside its reasoning pass. `—` = no judge verdict "
+              "(unjudged tasks are not counted as vacuously answered).",
               "`abort` = share of runs the loop itself ended on `stuck_repeating` (an exact-repeat "
               "tool-call thrash); diagnostic only, not part of `solved`. `—` = predates the metric "
               "(no observer data was ever recorded for that result). `n/a` = observer disabled "
@@ -419,11 +459,13 @@ def main(argv=None):
     print(f"report: {bench_dir / 'report.md'}" + (f"\ncurve: {bench_dir / 'curve.png'}" if curve_ok else ""))
     try:
         from benchmark import charts
-        # both metrics per battery: chain_pass (canonical, matches the curve) + solved (the headline)
-        for metric, suffix in (("chain_pass", ""), ("solved", "_solved")):
+        # all three metrics per battery: chain_pass (canonical, matches the curve) + the two
+        # headlines, solved (chain AND judge) and answered (judge alone).
+        for metric, suffix in (("chain_pass", ""), ("solved", "_solved"), ("answered", "_answered")):
             charts.stackup(str(bench_dir / f"stackup{suffix}.png"), metric=metric, bv=bv)
             charts.model_tiers(str(bench_dir / f"model_tiers{suffix}.png"), metric=metric, bv=bv)
-        print(f"charts: {bench_dir}/stackup[_solved].png, model_tiers[_solved].png")
+        print(f"charts: {bench_dir}/stackup[_solved|_answered].png, "
+              f"model_tiers[_solved|_answered].png")
     except ImportError:
         print("note: matplotlib not available — skipped stackup/model_tiers charts")
     return 0
