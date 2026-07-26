@@ -1,6 +1,6 @@
 # Model-Capability Benchmark — `cap-2`
 
-24 model(s), by param count. Chain = deterministic tool-chain pass-rate; Judge = Opus quality mean (0–3). A tier's line falling off below some size is the shelf.
+28 model(s), by param count. Chain = deterministic tool-chain pass-rate; Judge = Opus quality mean (0–3). A tier's line falling off below some size is the shelf.
 
 | model | params (B) | mode | scaffold | disclosure | max_tok | solved | answered | abort | T1 chain / judge | T2 chain / judge | T3 chain / judge | T4 chain / judge | overall |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -24,6 +24,10 @@
 | Qwen3.6-27B-FP8 | 27 | manual | on | off | 16384 | 77% | 84% | 0% | 92% / 2.5 | 83% / 2.3 | 86% / 2.6 | 79% / 2.6 | 85% / 2.5 |
 | Qwen3.6-27B-FP8 | 27 | native | off | off | 16384 | 59% | 70% | n/a | 92% / 2.8 | 83% / 2.9 | 57% / 1.5 | 21% / 1.0 | 62% / 2.1 |
 | Qwen3.6-27B-FP8 | 27 | manual | off | off | 16384 | 36% | 45% | n/a | 83% / 2.6 | 92% / 1.9 | 14% / 0.3 | 7% / 0.2 | 46% / 1.3 |
+| Agents-A1-FP8 | 35 | native | on | off | 16384 | 75% | 89% | 0% | 83% / 2.7 | 83% / 3.0 | 86% / 2.7 | 57% / 2.2 | 77% / 2.7 |
+| Agents-A1-FP8 | 35 | manual | on | off | 16384 | 79% | 95% | 0% | 83% / 2.7 | 83% / 2.8 | 86% / 2.7 | 57% / 2.5 | 77% / 2.7 |
+| Agents-A1-FP8 | 35 | native | off | off | 16384 | 61% | 68% | n/a | 100% / 2.7 | 83% / 2.8 | 43% / 1.3 | 21% / 1.1 | 60% / 2.0 |
+| Agents-A1-FP8 | 35 | manual | off | off | 16384 | 54% | 66% | n/a | 83% / 2.8 | 83% / 3.0 | 36% / 1.3 | 21% / 1.0 | 54% / 2.0 |
 | Qwen3.6-35B-A3B-FP8 | 35 | native | on | off | 16384 | 70% | 84% | 0% | 83% / 2.9 | 83% / 2.9 | 64% / 2.1 | 57% / 1.8 | 71% / 2.4 |
 | Qwen3.6-35B-A3B-FP8 | 35 | manual | on | off | 16384 | 79% | 89% | 2% | 100% / 3.0 | 100% / 2.8 | 79% / 2.5 | 57% / 2.1 | 83% / 2.6 |
 | Qwen3.6-35B-A3B-FP8 | 35 | native | off | off | 16384 | 25% | 29% | n/a | 83% / 2.6 | 0% / 0.8 | 0% / 0.0 | 0% / 0.1 | 19% / 0.9 |
