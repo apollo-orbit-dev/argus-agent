@@ -92,9 +92,52 @@ dataset. Regenerate cap-2's report and charts with
 `python -m engine.eval.benchmark report --battery-version cap-2` — it writes `report.md`, `curve.png`,
 and the `stackup`/`model_tiers` charts (both `chain_pass` and `solved`) into this folder.
 
+## Rubrics assert answer quality only
+
+A rubric criterion must **never name a tool**. `expect` (`tools_in_order` / `min_counts` /
+`max_counts`) is the axis that owns tool use, and it feeds `chain_pass`; the rubric feeds the 0–3
+judge, which feeds `judge_mean` and `answered`. When a rubric ALSO demanded the tool, the judge
+scored tool use a second time — so `solved` (chain AND judge) double-counted it, and `answered`
+("was the answer right, tools aside") did not mean what it says.
+
+It also made the judge non-deterministic. `"computes 51 via the calculator tool"` can be read as
+"the answer must be 51" or "the calculator must have been called", and the judge flipped between
+the two readings run to run: the identical final answer `'15% of 340 is **51**.'` scored both 3
+and 0. Measured over 10 disagreeing (task, answer) pairs judged 5x each, the old rubrics produced
+a mean score spread of 1.3 (4 of 10 pairs spanning more than one point, e.g. `[0,0,0,0,3]`); the
+split rubrics produced a spread of **0.0** — every pair landing on a single score.
+
+`tests/test_benchmark.py::test_cap2_rubrics_never_name_a_tool` enforces this by scanning, and
+`::test_cap2_moved_tool_requirements_still_enforced_by_expect` carries the provenance table
+proving each moved requirement is still enforced by `expect`.
+
+## Re-judging (no model re-runs)
+
+Every stored run keeps its `final` text, so a judge score can be regenerated from disk without
+re-running any model:
+
+```
+python -m engine.eval.benchmark rejudge \
+  --battery benchmark/cap-2/battery.json \
+  --tasks t1_calc_percent,t1_calc_sqrt \
+  [--concurrency 8] [--dry-run]
+```
+
+It rebuilds each run's judge prompt from the **current** battery plus the stored run, re-scores,
+and recomputes every task verdict and the aggregate so `judge_mean`/`solved`/`answered` follow the
+new scores. A run with no stored `final`, or one that errored, is **left untouched and reported** —
+never scored 0. `--tasks` should name only the tasks whose rubric actually changed: re-judging an
+unchanged rubric moves published numbers by judge noise alone. Frozen batteries (cap-1) are refused.
+
 ## Status
 
-cap-2 is **frozen** once validated (`test_cap2_battery_validates` +
+cap-2's **task set** is frozen once validated (`test_cap2_battery_validates` +
 `test_cap2_battery_is_complete_and_balanced` both green), the same way cap-1's `battery.json` is
-frozen — no further task additions or edits to this file. Further growth of the battery happens
-in a future `cap-3`.
+frozen — no task additions, removals, or prompt/fixture changes. Further growth of the battery
+happens in a future `cap-3`.
+
+Amended once, deliberately, after freezing (argus-as5): the rubric/`expect` split above. It changed
+no prompt, no fixture and no task, and it was applied together with a re-judge of the affected tasks
+across every stored cap-2 result, so the published table stays internally consistent. Note that the
+`max_counts` clauses added by that split make future cap-2 `chain_pass` numbers **stricter** than
+the ones already published (stored `chain_correct` values were not re-scored — nothing was re-run).

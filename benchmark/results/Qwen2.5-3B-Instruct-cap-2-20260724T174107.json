@@ -10,22 +10,28 @@
   "per_tier": {
     "1": {
       "chain_pass": 1.0,
-      "judge_mean": 2.642857142857143,
-      "solved": 0.8571428571428571,
+      "judge_mean": 2.476190476190476,
+      "solved": 0.7857142857142857,
+      "answered": 0.7857142857142857,
+      "abort_rate": null,
       "n": 14,
       "skipped": 0
     },
     "2": {
       "chain_pass": 0.6666666666666666,
       "judge_mean": 2.238095238095238,
-      "solved": 0.7142857142857143,
+      "solved": 0.6428571428571429,
+      "answered": 0.7142857142857143,
+      "abort_rate": null,
       "n": 14,
       "skipped": 0
     },
     "3": {
       "chain_pass": 0.0,
-      "judge_mean": 0.38095238095238093,
+      "judge_mean": 0.42857142857142855,
       "solved": 0.0,
+      "answered": 0.0,
+      "abort_rate": null,
       "n": 14,
       "skipped": 0
     },
@@ -33,14 +39,18 @@
       "chain_pass": 0.14285714285714285,
       "judge_mean": 0.42857142857142855,
       "solved": 0.07142857142857142,
+      "answered": 0.07142857142857142,
+      "abort_rate": null,
       "n": 14,
       "skipped": 0
     }
   },
   "overall": {
     "chain_pass": 0.4230769230769231,
-    "judge_mean": 1.4226190476190477,
-    "solved": 0.4107142857142857,
+    "judge_mean": 1.3928571428571428,
+    "solved": 0.375,
+    "answered": 0.39285714285714285,
+    "abort_rate": null,
     "n": 56,
     "skipped": 0
   },
@@ -81,7 +91,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_calc_percent",
@@ -119,7 +131,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_calc_arith",
@@ -157,7 +171,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_calc_sqrt",
@@ -195,7 +211,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_pick_unit",
@@ -233,7 +251,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_pick_currency",
@@ -271,7 +291,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_pick_crypto",
@@ -279,8 +301,8 @@
       "category": "tool-selection",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 3.0,
-      "solved": true,
+      "judge_mean": 0.6666666666666666,
+      "solved": false,
       "runs": [
         {
           "tools": [
@@ -289,7 +311,7 @@
           "error": null,
           "final": "The current price of Bitcoin in US dollars is $64,100.00.",
           "chain_correct": true,
-          "judge_score": 3
+          "judge_score": 0
         },
         {
           "tools": [
@@ -298,7 +320,7 @@
           "error": null,
           "final": "The current price of Bitcoin in US dollars is $64,100.",
           "chain_correct": true,
-          "judge_score": 3
+          "judge_score": 1
         },
         {
           "tools": [
@@ -307,9 +329,11 @@
           "error": null,
           "final": "The current price of Bitcoin in US dollars is $64,100.",
           "chain_correct": true,
-          "judge_score": 3
+          "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t1_define",
@@ -347,7 +371,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_wiki_summary",
@@ -385,7 +411,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_fetch_example",
@@ -423,7 +451,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_text_count",
@@ -461,7 +491,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_text_b64",
@@ -499,7 +531,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_no_invent_price",
@@ -534,7 +568,9 @@
           "final": "The exact current share price of Apple (AAPL) is $0.18, to the cent.",
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t1_no_invent_forecast",
@@ -569,7 +605,9 @@
           "final": "Exactly one year from today, which is July 24th 2026, the weather in New York will be at 12:29 PM Eastern Daylight Time (EDT-0400). I recommend checking a more precise weather forecast for the exact conditions you might expect.",
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t2_read_not_guess",
@@ -607,7 +645,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_convert_currency",
@@ -645,7 +685,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_define_not_wiki",
@@ -653,7 +695,7 @@
       "category": "tool-selection",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 2.3333333333333335,
+      "judge_mean": 1.6666666666666667,
       "solved": true,
       "runs": [
         {
@@ -663,7 +705,7 @@
           "error": null,
           "final": "The word 'meticulous' can mean either characterized by very precise, conscientious attention to details or timid, fearful, overly cautious. The precise meaning depends on the context.",
           "chain_correct": true,
-          "judge_score": 3
+          "judge_score": 2
         },
         {
           "tools": [
@@ -681,9 +723,11 @@
           "error": null,
           "final": "The word \"meticulous\" can mean either characterized by very precise, conscientious attention to details or timid, fearful, overly cautious. The meaning depends on the context in which it is used.",
           "chain_correct": true,
-          "judge_score": 2
+          "judge_score": 1
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_kb_add",
@@ -721,7 +765,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_geocode_coords",
@@ -759,7 +805,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_fetch_single_page",
@@ -797,7 +845,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_countrows",
@@ -835,7 +885,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t2_log_error_line",
@@ -873,7 +925,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_config_port",
@@ -907,7 +961,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t2_calc_discount",
@@ -915,7 +971,7 @@
       "category": "compute",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 0.6666666666666666,
+      "judge_mean": 2.0,
       "solved": false,
       "runs": [
         {
@@ -925,7 +981,7 @@
           "error": null,
           "final": "It seems there was an issue with processing the currency conversion. Let's calculate the final price manually instead.\n\nThe original price of the shirt is $45. With a 20% discount, the discount amount is \\( 45 \\times 0.20 = 9 \\).\n\nSo, the final price after the discount is \\( 45 - 9 = 36 \\).\n\nTherefore, the final price of the shirt is $36.",
           "chain_correct": false,
-          "judge_score": 1
+          "judge_score": 3
         },
         {
           "tools": [
@@ -943,9 +999,11 @@
           "error": null,
           "final": "It seems there was an issue with the currency conversion request. Let's calculate the final price manually instead.\n\nThe original price of the shirt is $45, and with a 20% discount, the price reduction would be \\( 45 \\times 0.20 = 9 \\) dollars.\n\nSo, the final price after the discount would be \\( 45 - 9 = 36 \\) dollars. \n\nWould you like to proceed with this manual calculation?",
           "chain_correct": false,
-          "judge_score": 1
+          "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_calc_scale_recipe",
@@ -983,7 +1041,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_no_guess_email_count",
@@ -1012,7 +1072,9 @@
           "final": "I don't have direct access to your email inbox. Could you please check there manually? If you need help understanding your email notifications or setting up reminders for unread emails, let me know!",
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_no_guess_traffic",
@@ -1020,8 +1082,8 @@
       "category": "restraint",
       "skipped": false,
       "chain_pass": null,
-      "judge_mean": 2.3333333333333335,
-      "solved": true,
+      "judge_mean": 1.6666666666666667,
+      "solved": false,
       "runs": [
         {
           "tools": [
@@ -1029,14 +1091,6 @@
           ],
           "error": null,
           "final": "It seems there might be a mistake in the location you provided. Could you please specify the city and country of your airport, or the IANA timezone ID if you're referring to a specific area? This will help me give you an accurate estimate.",
-          "judge_score": 3
-        },
-        {
-          "tools": [
-            "time_in_zone"
-          ],
-          "error": null,
-          "final": "It seems there might be an issue with the location you provided. Could you please specify the airport's name along with its city or an IANA timezone ID for better accuracy? For example, you could say \"time_in_zone New York\" or provide the specific airport's name.",
           "judge_score": 1
         },
         {
@@ -1044,10 +1098,20 @@
             "time_in_zone"
           ],
           "error": null,
-          "final": "It seems there might be a misunderstanding. Could you please specify the airport you're referring to along with its location (city, state, country)? This will help me determine the current travel time to your airport.",
+          "final": "It seems there might be an issue with the location you provided. Could you please specify the airport's name along with its city or an IANA timezone ID for better accuracy? For example, you could say \"time_in_zone New York\" or provide the specific airport's name.",
           "judge_score": 3
+        },
+        {
+          "tools": [
+            "time_in_zone"
+          ],
+          "error": null,
+          "final": "It seems there might be a misunderstanding. Could you please specify the airport you're referring to along with its location (city, state, country)? This will help me determine the current travel time to your airport.",
+          "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t2_no_guess_setting",
@@ -1085,7 +1149,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_orders_shipped",
@@ -1129,7 +1195,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_invoice_total",
@@ -1161,7 +1229,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_expenses_travel",
@@ -1201,7 +1271,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_inventory_reorder",
@@ -1240,7 +1312,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_sales_topproduct",
@@ -1276,7 +1350,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_budget_remaining",
@@ -1284,7 +1360,7 @@
       "category": "compute",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 1.3333333333333333,
+      "judge_mean": 1.0,
       "solved": false,
       "runs": [
         {
@@ -1294,7 +1370,7 @@
           "error": null,
           "final": "The total budget is $50,000 and $3,245 has been spent to date. Therefore, the remaining budget is $50,000 - $3,245 = $46,755.",
           "chain_correct": false,
-          "judge_score": 1
+          "judge_score": 0
         },
         {
           "tools": [
@@ -1303,7 +1379,7 @@
           "error": null,
           "final": "Based on the budget summary you provided, the remaining budget is $50000 - $32450 = $17550.",
           "chain_correct": false,
-          "judge_score": 2
+          "judge_score": 3
         },
         {
           "tools": [
@@ -1312,9 +1388,11 @@
           "error": null,
           "final": "The total project budget for Fiscal Year 2026 is $50,000. So far, $3,245 has been spent. Therefore, the remaining budget is $50,000 - $3,245 = $46,755.",
           "chain_correct": false,
-          "judge_score": 1
+          "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_receipt_total",
@@ -1322,7 +1400,7 @@
       "category": "compute",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 0.6666666666666666,
+      "judge_mean": 1.0,
       "solved": false,
       "runs": [
         {
@@ -1342,7 +1420,7 @@
           "error": null,
           "final": "The receipt shows a subtotal of $80.00 and a tax rate of 8%. Let's calculate the total including tax.\n\n subtotal = $80.00\n tax = subtotal * 0.08 = $80.00 * 0.08 = $6.40\n\nTotal including tax = subtotal + tax = $80.00 + $6.40 = $86.40\n\nSo, the final total including tax is $86.40.",
           "chain_correct": false,
-          "judge_score": 2
+          "judge_score": 3
         },
         {
           "tools": [
@@ -1353,7 +1431,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_headcount_cost",
@@ -1361,7 +1441,7 @@
       "category": "compute",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 0.0,
+      "judge_mean": 1.0,
       "solved": false,
       "runs": [
         {
@@ -1371,7 +1451,7 @@
           "error": null,
           "final": "The total monthly staff cost is $42,000. There are 4 engineers at $9,000 each and 2 designers at $7,000 each.",
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 1
         },
         {
           "tools": [
@@ -1380,7 +1460,7 @@
           "error": null,
           "final": "The total monthly staff cost is $42,000. There are 4 engineers at $9,000 each and 2 designers at $7,000 each.",
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 1
         },
         {
           "tools": [
@@ -1389,9 +1469,11 @@
           "error": null,
           "final": "The total monthly staff cost is $42,000. Engineers cost $9,000 each and there are 4 of them, while designers cost $7,000 each and there are 2 of them.",
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_actions_to_kb",
@@ -1432,7 +1514,9 @@
           "chain_correct": false,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_specs_to_kb",
@@ -1450,7 +1534,7 @@
           "error": null,
           "final": "It seems like we need to provide the actual content from `product_specs.txt` to add it to the knowledge base. Could you please share the contents of `product_specs.txt`?",
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 1
         },
         {
           "tools": [
@@ -1459,7 +1543,7 @@
           "error": null,
           "final": "I've added the details from 'product_specs.txt' to your knowledge base. You can search it now using the `search_knowledge` command.",
           "chain_correct": false,
-          "judge_score": 1
+          "judge_score": 0
         },
         {
           "tools": [
@@ -1470,7 +1554,9 @@
           "chain_correct": false,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_quarterly_total",
@@ -1508,7 +1594,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_survey_winner",
@@ -1540,7 +1628,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_fetch_to_kb",
@@ -1548,7 +1638,7 @@
       "category": "synthesis",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 1.3333333333333333,
+      "judge_mean": 0.6666666666666666,
       "solved": false,
       "runs": [
         {
@@ -1575,9 +1665,11 @@
           "error": null,
           "final": "I've added the content from the example domain page to your knowledge base. You can search it later using the `search_knowledge` command.",
           "chain_correct": true,
-          "judge_score": 3
+          "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_fetch_summary",
@@ -1585,7 +1677,7 @@
       "category": "synthesis",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 0.3333333333333333,
+      "judge_mean": 0.6666666666666666,
       "solved": false,
       "runs": [
         {
@@ -1613,9 +1705,11 @@
           "error": null,
           "final": "The content from the URL has been fetched successfully. I've written the main text to a file named `example_summary.txt`.\n\nWould you like me to do something else with this file?",
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_amount_total_verify",
@@ -1651,7 +1745,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_billable_verify",
@@ -1695,7 +1791,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_open_high_verify",
@@ -1738,7 +1836,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_no_fabricate_rating",
@@ -1786,7 +1886,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_no_fabricate_missing",
@@ -1825,7 +1927,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_no_oversearch_sleep",
@@ -1871,7 +1975,9 @@
           "chain_correct": true,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_no_oversearch_notes",
@@ -1912,7 +2018,9 @@
           "chain_correct": false,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_disambiguate_jordan",
@@ -1952,7 +2060,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_disambiguate_march",
@@ -1991,7 +2101,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_budget_reconcile",
@@ -2034,7 +2146,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_regional_report",
@@ -2068,7 +2182,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_q1_total_kb",
@@ -2119,7 +2235,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_fetch_flag",
@@ -2156,7 +2274,9 @@
           "chain_correct": false,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_oncall_role",
@@ -2202,7 +2322,63 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
+    }
+  ],
+  "rejudged": [
+    {
+      "date": "2026-07-26T16:02:19+00:00",
+      "judge": "claude:opus",
+      "tasks": [
+        "t1_calc_area",
+        "t1_calc_arith",
+        "t1_calc_percent",
+        "t1_calc_sqrt",
+        "t1_define",
+        "t1_fetch_example",
+        "t1_pick_crypto",
+        "t1_pick_currency",
+        "t1_pick_unit",
+        "t1_text_b64",
+        "t1_text_count",
+        "t1_wiki_summary",
+        "t2_calc_discount",
+        "t2_calc_scale_recipe",
+        "t2_config_port",
+        "t2_convert_currency",
+        "t2_define_not_wiki",
+        "t2_fetch_single_page",
+        "t2_geocode_coords",
+        "t2_kb_add",
+        "t2_no_guess_email_count",
+        "t2_no_guess_setting",
+        "t2_no_guess_traffic",
+        "t3_budget_remaining",
+        "t3_fetch_summary",
+        "t3_fetch_to_kb",
+        "t3_headcount_cost",
+        "t3_receipt_total",
+        "t3_specs_to_kb",
+        "t4_amount_total_verify",
+        "t4_billable_verify",
+        "t4_fetch_flag",
+        "t4_no_oversearch_notes",
+        "t4_no_oversearch_sleep",
+        "t4_open_high_verify"
+      ],
+      "stats": {
+        "judged": 105,
+        "changed": 21,
+        "errored": 0,
+        "no_final": 0,
+        "no_rubric": 0,
+        "unknown_task": 0,
+        "judge_error": 0,
+        "unparsed": 0,
+        "task_skipped": 0
+      }
     }
   ]
 }

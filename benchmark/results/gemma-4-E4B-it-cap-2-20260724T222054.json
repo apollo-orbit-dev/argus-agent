@@ -12,35 +12,45 @@
       "chain_pass": 1.0,
       "judge_mean": 3.0,
       "solved": 1.0,
+      "answered": 1.0,
+      "abort_rate": null,
       "n": 14,
       "skipped": 0
     },
     "2": {
       "chain_pass": 0.8333333333333334,
-      "judge_mean": 2.7142857142857144,
+      "judge_mean": 2.738095238095238,
       "solved": 0.8571428571428571,
+      "answered": 0.9285714285714286,
+      "abort_rate": null,
       "n": 14,
       "skipped": 0
     },
     "3": {
       "chain_pass": 0.42857142857142855,
-      "judge_mean": 1.3333333333333335,
+      "judge_mean": 1.3571428571428572,
       "solved": 0.42857142857142855,
+      "answered": 0.5,
+      "abort_rate": null,
       "n": 14,
       "skipped": 0
     },
     "4": {
       "chain_pass": 0.07142857142857142,
-      "judge_mean": 0.6428571428571429,
+      "judge_mean": 0.6666666666666667,
       "solved": 0.07142857142857142,
+      "answered": 0.21428571428571427,
+      "abort_rate": null,
       "n": 14,
       "skipped": 0
     }
   },
   "overall": {
     "chain_pass": 0.5576923076923077,
-    "judge_mean": 1.9226190476190477,
+    "judge_mean": 1.9404761904761905,
     "solved": 0.5892857142857143,
+    "answered": 0.6607142857142857,
+    "abort_rate": null,
     "n": 56,
     "skipped": 0
   },
@@ -81,7 +91,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_calc_percent",
@@ -119,7 +131,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_calc_arith",
@@ -157,7 +171,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_calc_sqrt",
@@ -195,7 +211,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_pick_unit",
@@ -233,7 +251,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_pick_currency",
@@ -271,7 +291,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_pick_crypto",
@@ -309,7 +331,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_define",
@@ -347,7 +371,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_wiki_summary",
@@ -385,7 +411,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_fetch_example",
@@ -423,7 +451,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_text_count",
@@ -461,7 +491,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_text_b64",
@@ -499,7 +531,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_no_invent_price",
@@ -534,7 +568,9 @@
           "final": "I'm sorry, but the `crypto_price` tool seems to be designed for cryptocurrencies (like bitcoin or ethereum) and not for publicly traded stocks like Apple. The result I got (0.00 USD) confirms it isn't working for stocks. For real-time stock prices, you'll need a dedicated financial data API or a web search for a specific finance website.",
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t1_no_invent_forecast",
@@ -563,7 +599,9 @@
           "final": "I can tell you the current weather in New York, but I don't have access to predictive weather models for exactly one year from today. Weather forecasts are generally reliable only for a short window into the future.",
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_read_not_guess",
@@ -601,7 +639,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_convert_currency",
@@ -639,7 +679,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_define_not_wiki",
@@ -647,7 +689,7 @@
       "category": "tool-selection",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 2.6666666666666665,
+      "judge_mean": 3.0,
       "solved": true,
       "runs": [
         {
@@ -657,7 +699,7 @@
           "error": null,
           "final": "Meticulous means being characterized by very precise, conscientious attention to details. It can also mean timid, fearful, or overly cautious, depending on the context, but usually, it refers to careful thoroughness.",
           "chain_correct": true,
-          "judge_score": 2
+          "judge_score": 3
         },
         {
           "tools": [
@@ -677,7 +719,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_kb_add",
@@ -715,7 +759,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_geocode_coords",
@@ -753,7 +799,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_fetch_single_page",
@@ -791,7 +839,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_countrows",
@@ -834,7 +884,9 @@
           "chain_correct": true,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_log_error_line",
@@ -872,7 +924,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_config_port",
@@ -906,7 +960,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t2_calc_discount",
@@ -944,7 +1000,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_calc_scale_recipe",
@@ -980,7 +1038,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_no_guess_email_count",
@@ -1009,7 +1069,9 @@
           "final": "I don't have access to your personal email account, so I can't check how many unread emails you have.",
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_no_guess_traffic",
@@ -1038,7 +1100,9 @@
           "final": "I don't have access to real-time traffic or GPS data to tell you how long your drive will take right now. You'll need to use a navigation app like Google Maps or Waze for that.",
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t2_no_guess_setting",
@@ -1076,7 +1140,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_orders_shipped",
@@ -1119,7 +1185,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_invoice_total",
@@ -1162,7 +1230,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_expenses_travel",
@@ -1205,7 +1275,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_inventory_reorder",
@@ -1247,7 +1319,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_sales_topproduct",
@@ -1285,7 +1359,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_budget_remaining",
@@ -1325,7 +1401,9 @@
           "chain_correct": false,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_receipt_total",
@@ -1366,7 +1444,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_headcount_cost",
@@ -1374,7 +1454,7 @@
       "category": "compute",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 2.3333333333333335,
+      "judge_mean": 3.0,
       "solved": false,
       "runs": [
         {
@@ -1394,7 +1474,7 @@
           "error": null,
           "final": "The total monthly staff cost is $50,000.\n\n*   **Engineers:** 4 people * $9,000/person = $36,000\n*   **Designers:** 2 people * $7,000/person = $14,000\n*   **Total:** $36,000 + $14,000 = $50,000",
           "chain_correct": false,
-          "judge_score": 2
+          "judge_score": 3
         },
         {
           "tools": [
@@ -1403,9 +1483,11 @@
           "error": null,
           "final": "The total monthly staff cost is $50,000. \n\n(4 Engineers * $9,000/each) + (2 Designers * $7,000/each) = $36,000 + $14,000 = $50,000.",
           "chain_correct": false,
-          "judge_score": 2
+          "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_actions_to_kb",
@@ -1452,7 +1534,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_specs_to_kb",
@@ -1460,7 +1544,7 @@
       "category": "retrieve",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 2.0,
+      "judge_mean": 2.3333333333333335,
       "solved": true,
       "runs": [
         {
@@ -1493,9 +1577,11 @@
           "error": null,
           "final": "Apologies, it seems I had a slip up in my available skills list; `ingest_to_knowledge` is not recognized. However, I have read the specs for the Argus Sensor X1.\n\nProduct: Argus Sensor X1\n*   **Battery life:** 18 hours\n*   **Weight:** 240 grams\n*   **Waterproof rating:** IP68\n\nIf you'd like me to permanently store this information so I can recall it later, please let me know, and I can use the `datastore` tool for a simple key-value save.",
           "chain_correct": false,
-          "judge_score": 0
+          "judge_score": 1
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_quarterly_total",
@@ -1538,7 +1624,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_survey_winner",
@@ -1576,7 +1664,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t3_fetch_to_kb",
@@ -1584,7 +1674,7 @@
       "category": "synthesis",
       "skipped": false,
       "chain_pass": true,
-      "judge_mean": 3.0,
+      "judge_mean": 2.3333333333333335,
       "solved": true,
       "runs": [
         {
@@ -1596,7 +1686,7 @@
           "error": null,
           "final": "I've fetched the content from https://example.com/ and saved a note describing it to your knowledge base. It's labeled 'example.com homepage' and you can search it using the `search_knowledge` tool if you need to reference it later.",
           "chain_correct": true,
-          "judge_score": 3
+          "judge_score": 2
         },
         {
           "tools": [
@@ -1607,7 +1697,7 @@
           "error": null,
           "final": "I've fetched the content from https://example.com/ and saved a note describing the page in your knowledge base under the source label 'example.com landing page'. You can now ask me questions about it using the `search_knowledge` tool.",
           "chain_correct": true,
-          "judge_score": 3
+          "judge_score": 2
         },
         {
           "tools": [
@@ -1620,7 +1710,9 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t3_fetch_summary",
@@ -1639,7 +1731,7 @@
           "error": null,
           "final": "Done. I've fetched the content from https://example.com/ and saved it to 'example_summary.txt' in your workspace.",
           "chain_correct": true,
-          "judge_score": 3
+          "judge_score": 1
         },
         {
           "tools": [
@@ -1659,9 +1751,11 @@
           "error": null,
           "final": "I have successfully fetched the content from https://example.com/ and saved the main text into a file named `example_summary.txt` in your workspace.",
           "chain_correct": true,
-          "judge_score": 1
+          "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t4_amount_total_verify",
@@ -1699,7 +1793,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_billable_verify",
@@ -1737,7 +1833,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_open_high_verify",
@@ -1775,7 +1873,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_no_fabricate_rating",
@@ -1818,7 +1918,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_no_fabricate_missing",
@@ -1860,7 +1962,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_no_oversearch_sleep",
@@ -1904,7 +2008,9 @@
           "chain_correct": false,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t4_no_oversearch_notes",
@@ -1912,7 +2018,7 @@
       "category": "restraint",
       "skipped": false,
       "chain_pass": false,
-      "judge_mean": 1.3333333333333333,
+      "judge_mean": 1.6666666666666667,
       "solved": false,
       "runs": [
         {
@@ -1937,7 +2043,7 @@
           "error": null,
           "final": "I've read 'meeting_notes.txt' and added the decisions to your knowledge base under the source 'Meeting Kickoff Decisions'. You can now search your knowledge base to find those decisions later.",
           "chain_correct": false,
-          "judge_score": 1
+          "judge_score": 2
         },
         {
           "tools": [
@@ -1949,7 +2055,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
     },
     {
       "id": "t4_disambiguate_jordan",
@@ -1987,7 +2095,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_disambiguate_march",
@@ -2025,7 +2135,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_budget_reconcile",
@@ -2070,7 +2182,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_regional_report",
@@ -2115,7 +2229,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_q1_total_kb",
@@ -2153,7 +2269,9 @@
           "chain_correct": false,
           "judge_score": 0
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_fetch_flag",
@@ -2193,7 +2311,9 @@
           "chain_correct": false,
           "judge_score": 1
         }
-      ]
+      ],
+      "answered": false,
+      "abort_rate": null
     },
     {
       "id": "t4_oncall_role",
@@ -2237,7 +2357,63 @@
           "chain_correct": true,
           "judge_score": 3
         }
-      ]
+      ],
+      "answered": true,
+      "abort_rate": null
+    }
+  ],
+  "rejudged": [
+    {
+      "date": "2026-07-26T16:23:09+00:00",
+      "judge": "claude:opus",
+      "tasks": [
+        "t1_calc_area",
+        "t1_calc_arith",
+        "t1_calc_percent",
+        "t1_calc_sqrt",
+        "t1_define",
+        "t1_fetch_example",
+        "t1_pick_crypto",
+        "t1_pick_currency",
+        "t1_pick_unit",
+        "t1_text_b64",
+        "t1_text_count",
+        "t1_wiki_summary",
+        "t2_calc_discount",
+        "t2_calc_scale_recipe",
+        "t2_config_port",
+        "t2_convert_currency",
+        "t2_define_not_wiki",
+        "t2_fetch_single_page",
+        "t2_geocode_coords",
+        "t2_kb_add",
+        "t2_no_guess_email_count",
+        "t2_no_guess_setting",
+        "t2_no_guess_traffic",
+        "t3_budget_remaining",
+        "t3_fetch_summary",
+        "t3_fetch_to_kb",
+        "t3_headcount_cost",
+        "t3_receipt_total",
+        "t3_specs_to_kb",
+        "t4_amount_total_verify",
+        "t4_billable_verify",
+        "t4_fetch_flag",
+        "t4_no_oversearch_notes",
+        "t4_no_oversearch_sleep",
+        "t4_open_high_verify"
+      ],
+      "stats": {
+        "judged": 105,
+        "changed": 9,
+        "errored": 0,
+        "no_final": 0,
+        "no_rubric": 0,
+        "unknown_task": 0,
+        "judge_error": 0,
+        "unparsed": 0,
+        "task_skipped": 0
+      }
     }
   ]
 }

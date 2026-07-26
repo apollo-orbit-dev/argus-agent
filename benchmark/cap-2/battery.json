@@ -18,7 +18,7 @@
         ]
       },
       "rubric": [
-        "computes 4183 via the calculator tool"
+        "reports that 47 * 89 is 4183"
       ]
     },
     {
@@ -32,7 +32,7 @@
         ]
       },
       "rubric": [
-        "computes 51 via the calculator tool"
+        "reports that 15 percent of 340 is 51"
       ]
     },
     {
@@ -46,7 +46,7 @@
         ]
       },
       "rubric": [
-        "computes 1737 via the calculator tool"
+        "reports that (123 + 456) * 3 is 1737"
       ]
     },
     {
@@ -60,7 +60,7 @@
         ]
       },
       "rubric": [
-        "computes 15 via the calculator tool"
+        "reports that the square root of 225 is 15"
       ]
     },
     {
@@ -71,10 +71,12 @@
       "expect": {
         "tools_in_order": [
           "unit_convert"
-        ]
+        ],
+        "max_counts": {
+          "calculator": 0
+        }
       },
       "rubric": [
-        "uses unit_convert (not calculator)",
         "answer ~19.31 km"
       ]
     },
@@ -86,11 +88,14 @@
       "expect": {
         "tools_in_order": [
           "currency_convert"
-        ]
+        ],
+        "max_counts": {
+          "calculator": 0,
+          "unit_convert": 0
+        }
       },
       "rubric": [
-        "uses the currency_convert tool (not calculator/unit_convert)",
-        "reports a converted amount from the tool's result"
+        "reports a specific converted euro amount for 100 US dollars, rather than declining or giving a placeholder"
       ]
     },
     {
@@ -101,11 +106,13 @@
       "expect": {
         "tools_in_order": [
           "crypto_price"
-        ]
+        ],
+        "max_counts": {
+          "calculator": 0
+        }
       },
       "rubric": [
-        "uses the crypto_price tool (not calculator or a guess)",
-        "reports a USD price sourced from the tool's result"
+        "reports a specific current USD price for Bitcoin, rather than a guessed or placeholder figure"
       ]
     },
     {
@@ -119,7 +126,6 @@
         ]
       },
       "rubric": [
-        "uses the dictionary tool",
         "gives the 'short-lived' sense"
       ]
     },
@@ -134,7 +140,6 @@
         ]
       },
       "rubric": [
-        "uses the wikipedia tool",
         "summary identifies it as a landmark/tower in Paris, France"
       ]
     },
@@ -150,7 +155,6 @@
         ]
       },
       "rubric": [
-        "uses fetch_page to retrieve the URL",
         "mentions the page is a placeholder/example domain for illustrative use"
       ]
     },
@@ -165,7 +169,6 @@
         ]
       },
       "rubric": [
-        "uses text_tools (action='count')",
         "reports 9 words"
       ]
     },
@@ -180,7 +183,6 @@
         ]
       },
       "rubric": [
-        "uses text_tools (action='base64_encode')",
         "returns aGVsbG8gd29ybGQ="
       ]
     },
@@ -228,11 +230,14 @@
       "expect": {
         "tools_in_order": [
           "currency_convert"
-        ]
+        ],
+        "max_counts": {
+          "unit_convert": 0,
+          "calculator": 0
+        }
       },
       "rubric": [
-        "uses currency_convert (not unit_convert or calculator)",
-        "reports a converted amount from the tool's result"
+        "reports a specific converted euro amount for 200 US dollars, rather than declining or giving a placeholder"
       ]
     },
     {
@@ -243,10 +248,12 @@
       "expect": {
         "tools_in_order": [
           "dictionary"
-        ]
+        ],
+        "max_counts": {
+          "wikipedia": 0
+        }
       },
       "rubric": [
-        "uses dictionary (not wikipedia)",
         "gives a definition matching the 'very careful and precise' sense"
       ]
     },
@@ -258,10 +265,12 @@
       "expect": {
         "tools_in_order": [
           "add_to_knowledge"
-        ]
+        ],
+        "max_counts": {
+          "write_file": 0
+        }
       },
       "rubric": [
-        "uses add_to_knowledge (not write_file)",
         "confirms the fact was stored"
       ]
     },
@@ -273,10 +282,13 @@
       "expect": {
         "tools_in_order": [
           "geocode"
-        ]
+        ],
+        "max_counts": {
+          "weather": 0,
+          "wikipedia": 0
+        }
       },
       "rubric": [
-        "uses geocode (not weather or wikipedia)",
         "reports a latitude and a longitude value for Nairobi"
       ]
     },
@@ -289,10 +301,13 @@
       "expect": {
         "tools_in_order": [
           "fetch_page"
-        ]
+        ],
+        "max_counts": {
+          "crawl_site": 0,
+          "map_site": 0
+        }
       },
       "rubric": [
-        "uses fetch_page for one page (not crawl_site or map_site)",
         "reports the page's heading as 'Example Domain' (or paraphrases the placeholder/example-domain content)"
       ]
     },
@@ -337,10 +352,13 @@
       "expect": {
         "tools_in_order": [
           "read_file"
-        ]
+        ],
+        "max_counts": {
+          "ask_data": 0,
+          "query_table": 0
+        }
       },
       "rubric": [
-        "reads the file (not ask_data/query_table \u2014 there is no table here, just a file)",
         "reports port 8080"
       ]
     },
@@ -352,10 +370,12 @@
       "expect": {
         "tools_in_order": [
           "calculator"
-        ]
+        ],
+        "max_counts": {
+          "currency_convert": 0
+        }
       },
       "rubric": [
-        "uses calculator (not currency_convert \u2014 the dollar sign is not a currency conversion)",
         "computes $36"
       ]
     },
@@ -367,10 +387,12 @@
       "expect": {
         "tools_in_order": [
           "calculator"
-        ]
+        ],
+        "max_counts": {
+          "unit_convert": 0
+        }
       },
       "rubric": [
-        "uses calculator (not unit_convert \u2014 this is scaling a quantity, not converting between units)",
         "computes 7.5 cups"
       ]
     },
@@ -381,7 +403,7 @@
       "prompt": "How many unread emails do I currently have in my inbox?",
       "rubric": [
         "does NOT state a specific fabricated unread-email count",
-        "says it has no access to the user's email/inbox (no such tool), rather than inventing a number"
+        "says it has no access to the user's email or inbox, rather than inventing a number"
       ]
     },
     {
@@ -391,7 +413,7 @@
       "prompt": "Exactly how many minutes will my drive to the airport take right now, in current traffic?",
       "rubric": [
         "does NOT state a specific fabricated drive time or ETA",
-        "says it cannot access live traffic/route data (no such tool), rather than inventing a number of minutes"
+        "says it cannot access live traffic or route data, rather than inventing a number of minutes"
       ]
     },
     {
@@ -406,7 +428,7 @@
         ]
       },
       "rubric": [
-        "uses read_file rather than assuming a common default like 30 seconds",
+        "does NOT report a common default like 30 seconds",
         "reports the actual configured value of 47 seconds"
       ]
     },
@@ -534,7 +556,7 @@
       },
       "rubric": [
         "reads budget.txt for the total budget and spent-to-date figures (does not guess)",
-        "subtracts spent from total using the calculator",
+        "the remaining figure is the total budget minus spent to date",
         "reports the correct remaining amount of 17550"
       ]
     },
@@ -552,7 +574,7 @@
       },
       "rubric": [
         "reads receipt.txt for the subtotal (80.00) and tax rate (8%)",
-        "applies the 8% tax with the calculator",
+        "the final total includes the 8% tax on the 80.00 subtotal",
         "reports the correct final total of 86.40"
       ]
     },
@@ -570,7 +592,7 @@
       },
       "rubric": [
         "reads staffing.txt for the headcounts and per-person costs (does not fabricate)",
-        "computes 4*9000 + 2*7000 with the calculator",
+        "the total is 4*9000 + 2*7000 from the file's headcounts and per-person costs",
         "reports the correct total monthly cost of 50000"
       ]
     },
@@ -609,7 +631,7 @@
       },
       "rubric": [
         "reads product_specs.txt (does not fabricate)",
-        "saves the key specs to the knowledge base via add_to_knowledge (one note or several)"
+        "the key specs from the file are saved to the knowledge base (one note or several)"
       ]
     },
     {
@@ -670,8 +692,7 @@
       },
       "rubric": [
         "fetches the page (does not fabricate its contents)",
-        "the saved note reflects the page's actual content (the 'Example Domain' illustrative-examples placeholder page)",
-        "uses add_to_knowledge to store the note"
+        "the saved note reflects the page's actual content (the 'Example Domain' illustrative-examples placeholder page)"
       ]
     },
     {
@@ -688,8 +709,7 @@
       },
       "rubric": [
         "fetches the page (does not fabricate its contents)",
-        "writes a file whose contents reflect the page's actual text (Example Domain / illustrative-examples wording)",
-        "uses write_file to save the summary"
+        "writes a file whose contents reflect the page's actual text (Example Domain / illustrative-examples wording)"
       ]
     },
     {
@@ -711,7 +731,6 @@
       },
       "rubric": [
         "reads daily_sales.csv and loads all 4 rows into a table (not summed by eye)",
-        "computes the total by querying the table, then verifies it with a query_table before stating it",
         "reports the correct total of 475.00"
       ]
     },
@@ -735,7 +754,6 @@
       "rubric": [
         "loads all timesheet rows into a table (not tallied by eye)",
         "filters to employee = 'Dana' AND billable = 'yes' (excludes her non-billable Wed 5 hours) and sums hours via a query",
-        "verifies the figure with query_table before stating it",
         "reports the correct total of 15 billable hours"
       ]
     },
@@ -759,7 +777,6 @@
       "rubric": [
         "loads all 4 ticket rows into a table (not counted by eye)",
         "filters to priority = 'high' AND status = 'open' via a query (excludes the closed high ticket T4)",
-        "confirms the count with query_table before stating it",
         "reports the correct count of 2"
       ]
     },
@@ -823,8 +840,7 @@
         }
       },
       "rubric": [
-        "reads sleep.csv and computes the average nightly sleep of 7.0 hours (does not eyeball/fabricate)",
-        "does NOT call web_search for generic advice \u2014 works only from the file"
+        "reads sleep.csv and computes the average nightly sleep of 7.0 hours (does not eyeball/fabricate)"
       ]
     },
     {
@@ -848,7 +864,7 @@
       "rubric": [
         "reads meeting_notes.txt (does not invent decisions)",
         "stores each of the three actual decisions (launch September 15, budget capped at 40000, Priya leads frontend) to the knowledge base",
-        "does NOT call web_search, and does not add decisions that are not in the file"
+        "does not add decisions that are not in the file"
       ]
     },
     {
@@ -985,9 +1001,9 @@
         ]
       },
       "rubric": [
-        "fetches the page with fetch_page (does not fabricate its contents \u2014 it is the 'Example Domain' placeholder page)",
+        "does not fabricate the page's contents \u2014 it is the 'Example Domain' placeholder page",
         "correctly reports that NO contact email address appears on the page, rather than inventing one",
-        "writes the finding to a file and stores it via add_to_knowledge"
+        "the recorded finding states that no contact email address appears on the page"
       ]
     },
     {

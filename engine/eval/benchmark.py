@@ -5,6 +5,7 @@ count, and plot a per-tier metric-vs-size curve.
   python -m engine.eval.benchmark run --model main --params 35 --mode native
   python -m engine.eval.benchmark run --model 'fast=http://host/v1|fast' --params 3 --mode manual
   python -m engine.eval.benchmark report
+  python -m engine.eval.benchmark rejudge --battery benchmark/cap-2/battery.json --tasks t1_calc_percent
 
 Single-arm (no skill ablation) — this measures "how good is the deployed system on model X", the
 input to the small-model capability curve. Reuses engine.eval.{scoring,judge,capture,judge_runner}.
@@ -28,6 +29,7 @@ RESULTS = BENCH / "results"                 # shared across batteries — filena
 PASS_FRACTION = 0.6
 JUDGE_SOLVED_MIN = 2          # a run is "solved" iff it chained correctly AND judge_score >= this
 ABORT_ISSUES = ("stuck_repeating",)   # observer issues that END the turn (v1: exact-repeat only)
+FROZEN_BATTERIES = ("cap-1",)         # published + closed: `rejudge` refuses to touch these
 
 # ------------------------------- pure helpers (unit-tested) -------------------------------
 
@@ -263,7 +265,12 @@ async def _run_task(cfg, judge_fn, task: dict, k: int, timeout: float, fixtures_
                 dst.mkdir(parents=True, exist_ok=True)
                 shutil.copy(fixtures_dir / src, dst / src)
             cap = await run_and_capture(engine, f"bench-{task['id']}-{i}", task["prompt"], timeout)
-            r = {"tools": cap["tools"], "error": cap["error"], "final": cap["final"],
+            # create_table_args is stored (not just used in-flight) because build_judge_prompt's
+            # _outcome renders the created schemas: without it on disk, a later `rejudge` would
+            # build a DIFFERENT prompt than the original judging saw. Results written before this
+            # lack the key and re-judge with "tables created: (none)" — a known fidelity gap.
+            r = {"tools": cap["tools"], "create_table_args": cap.get("create_table_args") or [],
+                 "error": cap["error"], "final": cap["final"],
                  "observer": cap["observer"], "aborted": run_aborted(cap["observer"])}
             if "expect" in task:
                 r["chain_correct"] = score_case(task["expect"], cap)["chain_correct"]
@@ -326,6 +333,103 @@ def _write_result(result: dict) -> Path:
     idx.append({k: result[k] for k in ("model", "params", "mode", "battery_version", "date")} | {"file": out.name})
     idx_path.write_text(json.dumps(idx, indent=2))
     return out
+
+
+# ------------------------------- re-judge (no model re-runs) -------------------------------
+
+
+def captured_from_run(run: dict) -> dict:
+    """Rebuild the `captured` dict build_judge_prompt needs from a STORED run. Judging is cheap and
+    generation is not, so a stored run is enough to regenerate a judge score — but only these four
+    keys survive to disk, so the reconstruction is explicit rather than passing the run itself."""
+    return {"tools": list(run.get("tools") or []),
+            "create_table_args": list(run.get("create_table_args") or []),
+            "observer": list(run.get("observer") or []),
+            "final": run.get("final") or ""}
+
+
+def rejudgeable(run: dict) -> str | None:
+    """None if this stored run can be re-judged, else the reason it can't. A run that cannot be
+    re-judged is LEFT ALONE — never scored 0. Inventing a 0 for a run whose output was never
+    recorded would manufacture a model failure out of a harness gap."""
+    if run.get("error"):
+        return "errored"            # the original pass didn't judge these either (`not cap["error"]`)
+    if not (run.get("final") or "").strip():
+        return "no_final"
+    return None
+
+
+async def rejudge_result(result: dict, battery: dict, judge_fn, task_ids=None,
+                         concurrency: int = 1) -> dict:
+    """Re-score a stored result IN PLACE from its own `final` text against the CURRENT battery, then
+    recompute every task verdict and the aggregate so `solved`/`answered`/`judge_mean` follow the new
+    scores instead of the stale stored ones. No model is re-run.
+
+    task_ids: restrict to these battery task ids (None = all). Restricting is the honest default when
+    only some rubrics changed — re-judging an UNCHANGED rubric moves published numbers by judge noise
+    alone, which is the very thing this whole exercise is trying to stop measuring.
+
+    Returns a report dict; mutates `result`."""
+    from engine.eval.judge import build_judge_prompt, parse_judge_reply
+
+    cases = {t["id"]: t for t in battery.get("tasks", [])}
+    stats = {"judged": 0, "changed": 0, "errored": 0, "no_final": 0,
+             "no_rubric": 0, "unknown_task": 0, "judge_error": 0, "unparsed": 0, "task_skipped": 0}
+    changes: list[dict] = []
+    sem = asyncio.Semaphore(max(1, concurrency))
+
+    async def _one(case, task, idx, run):
+        async with sem:
+            try:
+                text = await judge_fn(build_judge_prompt(case, captured_from_run(run)))
+            except Exception as e:      # noqa: BLE001 - one bad judge call must not lose the pass
+                stats["judge_error"] += 1
+                run["judge_error"] = f"{type(e).__name__}: {e}"
+                return
+        score = parse_judge_reply(text)["score"]
+        if score is None:               # unparseable reply is not evidence of a 0
+            stats["unparsed"] += 1
+            return
+        old = run.get("judge_score")
+        run["judge_score"] = score
+        run.pop("judge_error", None)
+        stats["judged"] += 1
+        if old != score:
+            stats["changed"] += 1
+            changes.append({"task": task["id"], "run": idx, "old": old, "new": score})
+
+    jobs = []
+    for task in result.get("tasks", []):
+        case = cases.get(task.get("id"))
+        if case is None:
+            stats["unknown_task"] += 1
+            continue
+        if task_ids is not None and task["id"] not in task_ids:
+            continue
+        if task.get("skipped") or not task.get("runs"):
+            stats["task_skipped"] += 1
+            continue
+        if not case.get("rubric"):
+            stats["no_rubric"] += 1
+            continue
+        for idx, run in enumerate(task["runs"]):
+            why = rejudgeable(run)
+            if why:
+                stats[why] += 1
+                continue
+            jobs.append(_one(case, task, idx, run))
+    if jobs:
+        await asyncio.gather(*jobs)
+
+    # Verdicts + aggregate are DERIVED, so recompute them from the runs rather than patching the
+    # stored numbers — otherwise `solved`/`answered` would keep reporting the pre-re-judge collapse.
+    k = result.get("k", 3)
+    for task in result.get("tasks", []):
+        if task.get("runs"):
+            task.update(task_verdict(task["runs"], k))
+    agg = aggregate(result.get("tasks", []))
+    result["per_tier"], result["overall"] = agg["per_tier"], agg["overall"]
+    return {"stats": stats, "changes": changes}
 
 
 # ------------------------------- report / curve -------------------------------
@@ -414,6 +518,57 @@ def render_curve(battery_version: str, out: Path) -> bool:
 # ------------------------------- CLI -------------------------------
 
 
+def _cmd_rejudge(args) -> int:
+    from engine.eval.judge_runner import make_judge
+    battery = json.loads(Path(args.battery).read_text())
+    bv = battery["battery_version"]
+    if bv in FROZEN_BATTERIES:
+        print(f"refusing: battery {bv!r} is frozen (published); re-judging it would rewrite closed numbers")
+        return 2
+    task_ids = set(t.strip() for t in args.tasks.split(",") if t.strip()) if args.tasks else None
+    if task_ids:
+        unknown = task_ids - {t["id"] for t in battery["tasks"]}
+        if unknown:
+            print(f"unknown task ids for {bv}: {sorted(unknown)}")
+            return 2
+    if args.result:
+        paths = [Path(x) for x in args.result]
+    else:
+        paths = [p for p in sorted(RESULTS.glob("*.json")) if p.name != "index.json"
+                 and json.loads(p.read_text()).get("battery_version") == bv]
+    total = {"judged": 0, "changed": 0}
+    for path in paths:
+        result = json.loads(path.read_text())
+        if result.get("battery_version") != bv:
+            print(f"skip {path.name}: battery_version {result.get('battery_version')!r} != {bv!r}")
+            continue
+        before = dict(result.get("overall") or {})
+        if args.dry_run:
+            n = sum(1 for t in result.get("tasks", [])
+                    if not t.get("skipped") and (task_ids is None or t["id"] in task_ids)
+                    for r in t.get("runs", []) if rejudgeable(r) is None)
+            print(f"{path.name}: would judge {n} run(s)")
+            continue
+        rep = asyncio.run(rejudge_result(result, battery, make_judge(args.judge),
+                                         task_ids=task_ids, concurrency=args.concurrency))
+        result.setdefault("rejudged", []).append({
+            "date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "judge": args.judge, "tasks": sorted(task_ids) if task_ids else "all",
+            "stats": rep["stats"]})
+        path.write_text(json.dumps(result, indent=2, default=str))
+        after = result.get("overall") or {}
+        total["judged"] += rep["stats"]["judged"]
+        total["changed"] += rep["stats"]["changed"]
+
+        def _d(key):
+            a, b = before.get(key), after.get(key)
+            return f"{key}: {a if a is None else round(a, 4)} -> {b if b is None else round(b, 4)}"
+        print(f"{path.name}: {rep['stats']}\n    " + "  ".join(_d(k) for k in ("judge_mean", "solved", "answered")))
+    if not args.dry_run:
+        print(f"\ntotal: {total['judged']} run(s) re-judged, {total['changed']} score(s) changed")
+    return 0
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="benchmark", description="Argus model-capability benchmark")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -432,9 +587,25 @@ def main(argv=None):
                    choices=["off", "keyword", "embedding", "hybrid"],
                    help="progressive tool disclosure arm: advertise only the K most relevant tools "
                         "per turn (default: leave the configured value alone)")
+    rj = sub.add_parser("rejudge", help="re-score stored results from their own final text against "
+                                        "the current battery (no model re-runs)")
+    rj.add_argument("--battery", default=str(BENCH / "cap-2" / "battery.json"))
+    rj.add_argument("--judge", default="claude:opus")
+    rj.add_argument("--tasks", default=None,
+                    help="comma-separated battery task ids to re-judge (default: all). Restrict this "
+                         "to the tasks whose RUBRIC changed — re-judging an unchanged rubric only "
+                         "adds judge noise to published numbers.")
+    rj.add_argument("--result", action="append", default=None,
+                    help="result file to re-judge (repeatable; default: every stored result of this "
+                         "battery_version)")
+    rj.add_argument("--concurrency", type=int, default=1)
+    rj.add_argument("--dry-run", action="store_true", help="report what would be judged, call nothing")
     rep = sub.add_parser("report", help="regenerate report.md + curve.png from the results")
     rep.add_argument("--battery-version", default=None)
     args = p.parse_args(argv)
+
+    if args.cmd == "rejudge":
+        return _cmd_rejudge(args)
 
     if args.cmd == "run":
         result = asyncio.run(run_model(args.model, args.params, args.mode, args.k, args.judge,
