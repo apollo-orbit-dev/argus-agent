@@ -95,7 +95,7 @@
         }
       },
       "rubric": [
-        "reports a specific converted euro amount for 100 US dollars, rather than declining or giving a placeholder"
+        "reports a specific euro amount for 100 US dollars, rather than refusing or giving a placeholder"
       ]
     },
     {
@@ -112,7 +112,7 @@
         }
       },
       "rubric": [
-        "reports a specific current USD price for Bitcoin, rather than a guessed or placeholder figure"
+        "reports a specific US dollar price for Bitcoin, rather than refusing or giving a placeholder"
       ]
     },
     {
@@ -237,7 +237,7 @@
         }
       },
       "rubric": [
-        "reports a specific converted euro amount for 200 US dollars, rather than declining or giving a placeholder"
+        "reports a specific euro amount for 200 US dollars, rather than refusing or giving a placeholder"
       ]
     },
     {
@@ -726,7 +726,8 @@
           "query_table"
         ],
         "min_counts": {
-          "insert_row": 4
+          "insert_row": 4,
+          "query_table": 2
         }
       },
       "rubric": [
@@ -748,7 +749,8 @@
           "query_table"
         ],
         "min_counts": {
-          "insert_row": 4
+          "insert_row": 4,
+          "query_table": 2
         }
       },
       "rubric": [
@@ -771,7 +773,8 @@
           "query_table"
         ],
         "min_counts": {
-          "insert_row": 4
+          "insert_row": 4,
+          "query_table": 2
         }
       },
       "rubric": [

@@ -453,6 +453,12 @@ def test_report_renders_the_disclosure_column():
 # rubric appears here, and the test below proves `expect` still enforces it. Two restraint
 # tasks are listed with nothing to move: their rubric said "(no such tool)" — an aside about
 # the reply's content, naming no tool — so the edit only deleted the phrase.
+#
+# A required entry is a bare tool name (>= 1 call) or `(name, n)` for a requirement of n calls.
+# The count matters: a `tools_in_order` clause listing a tool ONCE only proves one call, so it
+# cannot discharge a two-call requirement. The three *_verify tasks' prompts demand a second,
+# verifying query ("Verify the figure against the table before answering"), which is why they
+# carry ("query_table", 2) — see `_expect_shortfalls`.
 CAP2_MOVED_TOOL_REQUIREMENTS = {
     "t1_calc_area":           (["calculator"], []),
     "t1_calc_percent":        (["calculator"], []),
@@ -483,9 +489,9 @@ CAP2_MOVED_TOOL_REQUIREMENTS = {
     "t3_specs_to_kb":         (["add_to_knowledge"], []),
     "t3_fetch_to_kb":         (["add_to_knowledge"], []),
     "t3_fetch_summary":       (["write_file"], []),
-    "t4_amount_total_verify": (["query_table"], []),
-    "t4_billable_verify":     (["query_table"], []),
-    "t4_open_high_verify":    (["query_table"], []),
+    "t4_amount_total_verify": ([("query_table", 2)], []),
+    "t4_billable_verify":     ([("query_table", 2)], []),
+    "t4_open_high_verify":    ([("query_table", 2)], []),
     "t4_no_oversearch_sleep": ([], ["web_search"]),
     "t4_no_oversearch_notes": ([], ["web_search"]),
     "t4_fetch_flag":          (["fetch_page", "write_file", "add_to_knowledge"], []),
@@ -529,25 +535,109 @@ def test_cap2_rubrics_never_name_a_tool():
     assert not offenders, "cap-2 rubrics still name tools:\n" + "\n".join(offenders)
 
 
+# Tasks whose ONLY honest rubric is "a concrete figure came back": the reply cannot show where
+# the number came from, so any criterion about its provenance ("rather than a guessed figure",
+# "a live price", "the real rate") is unanswerable from the final text — the judge's only
+# evidence would be `_outcome`'s tool list, i.e. exactly the channel the rubric split exists to
+# close (argus-z8e). Provenance is `expect`'s job: `tools_in_order` already requires the tool.
+CAP2_FIGURE_TASKS = ("t1_pick_crypto", "t1_pick_currency", "t2_convert_currency")
+
+# Wording that asserts something a reader of the final reply alone cannot check.
+PROVENANCE_WORDS = ("guess", "fabricat", "invent", "made up", "actual", "real ", "genuine",
+                    "live ", "current", "up-to-date", "up to date", "fetched", "looked up")
+
+
+def test_cap2_figure_rubrics_are_checkable_from_the_reply():
+    """These rubrics may assert only what a reader of the reply can verify: that a specific
+    figure is reported rather than a refusal or a placeholder. They may NOT ask whether the
+    figure is real, current or guessed — nothing in the text answers that, so the judge falls
+    back on the tool list and the judge axis is contaminated again (t1_pick_crypto's mean moved
+    2.96 -> 2.62 on exactly this wording, with all 11 changes downward)."""
+    import json
+    battery = {t["id"]: t for t in json.loads(open("benchmark/cap-2/battery.json").read())["tasks"]}
+    offenders = []
+    for tid in CAP2_FIGURE_TASKS:
+        for c in battery[tid].get("rubric") or []:
+            low = c.lower()
+            hits = [w for w in PROVENANCE_WORDS if w in low]
+            if hits:
+                offenders.append(f"{tid}: {c!r} -> unanswerable from the reply: {hits}")
+            assert "specific" in low, f"{tid}: {c!r} should still demand a specific figure"
+    assert not offenders, "cap-2 rubrics ask the judge an unanswerable question:\n" + \
+        "\n".join(offenders)
+
+
+def _expect_shortfalls(tid, exp, required, forbidden):
+    """Ways `exp` fails to enforce the (required, forbidden) provenance entry, as strings.
+
+    COUNTS ARE CHECKED. `tools_in_order` is a subsequence match, so a tool listed once in it
+    guarantees exactly one call — it cannot discharge a requirement of two. Only repeats in
+    `tools_in_order` or a `min_counts` entry can. (This is the masking that let the *_verify
+    tasks' second, verifying query be dropped from the rubrics without any test noticing.)
+    """
+    order = list(exp.get("tools_in_order") or [])
+    mins = exp.get("min_counts") or {}
+    maxes = exp.get("max_counts") or {}
+    out = []
+    for item in required:
+        tool, n = item if isinstance(item, tuple) else (item, 1)
+        guaranteed = max(order.count(tool), int(mins.get(tool) or 0))
+        if guaranteed < n:
+            out.append(f"{tid}: requires {n}x {tool} but expect guarantees only "
+                       f"{guaranteed} ({exp})")
+    for tool in forbidden:
+        if maxes.get(tool) != 0:
+            out.append(f"{tid}: forbids {tool} but expect.max_counts does not ({exp})")
+    return out
+
+
+def test_expect_shortfalls_counts_calls_not_just_names():
+    """A one-call `tools_in_order` clause must NOT be accepted as satisfying a two-call
+    requirement — the masking that hid the dropped verification step on the *_verify tasks."""
+    one_call = {"tools_in_order": ["read_file", "query_table"]}
+    assert _expect_shortfalls("t", one_call, ["query_table"], []) == []          # 1 of 1: ok
+    assert _expect_shortfalls("t", one_call, [("query_table", 2)], [])           # 1 of 2: not ok
+    # only min_counts (or a repeat in tools_in_order) can discharge a 2-call requirement
+    with_min = {"tools_in_order": ["query_table"], "min_counts": {"query_table": 2}}
+    assert _expect_shortfalls("t", with_min, [("query_table", 2)], []) == []
+    repeated = {"tools_in_order": ["query_table", "query_table"]}
+    assert _expect_shortfalls("t", repeated, [("query_table", 2)], []) == []
+    # a min_counts BELOW the requirement is still a shortfall
+    assert _expect_shortfalls("t", {"min_counts": {"query_table": 1}}, [("query_table", 2)], [])
+    # forbidden tools still need an explicit max_counts 0
+    assert _expect_shortfalls("t", one_call, [], ["web_search"])
+    assert _expect_shortfalls("t", {"max_counts": {"web_search": 0}}, [], ["web_search"]) == []
+
+
 def test_cap2_moved_tool_requirements_still_enforced_by_expect():
     """Nothing was silently dropped: every tool a pre-split rubric named is still required (or
-    still forbidden) by that task's `expect`, which is the axis that owns tool use."""
+    still forbidden) by that task's `expect`, at the call count the prompt demands."""
     import json
     battery = {t["id"]: t for t in json.loads(open("benchmark/cap-2/battery.json").read())["tasks"]}
     missing = []
     for tid, (required, forbidden) in CAP2_MOVED_TOOL_REQUIREMENTS.items():
         assert tid in battery, f"{tid} is not a cap-2 task"
-        exp = battery[tid].get("expect") or {}
-        order = list(exp.get("tools_in_order") or [])
-        mins = exp.get("min_counts") or {}
-        for tool in required:
-            if tool not in order and not mins.get(tool):
-                missing.append(f"{tid}: requires {tool} but expect does not ({exp})")
-        maxes = exp.get("max_counts") or {}
-        for tool in forbidden:
-            if maxes.get(tool) != 0:
-                missing.append(f"{tid}: forbids {tool} but expect.max_counts does not ({exp})")
+        missing += _expect_shortfalls(tid, battery[tid].get("expect") or {}, required, forbidden)
     assert not missing, "tool requirements lost in the rubric split:\n" + "\n".join(missing)
+
+
+def test_cap2_verify_tasks_require_a_second_query():
+    """The three *_verify tasks are named for a verification step their prompts demand in plain
+    English ("Verify the figure against the table before answering" / "Confirm the count with a
+    query before you answer"). The rubric split moved that requirement off the judge axis, so
+    `expect` is the only place left that can hold it: one query computes the figure, a second
+    verifies it. Pinned here as well as in the provenance table so neither can be quietly
+    weakened. See the README — this makes those rows non-comparable to published chain_pass."""
+    import json
+    import re
+    battery = {t["id"]: t for t in json.loads(open("benchmark/cap-2/battery.json").read())["tasks"]}
+    for tid in ("t4_amount_total_verify", "t4_billable_verify", "t4_open_high_verify"):
+        task = battery[tid]
+        assert re.search(r"verify|confirm|double-check", task["prompt"], re.I), \
+            f"{tid}'s prompt no longer asks for verification; revisit this requirement"
+        mins = (task.get("expect") or {}).get("min_counts") or {}
+        assert mins.get("query_table", 0) >= 2, \
+            f"{tid} must require >= 2 query_table calls (compute + verify), got {mins}"
 
 
 # ------------------------------- rejudge -------------------------------
