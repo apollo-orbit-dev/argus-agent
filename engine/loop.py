@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import time
 from dataclasses import dataclass
@@ -101,6 +102,24 @@ class LoopDeps:
     approvals: object = None       # ApprovalBroker | None; None -> no gating (master-flag-off parity)
     run_id: str = ""               # this turn's run id, for the gate's resume payload
     origin: str = "api"            # dashboard | telegram | scheduled | api — for the gate's origin-routing
+    friction: object = None        # FrictionLog | None; None -> nothing is recorded (default: off)
+    model_name: str = ""           # stamped onto friction records so the list is readable per-model
+
+
+def _record_friction(deps: "LoopDeps", session_id: str, kind: str,
+                     tool: Optional[str], attempts: int, detail: str) -> None:
+    """Note one give-up moment in the friction log, if one is configured.
+
+    This RECORDS; it never intervenes. The loop must behave byte-identically whether a log is
+    attached or not, so every failure — a missing/unwritable path, a full disk, a FrictionLog
+    that somehow raises — dies here at debug level and the turn continues to its normal result."""
+    if deps.friction is None:
+        return
+    try:
+        deps.friction.record(kind=kind, session_id=session_id, tool=tool,
+                             attempts=attempts, detail=detail, model=deps.model_name)
+    except Exception:
+        logging.getLogger("argus.friction").debug("friction record failed", exc_info=True)
 
 
 def _jsonable(args) -> object:
@@ -168,6 +187,10 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
     create_verify_nudged = False
     recent_calls: list[tuple[str, set]] = []   # observer: (tool, value-token-set) per ToolCall
     fuzzy_repeat_nudged = False                 # fire the fuzzy nudge at most once per turn
+    # friction: signature -> the (truncated) result that call last produced. The stuck_repeating
+    # check fires BEFORE the repeat executes, so this is what the model kept hitting — the whole
+    # point of the log is naming that error, not just the tool.
+    last_result: dict[str, str] = {}
 
     async def observer_repeat_check(step: int, call: "ToolCall", sig: str) -> None:
         """At the repeat threshold, nudge the model to change approach.
@@ -217,6 +240,8 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
                                        "raw": parsed.raw, "truncated": truncated})
             if parse_failures >= 1:
                 await emit(step, "error", {"message": "gave up after reprompt", "reason": parsed.reason})
+                _record_friction(deps, session_id, "parse_failure", None,
+                                 parse_failures + 1, parsed.reason or "")
                 if truncated:
                     return ("Sorry — my reply ran past the model's output limit and got cut off "
                             "mid-way. Ask me to write it more concisely, or in parts.")
@@ -270,6 +295,8 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
         if deps.enable_observer and call_counts[sig] > deps.observer_threshold:
             await emit(step, "observer", {"issue": "stuck_repeating", "tool": call.tool,
                                           "count": call_counts[sig]})
+            _record_friction(deps, session_id, "stuck_repeating", call.tool,
+                             call_counts[sig], last_result.get(sig, ""))
             answer = ("I wasn't able to make progress — I kept repeating the same step "
                       "without getting new information. Could you rephrase or add detail?")
             deps.store.append_message(session_id, {"role": "assistant", "content": answer})
@@ -318,6 +345,7 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
             for m in deps.mode.tool_result_messages(resp, call, result):
                 deps.store.append_message(session_id, m)
             await emit(step, "tool_result", {"tool": call.tool, "ok": False, "result": result})
+            last_result[sig] = str(result)[:400]
             await observer_repeat_check(step, call, sig)
             continue
 
@@ -367,6 +395,7 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
 
         for m in deps.mode.tool_result_messages(resp, call, result):
             deps.store.append_message(session_id, m)
+        last_result[sig] = str(result)[:400]
         await observer_repeat_check(step, call, sig)
 
         # Observer: building tool after tool without ever RUNNING one to see its real output is

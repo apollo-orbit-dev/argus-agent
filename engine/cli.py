@@ -144,6 +144,32 @@ def cmd_run(_):
     os.execv(sys.executable, [sys.executable, str(ROOT / "main.py")])   # foreground; replaces process
 
 
+def cmd_friction(args):
+    """Print the friction log grouped by (kind, tool), most frequent first.
+
+    The grouping IS the feature: the top row is the thing Argus most often fails to do and
+    can't explain, so it's the next thing to fix. `detail` is the most recent error text seen
+    for that group — it may quote user content, which is why the log is never committed."""
+    from engine.friction import FrictionLog
+    fl = FrictionLog(str(ROOT / "friction.json"))
+    groups = fl.summary()
+    if not groups:
+        print(f"No friction recorded yet ({ROOT / 'friction.json'}).")
+        print("Records appear when a turn gives up — a repeated tool call or an unparseable reply.")
+        return 0
+    limit = getattr(args, "limit", None) or 20
+    print(f"{len(fl.records)} friction record(s) across {len(groups)} group(s) "
+          f"— {ROOT / 'friction.json'}\n")
+    print(f"{'COUNT':>5}  {'KIND':<16} {'TOOL':<20} {'LAST SEEN':<26} DETAIL")
+    for g in groups[:limit]:
+        detail = " ".join((g["detail"] or "(no detail captured)").split())[:90]
+        print(f"{g['count']:>5}  {g['kind']:<16} {str(g['tool'] or '-'):<20} "
+              f"{g['last_at'] or '-':<26} {detail}")
+    if len(groups) > limit:
+        print(f"\n... {len(groups) - limit} more group(s) — rerun with --limit {len(groups)}")
+    return 0
+
+
 def cmd_version(_):
     from engine.version import get_version
     print(f"argus {get_version()}")
@@ -192,6 +218,8 @@ def main(argv=None):
         ("help", "show this help"),
     ]:
         sub.add_parser(name, help=help_)
+    fr = sub.add_parser("friction", help="show where the agent gave up, most frequent first")
+    fr.add_argument("--limit", type=int, default=20, help="max groups to print (default: 20)")
     svc = sub.add_parser("service", help="install/remove a systemd user service (Linux)")
     svc.add_argument("action", nargs="?", choices=["install", "uninstall", "status"], default="status")
     svc.add_argument("--name", default=None, help="override the unit name (default: auto-derived)")
@@ -199,7 +227,7 @@ def main(argv=None):
     args = p.parse_args(argv)
     handlers = {"start": cmd_start, "stop": cmd_stop, "exit": cmd_stop, "restart": cmd_restart,
                 "status": cmd_status, "logs": cmd_logs, "run": cmd_run, "version": cmd_version,
-                "service": cmd_service}
+                "service": cmd_service, "friction": cmd_friction}
     if not args.cmd or args.cmd == "help":
         p.print_help()
         return 0
