@@ -174,6 +174,46 @@ def _looks_like_no_data(text: str) -> bool:
     return len(_PLACEHOLDER_RE.findall(t)) >= 2
 
 
+_MISSING_MODULE_RE = re.compile(r"ModuleNotFoundError:\s*No module named ['\"]([\w.]+)['\"]")
+
+
+def _missing_module(test_result: str) -> str:
+    """The module name from a ModuleNotFoundError in a container test-run result, or "".
+
+    The sandbox runner reports `{type(e).__name__}: {e}` and DynamicTool prefixes `<name> error: `,
+    so a missing import arrives as `mytool error: ModuleNotFoundError: No module named 'httpx'`.
+    Only the top-level name is kept (`bs4.element` -> `bs4`): that is what the model has to stop
+    importing, and it is what a `sandboxed=false` run would need available.
+    """
+    m = _MISSING_MODULE_RE.search(test_result or "")
+    return m.group(1).split(".")[0] if m else ""
+
+
+def _sandbox_missing_module_message(tool_name: str, module: str, test_result: str) -> str:
+    """The failure text for a SANDBOXED tool whose test run died on a missing import.
+
+    The generic "fix the code" advice is actively wrong here: the code is usually fine and the
+    ENVIRONMENT is the problem, so a model that follows it rewrites working code, hits the identical
+    wall, and loops (observed live: a tool importing httpx, rewritten three times, then abandoned).
+    Name the module and give the only two escapes that actually exist.
+
+    Deliberately does NOT offer dependency approval as a third option: approving a module pip-installs
+    it into the HOST venv (dep_installer.install runs `sys.executable -m pip install`), while a
+    sandboxed tool executes `python /opt/argus/runner.py` inside a python:3.12-slim container whose
+    only bind mount is the workspace. Approval cannot make a package exist in there.
+    """
+    return (f"create_tool: '{tool_name}' was NOT created — its test run failed:\n"
+            f"  {test_result}\n"
+            f"'{module}' is NOT available in the container sandbox — the sandbox has the Python "
+            "STANDARD LIBRARY ONLY, no third-party packages. Your code is probably fine; the "
+            "environment is the problem, so rewriting it the same way will fail the same way. "
+            "Two options:\n"
+            f"  1. Rewrite using the standard library instead of '{module}' (for HTTP, use "
+            "urllib.request).\n"
+            f"  2. Call create_tool again with the SAME name and sandboxed=false, to run it "
+            "host-side where the app's own dependencies are available.")
+
+
 def _discarded_tool_calls(code: str, known_tools: set) -> list:
     """Bare-statement calls to CALL_TOOL or another tool whose RETURN VALUE is thrown away — not
     assigned, returned, or used. A created tool calls another tool for its DATA, so discarding the
@@ -516,6 +556,30 @@ def load_persisted_tools(persist_dir: str, timeout: float = 15.0,
     return tools
 
 
+# The ONE statement of what the container actually contains. Both surfaces a model reads before it
+# writes a line of code — create_tool's own description and the `sandboxed` field — are built from
+# this exact string, so they cannot drift into contradicting each other. They did: the description
+# said "you may import httpx", the field said "full stdlib", the sandbox had neither, and a model
+# that believed the description looped until a human intervened.
+_SANDBOX_STDLIB_FACT = (
+    "The container sandbox has the Python STANDARD LIBRARY ONLY — NO third-party packages: no "
+    "httpx, no requests, no bs4, no pandas. For HTTP inside the sandbox use urllib.request.")
+
+# The import advice for a host-side tool. Accurate ONLY when the sandbox is off/unavailable, because
+# then `sandboxed` resolves to false and the tool really does run in Argus's own venv.
+_IMPORTS_HOST_SIDE = (
+    "You may import: math, statistics, datetime, json, re, calendar, zoneinfo, and "
+    "httpx for web APIs (call it synchronously: resp = httpx.get(url)). ")
+
+# ...and its replacement when a new tool DEFAULTS into the container (sandbox enabled + available).
+# Recommending httpx there is the root cause of the observed failure loop: Argus told the model to
+# use httpx, put the tool somewhere httpx does not exist, then told it to fix correct code.
+_IMPORTS_SANDBOXED = (
+    "New tools run in the container sandbox by DEFAULT. " + _SANDBOX_STDLIB_FACT + " Pass "
+    "sandboxed=false to run the tool host-side instead, where the app's own dependencies (httpx "
+    "and the rest) ARE available. ")
+
+
 class CreateToolTool(Tool):
     name = "create_tool"
     description = (
@@ -524,8 +588,7 @@ class CreateToolTool(Tool):
         "mapping each argument to {type, description}); code — a REGULAR Python function "
         "`def run(args): ...` (NOT async) that takes a dict of the arguments and returns a "
         "string; and test_args — example arguments so the tool is test-run immediately. "
-        "You may import: math, statistics, datetime, json, re, calendar, zoneinfo, and "
-        "httpx for web APIs (call it synchronously: resp = httpx.get(url)). "
+        + _IMPORTS_HOST_SIDE +
         "To REUSE an existing tool inside your code, just CALL IT BY NAME like a function: "
         "`data = get_account_data({'date_range': 'last 7 days'})` returns that tool's result "
         "as a string. Prefer this over re-implementing or (never!) hardcoding data — e.g. a "
@@ -545,9 +608,11 @@ class CreateToolTool(Tool):
         test_args: dict = Field(default_factory=dict,
                                 description='example args to test-run the tool once, e.g. {"city":"Nashville"}')
         sandboxed: Optional[bool] = Field(
-            None, description="run this tool in the container sandbox (full stdlib, no calling other "
-                              "tools). Default: on when the sandbox is available. Set false if the "
-                              "tool must call another Argus tool.")
+            None, description="run this tool in the container sandbox. " + _SANDBOX_STDLIB_FACT +
+                              " Default: on when the sandbox is available. Set false to run the "
+                              "tool host-side, where the app's own dependencies (httpx and the "
+                              "rest) ARE available — also required if the tool must call another "
+                              "Argus tool.")
 
     def __init__(self, registry: ToolRegistry, allow_network: bool = False,
                  validate_only: bool = False, timeout: float = 15.0,
@@ -584,6 +649,14 @@ class CreateToolTool(Tool):
         self.sandbox_runtime = sandbox_runtime      # SandboxRuntime | None
         self.sandbox_workspace = sandbox_workspace
         self.sandbox_enabled = sandbox_enabled
+        # Describe the environment the tool will ACTUALLY land in. When `sandboxed` defaults to true
+        # (the daily-instance configuration), advertising httpx is a lie the model cannot detect
+        # until its test run fails — so swap in the stdlib-only advice. When the sandbox is
+        # off/unavailable, `sandboxed` resolves false, the tool runs in Argus's own venv, and the
+        # httpx advice is simply correct. Same predicate as _resolve_sandboxed(None), so the text
+        # and the behaviour cannot disagree.
+        if self._resolve_sandboxed(None):
+            self.description = self.description.replace(_IMPORTS_HOST_SIDE, _IMPORTS_SANDBOXED)
         if self.secrets:                 # tell the model the exact keys it may use
             keys = sorted(self.secrets)
             self.description = (
@@ -855,6 +928,14 @@ class CreateToolTool(Tool):
             record["test_result"] = test_result
             if test_result.strip().startswith(f"{args.name} error:"):
                 record["error"] = f"test-run failed: {test_result}"
+                # A missing import in the CONTAINER is an environment failure, not a code failure —
+                # telling the model to "fix the code" sends it into a rewrite loop it cannot win
+                # (see _sandbox_missing_module_message). Every other failure, including a genuine
+                # NameError, really is the code, so it keeps the generic advice.
+                module = _missing_module(test_result) if sandboxed else ""
+                if module:
+                    record["missing_module"] = module
+                    return _sandbox_missing_module_message(args.name, module, test_result)
                 return (f"create_tool: '{args.name}' was NOT created — its test run failed:\n"
                         f"  {test_result}\n"
                         "Fix the code and call create_tool again with the same name.")
