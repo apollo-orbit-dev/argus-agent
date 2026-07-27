@@ -531,7 +531,10 @@ def test_cap2_rubrics_never_name_a_tool():
             low = c.lower()
             hits = sorted(n for n in names if re.search(r"\b" + re.escape(n) + r"\b", low))
             if hits or "tool" in low:
-                offenders.append(f"{t['id']}: {c!r} -> {hits or ['the word \"tool\"']}")
+                # Hoisted out of the f-string: a backslash inside an f-string EXPRESSION is a
+                # SyntaxError before 3.12 (PEP 701), and pyproject requires-python is >=3.11.
+                why = hits or ['the word "tool"']
+                offenders.append(f"{t['id']}: {c!r} -> {why}")
     assert not offenders, "cap-2 rubrics still name tools:\n" + "\n".join(offenders)
 
 
