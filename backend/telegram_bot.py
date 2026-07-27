@@ -1007,6 +1007,24 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
         The process dies before it can say "done", so the ✅ is delivered on the way back up — see
         register_bot_commands, which reads the pending_notice this writes."""
         from engine.version import get_version
+
+        def _stash_html(stash: str) -> str:
+            """Where the tree went, for a message body. `git stash pop` is NOT offered on purpose: it
+            fails in the exact shape this saves for ("<path> already exists, no checkout"), because
+            the checkout has since put the release's own copy back at that path. And a plain
+            `git stash show -p` prints nothing at all for an untracked-only entry.
+
+            stash@{N}, never stash@{0}: there can be TWO entries and `stash` carries each one's own
+            index. Naming 0 for both sent a user whose files were in the older entry to the wrong
+            one, and an advertised recovery that shows the wrong entry reads as "it is gone"."""
+            return ("Your version of the files it replaced was saved to the git stash as "
+                    f"<code>{_esc(str(stash))}</code> — list it with "
+                    f"<code>git stash list</code>, see what is in an entry with "
+                    f"<code>git stash show -p --include-untracked \"stash@{{N}}\"</code> (its own "
+                    f"index, as shown above), and take a file back with "
+                    f"<code>git checkout \"stash@{{N}}\" -- &lt;path&gt;</code> "
+                    f"(<code>\"stash@{{N}}^3\"</code> if it was untracked or ignored).")
+
         if not res.get("ok"):
             tail = "\n".join(log_lines[-20:]) or "(no output)"
             state, step = res.get("state"), _esc(res.get("failed_step") or "?")
@@ -1023,17 +1041,7 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
             # writes this one first — so as a log line it fell off the top exactly when the update
             # produced enough output to matter.
             if res.get("stash"):
-                # `git stash pop` is NOT offered on purpose: it fails in the exact shape this saves
-                # for ("<path> already exists, no checkout"), because the rollback has since put the
-                # release's own copy back at that path. And a plain `git stash show -p` prints
-                # nothing at all for an untracked-only entry.
-                body += ["", "Your version of the files it replaced was saved to the git stash as "
-                             f"<code>{_esc(str(res['stash']))}</code> — list it with "
-                             f"<code>git stash list</code>, see what is in it with "
-                             f"<code>git stash show -p --include-untracked \"stash@{{0}}\"</code>, "
-                             f"and take a file back with "
-                             f"<code>git checkout \"stash@{{0}}\" -- &lt;path&gt;</code> "
-                             f"(<code>\"stash@{{0}}^3\"</code> if it was untracked or ignored)."]
+                body += ["", _stash_html(res["stash"])]
             body += ["", f"<pre>{_esc(tail)}</pre>"]
             cmd = res.get("revert_command") or (res.get("commands") or [None])[0]
             if cmd:
@@ -1041,11 +1049,18 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
             await reply_html(msg, "\n".join(body))
             return
 
+        # A SUCCESSFUL run can have a stash too, and the revert is where that is the common case: the
+        # tree is preserved before the old release is checked out, and an install that has been
+        # running for days is exactly the one with runtime data at a path that release ships. Only
+        # the failure branch above ever mentioned it, so on the likelier path it reached nobody.
+        stash_line = ["", _stash_html(res["stash"])] if res.get("stash") else []
+
         info = res.get("restart") or updater.restart_strategy()
         if info.get("strategy") == "manual":
-            await reply_html(msg, "✅ Installed — but a restart is required and cannot be done "
-                                  "automatically on this platform:\n"
-                                  f"<pre>{_esc(info.get('instruction') or '')}</pre>")
+            await reply_html(msg, "\n".join(
+                ["✅ Installed — but a restart is required and cannot be done "
+                 "automatically on this platform:",
+                 f"<pre>{_esc(info.get('instruction') or '')}</pre>"] + stash_line))
             return
         notice = {"chat_id": chat_id, "to": res.get("to_tag") or res.get("from_tag")}
         # Mirrors /update/restart in app.py, and for the same reason: between here and the moment
@@ -1058,7 +1073,7 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
         # restores it — see deliver_pending_update_notice for why hardcoding "applied" there lied.
         updater.write_state(state="restarting", before_restart=res.get("state"),
                             pending_notice=notice if chat_id else None)
-        await reply_html(msg, "🔄 Restarting… I'll say when I'm back.")
+        await reply_html(msg, "\n".join(["🔄 Restarting… I'll say when I'm back."] + stash_line))
 
         async def _do():
             await asyncio.sleep(0.6)          # let the reply flush before the process dies

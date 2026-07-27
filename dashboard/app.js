@@ -1569,11 +1569,15 @@
         // for ("already exists, no checkout") because the rollback has since put the release's own
         // copy back at that path; and a bare `show -p` prints nothing at all, exit 0, for an entry
         // that holds only untracked files — so the user concludes it is empty.
+        //
+        // The index is written stash@{N} rather than stash@{0} because there can be TWO entries and
+        // the name above carries each one's own index. Printing 0 for both sent a user whose files
+        // were in the older entry to the wrong one, which reads exactly like "my work is gone".
         out.textContent += '\nYour version of the files it replaced was saved to the git stash as "'
-          + result.stash + '":\n  git stash list\n'
-          + '  git stash show -p --include-untracked "stash@{0}"\n'
-          + '  git checkout "stash@{0}" -- <path>       # a file that was tracked\n'
-          + '  git checkout "stash@{0}^3" -- <path>     # one that was untracked or ignored\n';
+          + result.stash + '" (use the stash@{N} index shown for each entry):\n  git stash list\n'
+          + '  git stash show -p --include-untracked "stash@{N}"\n'
+          + '  git checkout "stash@{N}" -- <path>       # a file that was tracked\n'
+          + '  git checkout "stash@{N}^3" -- <path>     # one that was untracked or ignored\n';
       }
       var cmds = (result.commands && result.commands.length) ? result.commands
                  : (result.revert_command ? [result.revert_command] : []);
@@ -1583,14 +1587,32 @@
       return;
     }
     el.innerHTML = updOk('Installed — restarting…');
+    // A SUCCESSFUL run can have a stash too, and it is the common case for one: the Revert button
+    // preserves the tree before it checks the old release out, and reverting an install that has
+    // been running for days is exactly when there is runtime data at a path that release ships. The
+    // failure branch above returns, so without this the name reached nobody on the likelier path.
+    var stashNote = '';
+    if (result.stash){
+      stashNote = '<span>Your version of the files it replaced was saved to the git stash as "'
+        + esc(result.stash) + '" — recover it with: git stash list</span>';
+      el.innerHTML += stashNote;
+      out.textContent += '\nYour version of the files it replaced was saved to the git stash as "'
+        + result.stash + '" (use the stash@{N} index shown for each entry):\n  git stash list\n'
+        + '  git stash show -p --include-untracked "stash@{N}"\n'
+        + '  git checkout "stash@{N}" -- <path>       # a file that was tracked\n'
+        + '  git checkout "stash@{N}^3" -- <path>     # one that was untracked or ignored\n';
+    }
     var r = await (await fetch('/update/restart', { method: 'POST' })).json();
     if (r.strategy === 'manual'){
-      el.innerHTML = updBad('Installed — restart required');
+      el.innerHTML = updBad('Installed — restart required') + stashNote;
       out.textContent += '\n' + (r.instruction || '') + '\n';
       toast('Installed — restart Argus to finish', 'ok');
       return;
     }
     await pollForNewVersion(el, wasVersion);
+    // Re-appended: every exit from pollForNewVersion REPLACES the card's contents, so without this
+    // the one line telling the user where their files went is visible only during the restart.
+    if (stashNote) el.innerHTML += stashNote;
   }
 
   if ($('updateCheckBtn')){

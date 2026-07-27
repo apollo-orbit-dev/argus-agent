@@ -16,30 +16,38 @@ guarantee hold is that `.env`, `*.db`, `model_presets.json`, `workspaces/`, `cre
 `SOUL.md`, `trusted_tools.json` … are gitignored AND tracked by no release, so nothing a checkout
 writes ever lands on them. There is deliberately no "clean the tree" step anywhere in here.
 
-THE ROLLBACK PRESERVES THE TREE WITH GIT'S OWN STASH, not a bespoke copy-aside. Before the rollback
-checkout, `git stash push --include-untracked` hands the whole working tree to git; only then does a
-PLAIN checkout of the previous ref run. Git already gets right every case a hand-rolled copy got
-wrong — a path that changed between file and directory, paths git quotes for spaces or non-ASCII,
-symlinks (saved as links, not as dereferenced content), permissions and modes — and what it saves is
-discoverable through a documented interface (`git stash list`) rather than a directory nobody was
-told about. It is also what makes the PLAIN checkout viable: the stash leaves the tree clean, so
-there is nothing for the checkout to refuse and no reason to reach for `--force`.
+BOTH WAYS BACK PRESERVE THE TREE WITH GIT'S OWN STASH, not a bespoke copy-aside. There are exactly
+TWO checkouts onto an older ref in this module — the automatic rollback inside a failed apply, and
+the Revert button (`revert()`) — and both go through `_stash_working_tree` before they check
+anything out. Git already gets right every case a hand-rolled copy got wrong — a path that changed
+between file and directory, paths git quotes for spaces or non-ASCII, symlinks (saved as links, not
+as dereferenced content), permissions and modes — and what it saves is discoverable through a
+documented interface (`git stash list`) rather than a directory nobody was told about. It is also
+what makes the PLAIN checkout viable: the stash leaves the tree clean, so there is nothing for the
+checkout to refuse and no reason to reach for `--force`.
 
-If the stash FAILS, the rollback does not run at all. A rollback that cannot preserve the tree is
-the one thing worse than no rollback, so the result is state="needs_manual" with the stash error
-verbatim and HEAD left exactly where it is. A non-zero exit does NOT license the report to say
-"nothing on disk was touched", though: real git writes the stash, deletes the files, and only then
-reports a failure it hit while removing one of them. So the stash ref is re-read on that path and
-the entry is named if one exists — see `_stash_working_tree`.
+REVERT IS THE LIKELIER OF THE TWO, not the edge case, and it went five rounds unprotected. On the
+rollback path the at-risk file can only exist if the running instance recreated it during the pip
+window, because the forward checkout to the target already deleted it. On the revert path the file
+is there BY CONSTRUCTION: the user has been running the new release for days and the app has been
+writing runtime data at that path the whole time, and then they press Revert.
+
+If the stash FAILS, the checkout does not run at all — on either path. A way back that cannot
+preserve the tree is the one thing worse than no way back, so the result is state="needs_manual"
+with the stash error verbatim and HEAD left exactly where it is. A non-zero exit does NOT license
+the report to say "nothing on disk was touched", though: real git writes the stash, deletes the
+files, and only then reports a failure it hit while removing one of them. So the stash ref is
+re-read on that path and the entry is named if one exists — see `_stash_working_tree`.
 
 `--include-untracked` does not save IGNORED files, and a bare `--all` is not the answer — with no
 pathspec it would strip .env, every *.db and .venv/ out of a live install, which is categorically
 worse. The shape that leaves exposed is a release that turns a formerly-shipped path into a
-*gitignored* runtime data dir: rolling back writes the old release's file over the user's data there,
+*gitignored* runtime data dir: going back writes the old release's file over the user's data there,
 silently, because that is what `git checkout` does to a path the target commit tracks. So a SECOND
 push covers exactly it — `git stash push --all` restricted by pathspec to the paths `from_ref` tracks
 that HEAD does not and where something exists now (`_once_shipped_paths`). The pathspec is what makes
-`--all` safe: .env, the databases and .venv/ are never named by it and are never touched.
+`--all` safe: .env, the databases and .venv/ are never named by it and are never touched, and every
+path in it is spelled `:(literal)` so a `*` in a filename cannot widen it onto the neighbours.
 
 Every subprocess call goes through `_run` (capture) or `_stream` (line-by-line) — the two seams the
 suite monkeypatches, so tests never invoke real git/pip against the network.
@@ -95,6 +103,35 @@ def _run(argv: list[str], cwd: Path = ROOT, timeout: float = 20.0) -> tuple[int,
         return 124, "", f"{argv[0]}: timed out after {timeout:.0f}s"
     except OSError as e:
         return 1, "", str(e)
+
+
+def _run_z(argv: list[str], cwd: Path = ROOT, timeout: float = 60.0) -> tuple[int, list[str]]:
+    """The seam for git's `-z` (NUL-separated) output. Returns (returncode, paths).
+
+    A SEPARATE seam from `_run` on purpose. `_run` strips its stdout, which is right for a sha or a
+    tag name and WRONG here: `git ls-tree -z` sorts a name with a leading space first, so the strip
+    ate the leading space of " leading.txt" and `_once_shipped_paths` then produced a pathspec that
+    matched nothing — the file was reported as not at risk and the checkout wrote the release's copy
+    over the user's data. The whole point of `-z` is that git emits the name exactly as it is stored,
+    and a shared helper that trims it defeats that one layer down.
+
+    Bytes, then `os.fsdecode`, because a path in a git tree is bytes and need not be UTF-8. `text=True`
+    raised UnicodeDecodeError straight out of subprocess for such a path, which the SSE catch-all
+    turned into "the update crashed" with the state file left at `applying`, HEAD on the failed
+    target, and no rollback. fsdecode round-trips through subprocess's own fsencode on POSIX, so the
+    surrogate-escaped name is handed back to git byte-identical.
+    """
+    try:
+        p = subprocess.run(argv, cwd=str(cwd), capture_output=True, timeout=timeout)
+    except FileNotFoundError:
+        return 127, []
+    except subprocess.TimeoutExpired:
+        return 124, []
+    except OSError:
+        return 1, []
+    if p.returncode != 0:
+        return p.returncode, []
+    return 0, [os.fsdecode(chunk) for chunk in p.stdout.split(b"\0") if chunk]
 
 
 def _stream(argv: list[str], cwd: Path = ROOT, timeout: float = PIP_TIMEOUT,
@@ -511,7 +548,15 @@ _RESTART_PENDING: Optional[float] = None            # monotonic mark, or None/Fa
 
 # Generous against a slow systemd handoff (the process is normally dead in well under a second) and
 # still short enough that a wedged flag clears itself long before anyone reaches for a terminal.
-RESTART_PENDING_TTL = 90.0
+#
+# IT MUST NOT BE 90. `engine/service.py` renders the unit with no TimeoutStopSec, so systemd uses
+# DefaultTimeoutStopSec — 90s on every mainstream distro — and a `systemctl restart` whose stop hangs
+# (uvicorn's graceful shutdown waiting on open SSE streams, with no timeout_graceful_shutdown set)
+# gets SIGKILLed at mark+90s while this process is still serving requests. A 90s TTL put the flag's
+# expiry on exactly that instant: an apply accepted in the ~0.6s before the kill takes the lock,
+# starts pip, and dies with HEAD already moved — the precise brick this flag exists to prevent. Any
+# value well under the kill deadline bounds a stuck flag just as well with no overlap at all.
+RESTART_PENDING_TTL = 20.0
 
 RESTART_PENDING_DETAIL = ("Argus is restarting right now — starting an update in the moment before "
                           "the process is replaced would kill it halfway through. Try again once it "
@@ -519,8 +564,12 @@ RESTART_PENDING_DETAIL = ("Argus is restarting right now — starting an update 
 
 
 def restart_pending() -> bool:
+    # `is None or is False`, never `if not at`: a mark of 0.0 is a real timestamp (time.monotonic()
+    # is only guaranteed monotonic, not large — a freshly booted machine can hand out 0.0), and
+    # `not at` read it as "no restart pending", dropping the fence at the one moment it is needed.
+    # False is accepted alongside None because that is what the suite pins the flag to.
     at = _RESTART_PENDING
-    if not at:
+    if at is None or at is False:
         return False
     return (time.monotonic() - float(at)) < RESTART_PENDING_TTL
 
@@ -651,9 +700,49 @@ def _stash_ref(clone_dir: Path) -> str:
 #     no checkout / error: could not restore untracked files" — because the rollback checkout has
 #     since put the release's own copy back at that path. Checking one path out of the stash commit
 #     works: `stash@{0}` for a file that was tracked, `stash@{0}^3` for one that was not.
-RECOVERY_COMMANDS = ('git stash list  /  git stash show -p --include-untracked "stash@{0}"  /  '
-                     'git checkout "stash@{0}" -- <path>   (for a file that was untracked or '
-                     'ignored: git checkout "stash@{0}^3" -- <path>)')
+#
+# THE INDEX IS A PARAMETER, never a hardcoded 0. This can create TWO entries, and git pushes onto the
+# top: the SECOND one made is `stash@{0}` and the first is `stash@{1}`. Every message used to name
+# `stash@{0}` for both, so a user whose files were in the first entry ran the advertised command,
+# saw only the other entry's contents, and concluded the rest was gone — an advertised recovery that
+# does not recover, which is the failure mode this whole block exists to close.
+def _recovery_commands(index: int = 0) -> str:
+    e = f"stash@{{{index}}}"
+    return (f'git stash list  /  git stash show -p --include-untracked "{e}"  /  '
+            f'git checkout "{e}" -- <path>   (for a file that was untracked or '
+            f'ignored: git checkout "{e}^3" -- <path>)')
+
+
+RECOVERY_COMMANDS = _recovery_commands(0)
+
+
+def _recovery_hint(names: list[str]) -> str:
+    """The recovery commands for EVERY entry this made, each addressed by its own index."""
+    if len(names) <= 1:
+        return RECOVERY_COMMANDS
+    return "  /  ".join(_recovery_commands(_stash_index(names, i)) for i in range(len(names)))
+
+
+def _stash_index(names: list[str], position: int) -> int:
+    """Where the entry created `position`-th ends up in `git stash list`. Newest first, so the last
+    one created is 0."""
+    return len(names) - 1 - position
+
+
+def _stash_label(names: list[str]) -> str:
+    """The `stash` field both UIs render: every entry with the index that actually addresses it."""
+    return ", ".join(f"{n} (stash@{{{_stash_index(names, i)}}})" for i, n in enumerate(names))
+
+
+# `_tree_is_clean` has always bounded its file list at 8; the at-risk list did not, and it is joined
+# into a log line, into `detail`, and into a Telegram message body that is not split at 4096 chars.
+# One release that stops shipping a populated directory is enough to make that unbounded.
+_SHOW_MAX = 8
+
+
+def _shown(names: list[str]) -> str:
+    extra = len(names) - _SHOW_MAX
+    return ", ".join(names[:_SHOW_MAX]) + (f", and {extra} more" if extra > 0 else "")
 
 
 def _once_shipped_paths(clone_dir: Path, from_ref: str) -> list[str]:
@@ -671,17 +760,17 @@ def _once_shipped_paths(clone_dir: Path, from_ref: str) -> list[str]:
     three to the command line — a worse outcome than the bug. This predicate names the paths actually
     at risk, which is what lets the caller save exactly those and nothing else.
     """
-    rc_old, old, _ = _run(["git", "ls-tree", "-r", "--name-only", "-z", from_ref],
-                          clone_dir, timeout=60.0)
-    rc_now, now, _ = _run(["git", "ls-files", "-z"], clone_dir, timeout=60.0)
+    rc_old, old = _run_z(["git", "ls-tree", "-r", "--name-only", "-z", from_ref], clone_dir)
+    rc_now, now = _run_z(["git", "ls-files", "-z"], clone_dir)
     if rc_old != 0 or rc_now != 0:
         return []                               # can't tell — the general stash is what we have
-    # -z, so git emits raw bytes-as-written and never quotes a path for spaces or non-ASCII. Those
-    # are precisely the paths a naive split would mangle into a pathspec that matches nothing.
-    tracked_now = {p for p in now.split("\0") if p}
+    # -z through `_run_z`, NOT `_run`: git emits raw bytes-as-written and never quotes a path for
+    # spaces or non-ASCII, and those are precisely the paths a naive split — or `_run`'s .strip() —
+    # would mangle into a pathspec that matches nothing.
+    tracked_now = set(now)
     at_risk = []
-    for p in old.split("\0"):
-        if not p or p in tracked_now:
+    for p in old:
+        if p in tracked_now:
             continue
         here = clone_dir / p
         if here.exists() or here.is_symlink():
@@ -733,27 +822,41 @@ def _stash_working_tree(clone_dir: Path, name: str, from_ref: str,
         names.append(name)
     if rc != 0:
         return False, names, err, []
-    if created:
-        log(f'the tree does not match the release, so your version of it was saved to the git stash '
-            f'as "{name}" before putting the release back — nothing has been discarded. Recover it '
-            f'with: {RECOVERY_COMMANDS}')
 
     # Anything the first push saved is gone from disk, so this sees only what it could not: the
     # ignored files sitting at paths the ref we are about to check out still ships.
     at_risk = _once_shipped_paths(clone_dir, from_ref)
-    if not at_risk:
-        return True, names, "", []
     ignored_name = f"{name}-ignored"
-    rc, err, created = _push(["git", "stash", "push", "--all", "-m", ignored_name, "--", *at_risk])
-    if created:
-        names.append(ignored_name)
-    if rc != 0:
-        return False, names, err, at_risk
-    if not created:
+    ignored_created = False
+    if at_risk:
+        # `:(literal)` on every path. A git pathspec is a wildmatch PATTERN, not a filename, and
+        # these paths come from a git tree — whatever characters a release happened to ship. An
+        # at-risk path containing `*` also swept unrelated neighbours into the stash (verified with
+        # real git 2.43: `star*file.txt` took starSECRETfile.txt with it), `[`/`?` are pattern
+        # syntax whose meaning is not the filename's, and a leading `:` parses as pathspec magic
+        # rather than as a name at all.
+        rc, err, ignored_created = _push(["git", "stash", "push", "--all", "-m", ignored_name,
+                                          "--", *(f":(literal){p}" for p in at_risk)])
+        if ignored_created:
+            names.append(ignored_name)
+        if rc != 0:
+            return False, names, err, at_risk
+
+    # LOGGED ONLY NOW, because until the second push has (or has not) happened the index that
+    # addresses the first entry is not known: one entry makes it stash@{0}, two demotes it to
+    # stash@{1}. Naming an index that moved under the user is how the advertised recovery stopped
+    # recovering.
+    if name in names:
+        i = _stash_index(names, names.index(name))
+        log(f'the tree does not match the release, so your version of it was saved to the git stash '
+            f'as "{name}" (stash@{{{i}}}) before putting the release back — nothing has been '
+            f'discarded. Recover it with: {_recovery_commands(i)}')
+    if not ignored_created:
         return True, names, "", []              # nothing there after all (an empty directory)
-    log(f'{from_ref} ships {", ".join(at_risk)}, which this release does not — putting it back would '
+    j = _stash_index(names, names.index(ignored_name))
+    log(f'{from_ref} ships {_shown(at_risk)}, which this release does not — putting it back would '
         f'write the old release\'s copy over what is there now, ignored or not. Saved to the git '
-        f'stash as "{ignored_name}". Recover it with: {RECOVERY_COMMANDS}')
+        f'stash as "{ignored_name}" (stash@{{{j}}}). Recover it with: {_recovery_commands(j)}')
     return True, names, "", at_risk
 
 
@@ -887,7 +990,7 @@ def apply_update(target: str, clone_dir: Path = ROOT, emit: Optional[Emit] = Non
         stash_name = f"argus-update-{from_ref}-{target}"
         ok_stash, stash_names, stash_err, at_risk = _stash_working_tree(clone_dir, stash_name,
                                                                        from_ref, log)
-        stash = ", ".join(stash_names) or None
+        stash = _stash_label(stash_names) or None
         if not ok_stash:
             # FAIL SAFE. A rollback that cannot preserve the tree must not run: checking out over
             # unsaved work is the one outcome worse than staying broken. HEAD is untouched.
@@ -898,7 +1001,7 @@ def apply_update(target: str, clone_dir: Path = ROOT, emit: Optional[Emit] = Non
                 # file is gone from disk is worse than saying nothing, and the entry has to be named
                 # or nobody can find what is in it.
                 log(f'a PARTIAL stash WAS created as "{stash}" — some files may already have been '
-                    f'removed from disk. Look there FIRST: {RECOVERY_COMMANDS}')
+                    f'removed from disk. Look there FIRST: {_recovery_hint(stash_names)}')
                 log(f"the rollback was NOT run — HEAD is still on {target}")
                 return finish(False, "needs_manual", failed_step,
                               f"{detail} — and saving the working tree failed part-way through "
@@ -911,8 +1014,9 @@ def apply_update(target: str, clone_dir: Path = ROOT, emit: Optional[Emit] = Non
                               # make a SECOND entry with an identical name, and `git stash list`
                               # could then no longer tell the user which one holds their files.
                               commands=[f'cd "{clone_dir}" && git stash list',
-                                        f'cd "{clone_dir}" && git stash show -p --include-untracked'
-                                        f' "stash@{{0}}"',
+                                        *[f'cd "{clone_dir}" && git stash show -p '
+                                          f'--include-untracked "stash@{{{_stash_index(stash_names, i)}}}"'
+                                          for i in range(len(stash_names))],
                                         revert_command(clone_dir, from_ref)],
                               stash=stash)
             log("the rollback was NOT run — nothing on disk has been changed")
@@ -929,7 +1033,7 @@ def apply_update(target: str, clone_dir: Path = ROOT, emit: Optional[Emit] = Non
             # Named, not merely stashed: these are paths {from_ref} SHIPS and this release does not,
             # so what is at them now is the user's runtime data and the rollback would have written
             # the old release's copy straight over it.
-            kept += (f' That includes {", ".join(at_risk)}, which {from_ref} ships as part of the '
+            kept += (f' That includes {_shown(at_risk)}, which {from_ref} ships as part of the '
                      f'release — the rollback puts the release\'s own copy back there.')
         # A PLAIN checkout. The stash above already emptied the tree of anything git would refuse to
         # overwrite, so --force would only add the power to destroy something without saying so.
@@ -979,9 +1083,15 @@ def revert(clone_dir: Path = ROOT, emit: Optional[Emit] = None) -> dict:
     """Undo the recorded update: check the previous ref out again and reinstall. BLOCKING — call it
     through revert_async, which is what holds the exclusion.
 
-    Uses a PLAIN checkout: unlike the rollback inside a failed apply there is no half-written tree
-    to force past, so git's own refusal to overwrite a local modification is the right behaviour and
-    is left in place."""
+    PRESERVES THE TREE FIRST, through the same `_stash_working_tree` the rollback uses, and does not
+    check anything out if that fails. This used to be a bare `git checkout <from_ref>` on the
+    reasoning that "git refuses to overwrite a local modification". Git does no such thing for a path
+    the target commit TRACKS: it writes the release's copy straight over what is there, .gitignore
+    and all, and exits 0. That is the hazard in its likeliest form — the user has been running the
+    new release, the app has been writing runtime data at a path the OLD release shipped as a
+    tracked file, and Revert silently replaces it with the shipped default. On the rollback path the
+    same file usually does not exist yet; here it exists by construction.
+    """
     say: Emit = emit or (lambda _ev: None)
 
     def log(line: str) -> None:
@@ -993,17 +1103,66 @@ def revert(clone_dir: Path = ROOT, emit: Optional[Emit] = None) -> dict:
     from_tag = st.get("from_tag") or from_ref
     if not okc:
         result = {"ok": False, "state": st.get("state", "none"), "failed_step": "precondition",
-                  "detail": reason, "restart": None, "commands": []}
+                  "detail": reason, "restart": None, "stash": None, "commands": []}
         say({"type": "done", **result})
         return result
 
+    # 1. preserve — before the checkout, exactly as the rollback does it.
+    now_ref = current_ref(clone_dir).get("name") or st.get("to_tag") or "current"
+    stash_name = f"argus-revert-{now_ref}-{from_ref}"
+    say({"type": "step", "step": "preserve",
+         "text": f"saving the working tree before putting {from_ref} back"})
+    ok_stash, stash_names, stash_err, at_risk = _stash_working_tree(clone_dir, stash_name,
+                                                                    from_ref, log)
+    stash = _stash_label(stash_names) or None
+    if not ok_stash:
+        # FAIL SAFE, the same rule as the rollback: a way back that cannot preserve the tree must not
+        # run. HEAD is untouched, so the install keeps working on the release it is on.
+        log(f"COULD NOT SAVE THE WORKING TREE: {stash_err}")
+        if stash:
+            # git may have written the stash and removed the files before it reported the failure.
+            log(f'a PARTIAL stash WAS created as "{stash}" — some files may already have been '
+                f'removed from disk. Look there FIRST: {_recovery_hint(stash_names)}')
+            detail = (f"the working tree could not be saved (git stash push failed: {stash_err}), so "
+                      f"the revert was NOT run and HEAD is still on {now_ref}. A PARTIAL stash was "
+                      f'created as "{stash}": git may already have removed files from disk before it '
+                      f"reported that failure, so check that stash before anything else.")
+            commands = [f'cd "{clone_dir}" && git stash list',
+                        *[f'cd "{clone_dir}" && git stash show -p --include-untracked '
+                          f'"stash@{{{_stash_index(stash_names, i)}}}"'
+                          for i in range(len(stash_names))],
+                        revert_command(clone_dir, from_ref)]
+        else:
+            log("the revert was NOT run — nothing on disk has been changed")
+            detail = (f"the working tree could not be saved first (git stash push failed: "
+                      f"{stash_err}), so the revert was NOT run and nothing here has been changed. "
+                      f"HEAD is still on {now_ref}.")
+            # NOT a second push under the same name: `git stash list` could not then tell them apart.
+            commands = [f'cd "{clone_dir}" && git stash push --include-untracked -m "{stash_name}"',
+                        revert_command(clone_dir, from_ref)]
+        write_state(clone_dir, state="needs_manual", failed_step="preserve",
+                    **({"stash": stash} if stash else {}))
+        result = {"ok": False, "state": "needs_manual", "failed_step": "preserve", "detail": detail,
+                  "restart": None, "stash": stash, "from_tag": from_tag, "commands": commands}
+        say({"type": "done", **result})
+        return result
+
+    kept = (f' Your version of the files it replaced was saved to the git stash as "{stash}" — see '
+            f'`git stash list`.') if stash else ""
+    if at_risk:
+        kept += (f' That includes {_shown(at_risk)}, which {from_ref} ships as part of the release '
+                 f'— the revert puts the release\'s own copy back there.')
+
+    # 2. checkout — PLAIN, because the stash above left the tree clean.
     say({"type": "step", "step": "checkout", "text": f"checking out {from_ref}"})
     rc = _stream(["git", "-c", "advice.detachedHead=false", "checkout", "-q", from_ref],
                  clone_dir, 120.0, log)
     if rc != 0:
-        write_state(clone_dir, state="needs_manual", failed_step="checkout")
+        write_state(clone_dir, state="needs_manual", failed_step="checkout",
+                    **({"stash": stash} if stash else {}))
         result = {"ok": False, "state": "needs_manual", "failed_step": "checkout",
-                  "detail": f"git checkout {from_ref} failed (exit {rc})", "restart": None,
+                  "detail": f"git checkout {from_ref} failed (exit {rc}).{kept}", "restart": None,
+                  "stash": stash, "from_tag": from_tag,
                   "commands": [revert_command(clone_dir, from_ref)]}
         say({"type": "done", **result})
         return result
@@ -1011,16 +1170,22 @@ def revert(clone_dir: Path = ROOT, emit: Optional[Emit] = None) -> dict:
     say({"type": "step", "step": "pip", "text": "reinstalling dependencies"})
     rc = _stream(_pip_argv(), clone_dir, PIP_TIMEOUT, log)
     if rc != 0:
-        write_state(clone_dir, state="needs_manual", failed_step="pip")
+        write_state(clone_dir, state="needs_manual", failed_step="pip",
+                    **({"stash": stash} if stash else {}))
         result = {"ok": False, "state": "needs_manual", "failed_step": "pip",
-                  "detail": f"pip install -e . failed (exit {rc})", "restart": None,
+                  "detail": f"pip install -e . failed (exit {rc}).{kept}", "restart": None,
+                  "stash": stash, "from_tag": from_tag,
                   "commands": [revert_command(clone_dir, from_ref)]}
         say({"type": "done", **result})
         return result
 
-    write_state(clone_dir, state="reverted", failed_step=None, to_tag=from_tag)
+    write_state(clone_dir, state="reverted", failed_step=None, to_tag=from_tag,
+                **({"stash": stash} if stash else {}))
     result = {"ok": True, "state": "reverted", "failed_step": None,
-              "detail": f"reverted to {from_tag}", "restart": restart_strategy(clone_dir),
+              "detail": f"reverted to {from_tag}.{kept}", "restart": restart_strategy(clone_dir),
+              # A FIELD, not prose: a successful revert is the COMMON case for this stash, and both
+              # UIs render it from here. Burying it in `detail` is how it reached nobody.
+              "stash": stash,
               "from_tag": from_tag, "commands": []}
     say({"type": "done", **result})
     return result

@@ -426,6 +426,48 @@ async def test_a_rolled_back_update_streams_the_stash_name_as_a_field(tmp_path, 
     assert _events(r.text)[-1]["stash"] == "argus-update-v0.1.0-v0.2.0"
 
 
+async def test_a_successful_revert_streams_its_stash_name_as_a_field(tmp_path, upd, monkeypatch):
+    """The Revert button's own path to the user, which did not exist.
+
+    `revert()` produced no `stash` key at all, so even once it started preserving the tree the
+    dashboard had nothing to render. And this is the SUCCESS case: a revert that works is exactly
+    when the stash matters, because the install has been running the new release and writing runtime
+    data at a path the old release ships."""
+    def fake_revert(clone_dir=upd.ROOT, emit=None):
+        emit({"type": "done", "ok": True, "state": "reverted", "failed_step": None,
+              "stash": "argus-revert-v0.2.0-v0.1.0-ignored (stash@{0})", "from_tag": "v0.1.0",
+              "restart": {"strategy": "exec", "unit": None, "instruction": "re-exec"},
+              "detail": "reverted to v0.1.0.", "commands": []})
+        return {}
+    monkeypatch.setattr(upd, "revert", fake_revert)
+    async with _client(tmp_path) as c:
+        r = await c.post("/update/revert", json={"confirm": "revert"})
+    done = _events(r.text)[-1]
+    assert done["ok"] is True and done["state"] == "reverted"
+    assert done["stash"] == "argus-revert-v0.2.0-v0.1.0-ignored (stash@{0})"
+
+
+def test_the_update_card_shows_the_stash_name_on_a_SUCCESSFUL_run_too():
+    """The card only ever mentioned the stash inside `if (!result.ok)`, and that branch RETURNS. A
+    successful revert — the likeliest run to have a stash — fell straight through to the restart and
+    told the user nothing. (A source assertion because the dashboard has no JS test harness.)"""
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "dashboard" / "app.js").read_text(encoding="utf-8")
+    success_branch = js.split("async function finishUpdate", 1)[1] \
+                       .split("el.innerHTML = updOk", 1)[1] \
+                       .split("\n  }\n", 1)[0]
+    assert "result.stash" in success_branch, "a successful revert never mentions its stash"
+    assert "esc(result.stash)" in success_branch, "the stash name must reach the CARD, escaped"
+    assert "git stash list" in success_branch, "and it must say how to get the files back"
+    assert "--include-untracked" in success_branch, (
+        'a bare `git stash show -p "stash@{0}"` prints nothing for an untracked-only entry')
+    assert "git stash pop" not in success_branch, (
+        "pop fails once the checkout has put the release's own copy back at that path")
+    assert 'stash@{0}' not in success_branch, (
+        "there can be TWO entries; the name carries each one's own index, so the commands must not "
+        "hardcode 0 — that sent users to the wrong entry")
+
+
 def test_the_update_card_shows_the_stash_name():
     """Round 3 MED-5: the rescue path went into `res["detail"]`, which NEITHER UI renders — so the
     one message telling a user where their work went was never displayed anywhere. A non-CLI user

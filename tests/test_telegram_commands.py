@@ -439,6 +439,44 @@ async def test_update_revert_needs_its_own_confirm(monkeypatch):
     assert "/update revert confirm" in msg.sent[0] and "v0.1.0" in msg.sent[0]
 
 
+async def test_update_revert_confirm_tells_the_user_where_its_stash_went(monkeypatch):
+    """The Telegram half of the Revert button, and the case neither UI covered.
+
+    `_update_finish` only mentioned `stash` inside `if not res.get("ok")`, and that branch returns.
+    A revert that SUCCEEDS is the likeliest run of all to have a stash — the install has been on the
+    new release for days, writing runtime data at a path the old release ships as a tracked file —
+    and it said nothing at all."""
+    from types import SimpleNamespace as NS
+    from engine import updater
+    stash = "argus-revert-v0.2.0-v0.1.0-ignored (stash@{0})"
+    reverted = []
+    monkeypatch.setattr(updater, "can_revert", lambda clone_dir=updater.ROOT: (True, ""))
+    monkeypatch.setattr(updater, "read_state",
+                        lambda clone_dir=updater.ROOT: {"from_tag": "v0.1.0", "state": "applied"})
+    monkeypatch.setattr(updater, "write_state", lambda clone_dir=updater.ROOT, **f: dict(f))
+    monkeypatch.setattr(updater, "perform_restart", lambda info: None)
+    monkeypatch.setattr(updater, "_RESTART_PENDING", False)
+    monkeypatch.setattr(updater, "revert",
+                        lambda clone_dir=updater.ROOT, emit=None: reverted.append(1) or
+                        {"ok": True, "state": "reverted", "failed_step": None, "stash": stash,
+                         "from_tag": "v0.1.0", "detail": "reverted to v0.1.0.", "commands": [],
+                         "restart": {"strategy": "exec", "unit": None, "instruction": "x"}})
+    msg = _Msg()
+    await _handlers()["update"](NS(effective_chat=NS(id=1), effective_message=msg),
+                                NS(args=["revert", "confirm"]))
+    assert reverted == [1], "/update revert confirm must actually revert"
+    body = "\n".join(msg.sent)
+    assert stash in body, "the user was never told where their runtime data went"
+    assert "git stash list" in body, "and never told how to get it back"
+    assert "--include-untracked" in body, (
+        'a bare `git stash show -p "stash@{0}"` prints nothing for an untracked-only entry')
+    assert "git stash pop" not in body, (
+        "pop fails once the checkout has put the release's own copy back at that path")
+    assert 'stash@{0}"' not in body.replace(stash, ""), (
+        "there can be TWO entries and the name carries each one's own index — a hardcoded 0 sends "
+        "the user to the wrong entry")
+
+
 async def test_post_restart_ack_is_delivered_on_the_way_back_up(monkeypatch):
     from types import SimpleNamespace as NS
 

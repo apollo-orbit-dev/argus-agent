@@ -598,7 +598,8 @@ def test_rollback_stashes_a_file_the_maintainer_edited_during_the_update(tmp_pat
 
     # ...but the maintainer's bytes are in git's own stash, under a name the report gives back.
     name = "argus-update-v0.1.0-v0.2.0"
-    assert res["stash"] == name, "the result must name the stash — both UIs render this field"
+    assert res["stash"] == f"{name} (stash@{{0}})", (
+        "the result must name the stash AND the index that addresses it — both UIs render this field")
     assert name in _git(clone, "stash", "list"), "the stash is not discoverable from git stash list"
     assert _git(clone, "show", "stash@{0}:SETTINGS.md") == mine.strip()
     assert name in res["detail"]
@@ -703,7 +704,8 @@ def test_a_stash_that_fails_AFTER_saving_and_deleting_still_names_what_it_saved(
     # ...but git DID change the disk, and the report must say where the bytes went.
     assert (clone / "SETTINGS.md").read_text() != _MID_UPDATE_EDIT, (
         "precondition: real git removed the file while failing — otherwise this proves nothing")
-    assert res["stash"] == name, "the entry exists and nothing named it — neither UI can show it"
+    assert res["stash"] == f"{name} (stash@{{0}})", (
+        "the entry exists and nothing named it — neither UI can show it")
     assert name in _git(clone, "stash", "list")
     assert _git(clone, "show", f"stash@{{0}}:SETTINGS.md") == _MID_UPDATE_EDIT.strip()
     assert "nothing here has been changed" not in res["detail"], (
@@ -734,7 +736,8 @@ def test_the_offered_recovery_commands_work_for_untracked_content(tmp_path, monk
     events: list = []
     res = updater.apply_update("v0.2.0", clone, emit=events.append)
 
-    assert res["state"] == "reverted" and res["stash"] == "argus-update-v0.1.0-v0.2.0"
+    assert res["state"] == "reverted"
+    assert res["stash"] == "argus-update-v0.1.0-v0.2.0 (stash@{0})"
     hint = next(ln for ln in (str(e.get("line", "")) for e in events if e["type"] == "log")
                 if "Recover it with" in ln)
     assert 'git stash show -p --include-untracked "stash@{0}"' in hint
@@ -1103,6 +1106,39 @@ async def test_a_restart_that_never_happens_stops_refusing_everything_forever(mo
     assert (await updater.apply_update_async("v0.2.0", Path("."), lambda _e: None))["ok"] is True
 
 
+def test_the_pending_ttl_expires_well_before_systemd_kills_this_process():
+    """90.0 was the one value it must not be.
+
+    `engine/service.py` renders the unit with NO TimeoutStopSec, so systemd uses
+    DefaultTimeoutStopSec — 90s on every mainstream distro. The systemd restart strategy is
+    fire-and-forget: this process keeps serving requests until the stop completes, and uvicorn's
+    graceful shutdown waits on open SSE streams with no timeout_graceful_shutdown set. If the stop
+    hangs, SIGKILL lands at ~mark+90s — and a 90s TTL dropped the fence at that same instant, so an
+    apply accepted in the last fraction of a second took the lock, started pip, and was killed with
+    HEAD already moved. That is the exact brick the flag exists to prevent."""
+    from engine import service
+    unit = service.render_unit(Path("/opt/argus"), Path("/opt/argus/.venv/bin/argus"), "Argus")
+    assert "TimeoutStopSec" not in unit, (
+        "if the unit ever sets its own stop timeout, re-derive the bound below from THAT number")
+    systemd_default_stop = 90.0
+    assert updater.RESTART_PENDING_TTL < systemd_default_stop / 2, (
+        "the flag must expire nowhere near systemd's kill deadline")
+    assert updater.RESTART_PENDING_TTL >= 15.0, "...but still cover a slow handoff"
+
+
+def test_a_zero_monotonic_mark_still_counts_as_pending(monkeypatch):
+    """`if not at:` read a mark of 0.0 as "no restart pending". time.monotonic() is only guaranteed
+    to be monotonic, not large — on Linux it counts from boot, so 0.0 is a real timestamp — and the
+    fence would be down at the one moment it is needed."""
+    monkeypatch.setattr(updater, "_RESTART_PENDING", 0.0)
+    monkeypatch.setattr(updater, "RESTART_PENDING_TTL", 1e12)
+    assert updater.restart_pending() is True
+    monkeypatch.setattr(updater, "_RESTART_PENDING", None)
+    assert updater.restart_pending() is False
+    monkeypatch.setattr(updater, "_RESTART_PENDING", False)      # what the suite pins it to
+    assert updater.restart_pending() is False
+
+
 async def test_the_exclusion_never_queues(tmp_path):
     """A second update that WAITED would then run against a tree the first one already moved,
     deciding what to do from a preflight taken before that. Busy is the answer, not a delay."""
@@ -1159,6 +1195,323 @@ def test_revert_refuses_when_the_previous_ref_no_longer_resolves(repo):
                         to_tag="v0.2.0")
     ok, reason = updater.can_revert(repo)
     assert ok is False and "no longer resolves" in reason and "install.sh" in reason
+
+
+# --------------------------------------------------------------------------
+# THE REVERT BUTTON — the other checkout onto an older ref, and the likelier one.
+#
+# Every test above approaches this feature through apply_update(). That is how the same data-loss
+# shape survived five rounds of hardening on the rollback path while `revert()` — a bare checkout
+# with no stash at all — sat untouched three hundred lines further down. These come in from the
+# other side.
+# --------------------------------------------------------------------------
+def _reverting_install(tmp_path, monkeypatch, shipped=("routines/daily.json",)) -> Path:
+    """A live install that HAS been updated and is now the one a user presses Revert on.
+
+    v0.1.0 SHIPS these paths as tracked files. v0.2.0 stops shipping them and makes routines/ a
+    gitignored runtime directory — a real release pattern, and this repo's own .gitignore already
+    carries `/routines/`. HEAD is on v0.2.0 and the state file records the way back.
+
+    The difference from the rollback fixtures is the one that matters: here the user's data is at
+    those paths BY CONSTRUCTION, because the install has been running the new release and writing
+    there. On the rollback path the forward checkout has already deleted the file, so it can only be
+    there if the running instance recreated it inside the pip window.
+    """
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    _git(origin, "init", "-b", "main")
+    shipped_ignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert "/routines/\n" in shipped_ignore, "the shipped rules changed — pick another at-risk path"
+    before_ignore = shipped_ignore.replace("/routines/\n", "")
+
+    (origin / ".gitignore").write_text(before_ignore)
+    (origin / "pyproject.toml").write_text('[project]\nname = "argus"\nversion = "0.1.0"\n')
+    (origin / "routines").mkdir()
+    for p in shipped:
+        (origin / p).write_text("SHIPPED CONTENT\n")
+    _git(origin, "add", "-A")
+    _git(origin, "commit", "-m", "release 0.1.0")
+    _git(origin, "tag", "v0.1.0")
+
+    (origin / ".gitignore").write_text(shipped_ignore)
+    (origin / "pyproject.toml").write_text('[project]\nname = "argus"\nversion = "0.2.0"\n')
+    _git(origin, "rm", "-q", "-r", "--cached", "routines")
+    shutil.rmtree(origin / "routines")
+    _git(origin, "add", "-A")
+    _git(origin, "commit", "-m", "release 0.2.0")
+    _git(origin, "tag", "v0.2.0")
+
+    clone = _make_clone(tmp_path, origin, at="v0.2.0")
+    _pin(monkeypatch, clone)
+    updater.write_state(clone, state="applied", from_tag="v0.1.0", from_ref="v0.1.0",
+                        to_tag="v0.2.0")
+    return clone
+
+
+@needs_git
+def test_the_revert_button_preserves_runtime_data_at_a_path_the_old_release_shipped(tmp_path,
+                                                                                    monkeypatch):
+    """THE bug, reproduced end to end: `revert()` was a plain `git checkout <from_ref>` with no
+    stash, and git does NOT refuse to overwrite a local file at a path the target commit TRACKS —
+    it writes the release's own copy over it, .gitignore and all, and exits 0.
+
+    Before the fix this returned ok:true, "reverted to v0.1.0", no stash key for either UI to
+    render, no log line, and the user's routines/daily.json replaced by SHIPPED CONTENT with no
+    trace anywhere that it had ever existed."""
+    clone = _reverting_install(tmp_path, monkeypatch)
+    mine = '{"my": "routine", "at": "07:00"}\n'
+    (clone / "routines").mkdir(exist_ok=True)
+    (clone / "routines" / "daily.json").write_text(mine)
+    # The live install's own state, none of which this may touch.
+    (clone / ".env").write_text("ADMIN_TOKEN=hunter2\n")
+    (clone / "sessions.db").write_bytes(b"SQLite format 3\x00not really")
+    (clone / ".venv" / "pyvenv.cfg").write_text("home = /usr\n")
+    _stub_pip(monkeypatch)
+    monkeypatch.setattr(updater, "restart_strategy",
+                        lambda clone_dir=updater.ROOT: {"strategy": "exec", "unit": None,
+                                                        "instruction": "x"})
+    events: list = []
+    res = updater.revert(clone, emit=events.append)
+
+    assert res["ok"] is True and res["state"] == "reverted"
+    assert _git(clone, "rev-parse", "HEAD") == _git(clone, "rev-parse", "v0.1.0^{commit}")
+    # The revert DID put the release's file back — that is what a checkout of v0.1.0 does.
+    assert (clone / "routines" / "daily.json").read_text() == "SHIPPED CONTENT\n"
+    # ...but the user's bytes are in git's own stash, in an entry the result NAMES.
+    name = "argus-revert-v0.2.0-v0.1.0-ignored"
+    assert res["stash"] == f"{name} (stash@{{0}})", (
+        "a successful revert is where this stash is the COMMON case — unnamed, neither UI shows it")
+    assert name in _git(clone, "stash", "list")
+    assert _git(clone, "show", "stash@{0}^3:routines/daily.json") == mine.strip()
+    assert "routines/daily.json" in res["detail"], "the at-risk path must be named in the report"
+    assert any("routines/daily.json" in str(e.get("line", "")) for e in events
+               if e.get("type") == "log"), "nothing in the log said what was saved"
+
+    # THE PATHSPEC. A bare `--all` would have taken all of these.
+    assert (clone / ".env").read_text() == "ADMIN_TOKEN=hunter2\n", "--all stripped .env"
+    assert (clone / "sessions.db").exists(), "--all stripped the database"
+    assert (clone / ".venv" / "pyvenv.cfg").exists(), "--all stripped the virtualenv"
+
+
+@needs_git
+def test_a_revert_whose_stash_fails_does_not_check_anything_out(tmp_path, monkeypatch):
+    """The same fail-safe rule the rollback has: a way back that cannot preserve the tree must not
+    run. HEAD stays on the release that is installed and working, and the user's data stays where
+    it is rather than being overwritten by a checkout we could not vouch for."""
+    clone = _reverting_install(tmp_path, monkeypatch)
+    mine = '{"my": "routine"}\n'
+    (clone / "routines").mkdir(exist_ok=True)
+    (clone / "routines" / "daily.json").write_text(mine)
+    at_target = _git(clone, "rev-parse", "HEAD")
+
+    real_stream, real_run = updater._stream, updater._run
+    checkouts: list = []
+
+    def fake_stream(argv, cwd=updater.ROOT, timeout=updater.PIP_TIMEOUT, emit=None):
+        if "checkout" in argv:
+            checkouts.append(list(argv))
+        if "pip" in argv:
+            return 0
+        return real_stream(argv, cwd, timeout, emit)
+
+    def fake_run(argv, cwd=updater.ROOT, timeout=20.0):
+        if argv[:3] == ["git", "stash", "push"]:
+            return 1, "", "fatal: cannot save the current worktree state: Disk quota exceeded"
+        return real_run(argv, cwd, timeout)
+    monkeypatch.setattr(updater, "_stream", fake_stream)
+    monkeypatch.setattr(updater, "_run", fake_run)
+
+    res = updater.revert(clone)
+    assert res["ok"] is False and res["state"] == "needs_manual"
+    assert res["failed_step"] == "preserve"
+    assert checkouts == [], "the revert checked out over a tree it had just failed to preserve"
+    assert _git(clone, "rev-parse", "HEAD") == at_target, "HEAD moved after a failed stash"
+    assert (clone / "routines" / "daily.json").read_text() == mine, "the user's data was destroyed"
+    assert "Disk quota exceeded" in res["detail"], "git's own error must be quoted verbatim"
+    assert "nothing here has been changed" in res["detail"]
+    assert updater.read_state(clone)["state"] == "needs_manual"
+
+
+@needs_git
+def test_a_revert_with_a_clean_tree_creates_no_stash(repo, monkeypatch):
+    """The preserve step must be silent when there is nothing to preserve — a stash after every
+    revert trains the user to ignore the ones that matter."""
+    _stub_pip(monkeypatch)
+    monkeypatch.setattr(updater, "restart_strategy",
+                        lambda clone_dir=updater.ROOT: {"strategy": "exec", "unit": None,
+                                                        "instruction": "x"})
+    assert updater.apply_update("v0.2.0", repo)["ok"] is True
+    res = updater.revert(repo)
+    assert res["ok"] is True and res["stash"] is None
+    assert _git(repo, "stash", "list") == "", "a revert with nothing to save left a stash behind"
+
+
+@needs_git
+def test_two_stash_entries_each_carry_the_index_that_actually_addresses_them(tmp_path, monkeypatch):
+    """Two entries, and every advertised recovery command named `stash@{0}`.
+
+    Git pushes onto the top, so the SECOND entry created is stash@{0} and the FIRST is stash@{1} —
+    the printed order was the inverse of the addressable one. A user whose mid-update work is in the
+    first-named entry ran the advertised command, saw only the other entry's files, and concluded
+    the rest was gone: an advertised recovery that does not recover."""
+    clone = _reverting_install(tmp_path, monkeypatch)
+    (clone / "routines").mkdir(exist_ok=True)
+    (clone / "routines" / "daily.json").write_text('{"mine": true}\n')     # -> the ignored push
+    (clone / "notes.md").write_text("the untracked notes I keep in here\n")  # -> the first push
+    _stub_pip(monkeypatch)
+    monkeypatch.setattr(updater, "restart_strategy",
+                        lambda clone_dir=updater.ROOT: {"strategy": "exec", "unit": None,
+                                                        "instruction": "x"})
+    events: list = []
+    res = updater.revert(clone, emit=events.append)
+    assert res["ok"] is True
+
+    base = "argus-revert-v0.2.0-v0.1.0"
+    assert res["stash"] == f"{base} (stash@{{1}}), {base}-ignored (stash@{{0}})", (
+        "both entries must be named WITH the index that addresses each one")
+
+    # Real git agrees, and the advertised index is the one that gets the file back.
+    listing = _git(clone, "stash", "list").splitlines()
+    assert len(listing) == 2
+    assert "-ignored" in listing[0] and "-ignored" not in listing[1], (
+        "precondition: the entry created second is stash@{0}")
+    assert _git(clone, "show", "stash@{1}^3:notes.md") == "the untracked notes I keep in here"
+    assert _git(clone, "show", "stash@{0}^3:routines/daily.json") == '{"mine": true}'
+
+    logs = [str(e.get("line", "")) for e in events if e.get("type") == "log"]
+    first = next(ln for ln in logs if f'"{base}"' in ln)
+    second = next(ln for ln in logs if f'"{base}-ignored"' in ln)
+    assert 'stash@{1}' in first and 'stash@{0}' not in first, (
+        "the entry that is now stash@{1} was advertised as stash@{0}")
+    assert 'stash@{0}' in second and 'stash@{1}' not in second
+
+
+@needs_git
+def test_the_at_risk_path_list_is_bounded_like_every_other_path_list(tmp_path, monkeypatch):
+    """`_tree_is_clean` has always truncated at 8 and said "and N more". The at-risk list did not,
+    and it is joined into a log line, into `detail`, and into a Telegram body that is not split at
+    Telegram's 4096-character limit. One release that stops shipping a populated directory is
+    enough."""
+    shipped = [f"routines/r{i:02d}.json" for i in range(12)]
+    clone = _reverting_install(tmp_path, monkeypatch, shipped=shipped)
+    (clone / "routines").mkdir(exist_ok=True)
+    for p in shipped:
+        (clone / p).write_text("mine\n")
+    _stub_pip(monkeypatch)
+    monkeypatch.setattr(updater, "restart_strategy",
+                        lambda clone_dir=updater.ROOT: {"strategy": "exec", "unit": None,
+                                                        "instruction": "x"})
+    events: list = []
+    res = updater.revert(clone, emit=events.append)
+    assert res["ok"] is True
+
+    assert "and 4 more" in res["detail"]
+    assert "routines/r11.json" not in res["detail"], "the list is unbounded"
+    assert "routines/r00.json" in res["detail"], "...but it still names the first few"
+    line = next(ln for ln in (str(e.get("line", "")) for e in events if e.get("type") == "log")
+                if "which this release does not" in ln)
+    assert "and 4 more" in line and "routines/r11.json" not in line
+    # All twelve are still SAVED — bounding the message must not bound what is preserved.
+    for p in shipped:
+        assert _git(clone, "show", f"stash@{{0}}^3:{p}") == "mine"
+
+
+@needs_git
+def test_a_glob_character_in_an_at_risk_path_neither_misses_it_nor_sweeps_up_its_neighbours(
+        tmp_path, monkeypatch):
+    """A git pathspec is a wildmatch PATTERN, not a filename.
+
+    Confirmed with real git 2.43: `star*file.txt` as a pathspec ALSO matched starSECRETfile.txt and
+    pulled it into the stash — a file that was never at risk, taken off disk and put somewhere the
+    user was never told about. Nothing bounds how much a `*` can sweep up.
+
+    The bracketed name is here as the other half of the guarantee: `:(literal)` must not break the
+    paths that happen to work today (git compares a magic-free pathspec literally before it
+    wildmatches, so `br[ack]et.txt` currently finds itself), and a leading `:` in a filename would
+    otherwise parse as pathspec magic rather than as a name."""
+    shipped = ["routines/star*file.txt", "routines/br[ack]et.txt"]
+    clone = _reverting_install(tmp_path, monkeypatch, shipped=shipped)
+    (clone / "routines").mkdir(exist_ok=True)
+    (clone / "routines" / "star*file.txt").write_text("my starred data\n")
+    (clone / "routines" / "br[ack]et.txt").write_text("my bracketed data\n")
+    (clone / "routines" / "starSECRETfile.txt").write_text("a neighbour, not at risk\n")
+    _stub_pip(monkeypatch)
+    monkeypatch.setattr(updater, "restart_strategy",
+                        lambda clone_dir=updater.ROOT: {"strategy": "exec", "unit": None,
+                                                        "instruction": "x"})
+    res = updater.revert(clone)
+    assert res["ok"] is True
+
+    # Both at-risk files are recoverable...
+    assert _git(clone, "show", "stash@{0}^3:routines/star*file.txt") == "my starred data"
+    assert _git(clone, "show", "stash@{0}^3:routines/br[ack]et.txt") == "my bracketed data"
+    # ...and the neighbour was neither swept into the stash nor taken off disk.
+    assert (clone / "routines" / "starSECRETfile.txt").read_text() == "a neighbour, not at risk\n"
+    p = subprocess.run(["git", "show", "stash@{0}^3:routines/starSECRETfile.txt"],
+                       cwd=str(clone), capture_output=True, text=True, env=GIT_ENV)
+    assert p.returncode != 0, "an unrelated file was captured into the stash by a glob pathspec"
+
+
+@needs_git
+def test_a_path_with_a_leading_space_is_still_seen_as_at_risk(tmp_path, monkeypatch):
+    """`_run` strips its stdout — right for a sha, wrong for `-z` output. `git ls-tree -z` sorts a
+    leading-space name FIRST, so the strip ate the leading space of " leading.txt" and the pathspec
+    built from it matched nothing: the file was reported as not at risk and the checkout wrote the
+    release's copy straight over the user's data. `-z` exists precisely so paths are never mangled;
+    a shared helper that trims did it one layer down."""
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    _git(origin, "init", "-b", "main")
+    (origin / "pyproject.toml").write_text('[project]\nname = "argus"\nversion = "0.1.0"\n')
+    (origin / " leading.txt").write_text("SHIPPED CONTENT\n")
+    _git(origin, "add", "-A")
+    _git(origin, "commit", "-m", "release 0.1.0")
+    _git(origin, "tag", "v0.1.0")
+    _git(origin, "rm", "-q", " leading.txt")
+    (origin / "pyproject.toml").write_text('[project]\nname = "argus"\nversion = "0.2.0"\n')
+    _git(origin, "add", "-A")
+    _git(origin, "commit", "-m", "release 0.2.0")
+    _git(origin, "tag", "v0.2.0")
+    clone = _make_clone(tmp_path, origin, at="v0.2.0")
+    _pin(monkeypatch, clone)
+    (clone / " leading.txt").write_text("MY DATA\n")
+
+    raw = subprocess.run(["git", "ls-tree", "-r", "--name-only", "-z", "v0.1.0"], cwd=str(clone),
+                         capture_output=True, env=GIT_ENV).stdout
+    assert raw.startswith(b" leading.txt\0"), "precondition: -z sorts the leading-space name first"
+    assert updater._once_shipped_paths(clone, "v0.1.0") == [" leading.txt"], (
+        "the leading space was eaten, so the pathspec matched nothing and the file was overwritten")
+
+
+@needs_git
+def test_a_non_utf8_path_in_the_old_release_does_not_crash_the_update(tmp_path, monkeypatch):
+    """A path in a git tree is bytes and need not be UTF-8. `text=True` raised UnicodeDecodeError
+    straight out of subprocess, past `_run`'s except list (FileNotFoundError/TimeoutExpired/OSError),
+    and the SSE catch-all turned it into "the update crashed" with the state file left at `applying`,
+    HEAD on the failed target, no rollback and no recovery commands."""
+    weird = os.fsdecode(b"routines-\xff.json")
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    _git(origin, "init", "-b", "main")
+    (origin / "pyproject.toml").write_text('[project]\nname = "argus"\nversion = "0.1.0"\n')
+    try:
+        (origin / weird).write_text("SHIPPED\n")
+    except (OSError, UnicodeError):                  # a filesystem that refuses the name
+        pytest.skip("this filesystem cannot hold a non-UTF-8 filename")
+    _git(origin, "add", "-A")
+    _git(origin, "commit", "-m", "release 0.1.0")
+    _git(origin, "tag", "v0.1.0")
+    _git(origin, "rm", "-q", weird)
+    (origin / "pyproject.toml").write_text('[project]\nname = "argus"\nversion = "0.2.0"\n')
+    _git(origin, "add", "-A")
+    _git(origin, "commit", "-m", "release 0.2.0")
+    _git(origin, "tag", "v0.2.0")
+    clone = _make_clone(tmp_path, origin, at="v0.2.0")
+    _pin(monkeypatch, clone)
+    (clone / weird).write_text("MY DATA\n")
+
+    assert updater._once_shipped_paths(clone, "v0.1.0") == [weird], (
+        "a non-UTF-8 path raised UnicodeDecodeError out of the updater instead of being handled")
 
 
 # --------------------------------------------------------------------------
