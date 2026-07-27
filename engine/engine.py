@@ -494,6 +494,10 @@ class Engine:
         self.deps = DepStore(str(root / "dep_approvals.json"))
         from engine.experimental.trust_store import TrustStore
         self.trust = TrustStore(str(root / "trusted_tools.json"))
+        # Where the loop notes the turns it gave up on (`argus friction` reads it back). Lives in
+        # data_dir because `detail` can quote user content — it is gitignored, never committable.
+        from engine.friction import FrictionLog
+        self.friction = FrictionLog(str(root / "friction.json"))
         # interactive approvals: durable request log + per-gate policy + the broker tools call
         # through to gate a sensitive action (dep installs, SOUL edits, ...). Routed through
         # self._data_dir so tests get isolated storage; the broker itself is inert (nothing calls
@@ -1688,6 +1692,7 @@ class Engine:
             observer_threshold=c.observer_repeat_threshold,
             approvals=(self.approvals if c.enable_interactive_approvals else None),
             run_id=run_id, origin=origin,
+            friction=self.friction, model_name=c.model_name,
         )
         if self._adaptive_reasoning_active():            # route this turn to a reasoning LEVEL
             deps.reasoning = await self._route_reasoning(text)

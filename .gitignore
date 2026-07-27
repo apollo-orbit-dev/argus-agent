@@ -26,6 +26,9 @@ rules.json
 approvals.json
 permissions.json
 custom_commands.yaml
+# where the loop notes turns it gave up on. `detail` quotes tool output, which can quote whatever
+# the user asked about — this is user data and must never be committable.
+friction.json
 # in-app updater bookkeeping (previous ref, so a revert is still offerable after a restart)
 .argus-update.json
 # in-app updater mutual exclusion — no longer written (it is an asyncio.Lock now); still ignored so
