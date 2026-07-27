@@ -1140,3 +1140,98 @@ async def test_real_engine_composes_directive_with_genuine_builtins(tmp_path):
 
     # a name that only a CREATED (DynamicTool) tool would ever have must not appear
     assert "my_created_tool" not in names
+
+
+# ---- sandboxed test-run failures: environment vs code (argus-7zz) ----
+#
+# Live failure on :8700 (2026-07-27): a model wrote an NHC tool importing httpx, `sandboxed`
+# defaulted to true, the container is stdlib-only, and the failure message said "Fix the code and
+# call create_tool again". The code was fine. It rewrote it, hit the identical wall, and gave up.
+
+def _sandbox_error_ct(error: str, **kw):
+    """A CreateToolTool whose container test-run comes back as `{ok: false, error: <error>}` —
+    exactly the shape engine/sandbox/runner.py returns for an exception in the tool's code."""
+    import json as _json
+    fake = FakeRuntime(result=ExecResult(0, _json.dumps({"ok": False, "error": error}), ""))
+    return _ct(sandbox_enabled=True, sandbox_runtime=fake, timeout=30, **kw), fake
+
+
+async def test_sandboxed_missing_module_names_the_module_and_both_escapes():
+    """The transcript's first failure. The message must name the module, say the sandbox is
+    stdlib-only, and give BOTH real escapes (urllib.request / sandboxed=false) — and must NOT tell
+    the model to fix code that isn't broken."""
+    persist = tempfile.mkdtemp()
+    ct, fake = _sandbox_error_ct("ModuleNotFoundError: No module named 'httpx'",
+                                 persist_dir=persist)
+    out = await ct.run(CreateToolTool.Params(
+        name="fetch_nhc_outlook_text", description="d", parameters={"n": {"type": "integer"}},
+        code="import httpx\ndef run(args):\n    return httpx.get('https://x').text",
+        test_args={"n": 1}, sandboxed=True))
+
+    # The module must be named in the EXPLANATION, not merely echoed inside the raw error line —
+    # "a module is missing" is exactly the vagueness that made the original message unusable.
+    explanation = out.split("No module named 'httpx'", 1)[1]
+    assert "'httpx'" in explanation
+    low = out.lower()
+    assert "standard library only" in low            # says WHY it is missing
+    assert "urllib.request" in out                   # escape 1: stay in the sandbox
+    assert "sandboxed=false" in out                  # escape 2: run host-side
+    assert "not created" in low                      # still a refusal, not a silent pass
+    assert "fix the code" not in low                 # the code was never the problem
+    # not registered, not persisted
+    import os
+    assert not os.path.exists(os.path.join(persist, "fetch_nhc_outlook_text.json"))
+    assert "fetch_nhc_outlook_text" not in ct.registry.names()
+
+
+async def test_sandboxed_genuine_code_error_still_gets_the_generic_message():
+    """A NameError IS the code's fault — the generic "fix the code" advice must survive, and must
+    not be replaced with sandbox/dependency advice that would send the model down a false trail."""
+    ct, fake = _sandbox_error_ct("NameError: name 'foo' is not defined")
+    out = await ct.run(CreateToolTool.Params(
+        name="broken", description="d", parameters={"n": {"type": "integer"}},
+        code="def run(args):\n    return foo()", test_args={"n": 1}, sandboxed=True))
+
+    assert "fix the code and call create_tool again with the same name." in out.lower()
+    low = out.lower()
+    assert "standard library only" not in low
+    assert "sandboxed=false" not in low
+    assert "urllib.request" not in low
+
+
+async def test_a_missing_module_is_only_special_cased_for_a_sandboxed_run(monkeypatch):
+    """The stdlib-only explanation is TRUE of the container and FALSE of the host (host-side tools
+    run in the app's own venv), so an unsandboxed tool reporting a missing import must keep the
+    generic advice rather than be told to set sandboxed=false — which it already is."""
+    async def _fail(self, args):
+        return f"{self.name} error: ModuleNotFoundError: No module named 'httpx'"
+
+    monkeypatch.setattr(DynamicTool, "_run_host_side", _fail)
+    ct = _ct()
+    out = await ct.run(CreateToolTool.Params(
+        name="hosty", description="d", parameters={},
+        code="def run(args):\n    return 'x'", test_args={}, sandboxed=False))
+    assert "fix the code and call create_tool again with the same name." in out.lower()
+    assert "standard library only" not in out.lower()
+
+
+def test_missing_module_extraction():
+    from engine.experimental.tool_creation import _missing_module
+    assert _missing_module("t error: ModuleNotFoundError: No module named 'httpx'") == "httpx"
+    # a submodule import blames the top-level distribution, which is what must change
+    assert _missing_module("t error: ModuleNotFoundError: No module named 'bs4.element'") == "bs4"
+    assert _missing_module("t error: NameError: name 'foo' is not defined") == ""
+    assert _missing_module("") == ""
+
+
+def test_sandboxed_field_description_states_stdlib_only_and_both_escapes():
+    """The field description is the ONLY thing a model sees before it chooses; "full stdlib" read as
+    batteries-included and named no third-party limitation at all."""
+    d = CreateToolTool.Params.model_fields["sandboxed"].description
+    low = d.lower()
+    assert "standard library only" in low          # the actual constraint
+    assert "httpx" in low                          # named, because it is what models reach for
+    assert "urllib.request" in d                   # escape 1
+    assert "host-side" in low                      # escape 2
+    assert "another argus tool" in low             # the pre-existing reason is kept
+    assert "full stdlib" not in low                # the batteries-included phrasing is gone
