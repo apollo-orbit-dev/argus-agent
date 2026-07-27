@@ -1235,3 +1235,52 @@ def test_sandboxed_field_description_states_stdlib_only_and_both_escapes():
     assert "host-side" in low                      # escape 2
     assert "another argus tool" in low             # the pre-existing reason is kept
     assert "full stdlib" not in low                # the batteries-included phrasing is gone
+
+
+# ---- create_tool's own description must match the environment tools land in (argus-7zz) ----
+#
+# Root cause of the live loop: the description unconditionally said "httpx for web APIs (call it
+# synchronously: resp = httpx.get(url))" while `sandboxed` defaulted TRUE into a stdlib-only
+# container. Argus handed the model httpx, then put the tool where httpx does not exist.
+
+def test_description_drops_the_httpx_advice_when_tools_default_into_the_sandbox():
+    ct = _ct(sandbox_enabled=True, sandbox_runtime=FakeRuntime(available_=True))
+    assert ct._resolve_sandboxed(None) is True          # this instance really does default sandboxed
+    d = ct.description
+    assert "httpx.get(url)" not in d                    # no longer told to use a package that isn't there
+    assert "httpx for web APIs" not in d
+    assert "standard library only" in d.lower()
+    assert "urllib.request" in d                        # the stdlib way to do the same job
+    assert "sandboxed=false" in d                       # how to reach the app's own dependencies
+
+
+def test_description_keeps_the_httpx_advice_when_the_sandbox_is_not_the_default():
+    """With the sandbox off, `sandboxed` resolves false and the tool runs in Argus's own venv —
+    there the httpx advice is accurate, and removing it would be its own wrong instruction."""
+    for ct in (_ct(sandbox_enabled=False, sandbox_runtime=FakeRuntime(available_=True)),
+               _ct(sandbox_enabled=True, sandbox_runtime=FakeRuntime(available_=False)),
+               _ct(sandbox_enabled=True, sandbox_runtime=None)):
+        assert ct._resolve_sandboxed(None) is False
+        assert "httpx for web APIs" in ct.description
+        assert "httpx.get(url)" in ct.description
+        assert "standard library only" not in ct.description.lower()
+
+
+def test_the_description_and_the_sandboxed_field_cannot_contradict_each_other_about_httpx():
+    """The actual bug was a contradiction between two texts the model reads in the same breath.
+    Both are built from ONE shared sentence, so a paraphrase in either can't reintroduce it."""
+    from engine.experimental.tool_creation import (
+        _SANDBOX_STDLIB_FACT, _sandbox_missing_module_message,
+    )
+    ct = _ct(sandbox_enabled=True, sandbox_runtime=FakeRuntime(available_=True))
+    field = CreateToolTool.Params.model_fields["sandboxed"].description
+
+    assert _SANDBOX_STDLIB_FACT in ct.description       # the SAME sentence, not a paraphrase
+    assert _SANDBOX_STDLIB_FACT in field
+    assert "no httpx" in _SANDBOX_STDLIB_FACT.lower()   # and it is genuinely about httpx
+
+    # all three surfaces a model can meet agree that the sandbox is stdlib-only
+    failure = _sandbox_missing_module_message("t", "httpx", "t error: x")
+    for text in (ct.description, field, failure):
+        assert "standard library only" in text.lower()
+        assert "urllib.request" in text
