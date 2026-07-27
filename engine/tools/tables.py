@@ -798,7 +798,9 @@ class AskDataTool(Tool):
         try:
             client = self._aux()
         except Exception as e:                                   # pragma: no cover - defensive
-            return f"ask_data error: no model available ({e})"
+            return (f"ask_data error: no model is configured for it ({e}) — ask_data needs a model "
+                    "to turn your question into SQL. Query the tables yourself instead: "
+                    "query_table (or query_rows) with a SELECT; list_tables shows the columns.")
 
         sql, last_err = "", ""
         for attempt in range(1, _ASK_DATA_MAX_ATTEMPTS + 1):
@@ -807,7 +809,9 @@ class AskDataTool(Tool):
                 # model can burn the token budget and return empty content (the compaction failure).
                 resp = await client.chat(messages, max_tokens=300, think=False)
             except Exception as e:
-                return f"ask_data error: could not reach the model ({e})"
+                return (f"ask_data error: could not reach the model ({e}) — ask_data needs it to "
+                        "turn your question into SQL. Query the tables yourself instead: "
+                        "query_table (or query_rows) with a SELECT; list_tables shows the columns.")
             raw = (resp.content or "").strip()
             if not raw:
                 last_err = "the model returned an empty query"

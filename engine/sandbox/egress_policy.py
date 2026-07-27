@@ -123,3 +123,46 @@ def url_allowed(url: str) -> "tuple[bool, str]":
     except Exception:
         return False, "unparseable URL"
     return host_allowed(p.hostname or "", port)
+
+
+# ---------------------------------------------------------------------------
+# Explaining a blocked egress to the MODEL.
+#
+# The policy above is enforced by a proxy the sandboxed code never sees. What the code DOES see is
+# whatever its HTTP client says when the CONNECT is refused — urllib's "<urlopen error Tunnel
+# connection failed>", or a DNS error when the workspace has no network at all. Neither names a
+# constraint or a way out, and that is not a hypothetical: a model read exactly that string, decided
+# its (working) code was wrong, rewrote it three times, and gave up. So whenever a sandbox result
+# carries one of those signatures, the constraint and the escape get appended to it.
+EGRESS_CONSTRAINT = ("sandbox egress: sandboxed code reaches the network only through the egress "
+                     "proxy, which allows HTTPS to PUBLIC hosts and refuses plain http:// and any "
+                     "private/LAN/localhost address.")
+
+# Lowercased substrings that mean "the sandbox's network path refused or could not be used" — proxy
+# CONNECT refusals, the proxy's own denial body, and the name-resolution failures seen when the
+# workspace is on the no-network mode. Matched case-insensitively against the whole sandbox result.
+_EGRESS_SIGNATURES = (
+    "tunnel connection failed",
+    "argus egress proxy",
+    "proxyerror",
+    "cannot connect to proxy",
+    "name or service not known",
+    "temporary failure in name resolution",
+    "nodename nor servname provided",
+    "getaddrinfo failed",
+)
+
+
+def looks_like_egress_failure(text: str) -> bool:
+    """True when `text` (a sandbox result or error) shows the egress path refusing or missing."""
+    low = (text or "").lower()
+    return any(s in low for s in _EGRESS_SIGNATURES)
+
+
+def with_egress_hint(text: str, escape: str) -> str:
+    """Return `text` unchanged unless it shows an egress failure, in which case append the
+    constraint and `escape` (the caller's tool-specific way out). Appended, never substituted: the
+    original message still carries the URL and the exception type."""
+    if not looks_like_egress_failure(text):
+        return text
+    return f"{text}\n\n{EGRESS_CONSTRAINT} {escape}"
