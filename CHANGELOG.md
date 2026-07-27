@@ -2,6 +2,33 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+- **Update Argus from the dashboard and from Telegram.** A new "Update Argus" card in Settings and an
+  `/update` slash command move this install to the newest published **release tag** and restart it —
+  no checkout, no ssh, no deploy script. Updates follow tags, never `main`: a tag is the point where
+  the release process has asserted the version is coherent.
+  - **Preview before acting.** Shows `v<current> → v<target>` plus the CHANGELOG sections in between,
+    read from the target tag (they don't exist in the running checkout yet).
+  - **Preflight refusals say why**, each with its own readable message: not a git checkout, no
+    `origin`, a dirty tree (it names the files), the running Python not being the checkout's own
+    virtualenv, no network, no tags, already up to date, ahead of every tag, an unresolvable tag
+    (shallow clone), or no pip.
+  - **Automatic rollback.** If `pip install -e .` or the post-install verification fails, the previous
+    ref is checked out and reinstalled immediately, both streamed, and no restart is offered. Only if
+    the rollback itself fails does it fall back to printing the exact commands.
+  - **Your data is never touched.** `.env`, databases, `model_presets.json`, workspaces, routines,
+    created tools/skills and `SOUL.md` are all gitignored, so `git checkout <tag>` structurally cannot
+    write to them — and there is a test that proves it against the real `.gitignore`.
+  - **Restart handoff.** systemd when (and only when) the user unit is active *and* its MainPID is
+    this process — otherwise restarting the unit would start a second instance and collide on the
+    port. Otherwise re-exec in place; on Windows the restart instruction is printed instead. The HTTP
+    response and the Telegram reply are always delivered before the process is replaced.
+  - `/update` previews, `/update confirm` installs, `/update revert confirm` goes back. The "✅ update
+    complete" acknowledgement is delivered on the way back up, and warns if the booted version is not
+    the expected one.
+
 ## 0.13.0
 
 Per-connection request options, Telegram session commands, dashboard responsiveness fixes, and a

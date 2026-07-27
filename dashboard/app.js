@@ -1440,6 +1440,234 @@
     btn.disabled = false; loadServiceStatus();
   });
 
+  /* ---- update card (follows release TAGS, never main) ----
+     The most consequential button in the dashboard: it replaces the running process. So it never
+     acts on anything the user hasn't read — Apply requires typing the target version, the server
+     re-runs its own preflight anyway, and a failure prints the literal command back to safety. */
+  var updateTarget = null;      // the version the preview offered (what Apply must be confirmed with)
+  var updateRevertCmd = null;   // literal shell command back to the previous ref
+
+  function updBad(t){ return '<span class="sb-bad">' + esc(t) + '</span>'; }
+  function updOk(t){ return '<span class="sb-ok">' + esc(t) + '</span>'; }
+
+  async function loadUpdateState(){
+    // Cheap and local — no fetch of the remote, no working-tree access. Just "is there an update
+    // recorded that could still be undone?".
+    var btn = $('updateRevertBtn');
+    if (!btn) return;
+    try {
+      var s = await (await fetch('/update/state')).json();
+      // NOT 'reverted': that state means this install is already back on from_tag (by revert, or by
+      // the automatic rollback inside a failed update), so offering "Revert to v0.13.0" while
+      // running v0.13.0 would be a lie — and the server's can_revert() refuses it anyway.
+      if ((s.state === 'applied' || s.state === 'restarting') && s.from_tag){
+        btn.style.display = '';
+        btn.textContent = 'Revert to ' + s.from_tag;
+        btn.dataset.fromTag = s.from_tag;
+      } else { btn.style.display = 'none'; }
+    } catch(e){ btn.style.display = 'none'; }
+  }
+
+  async function loadUpdatePreview(){
+    var el = $('updateStatus'), cl = $('updateChangelog'), apply = $('updateApplyBtn');
+    if (!el) return;
+    el.innerHTML = '<span>checking for a new release…</span>';
+    cl.style.display = 'none'; apply.disabled = true; updateTarget = null;
+    try {
+      var res = await fetch('/update/preview');
+      if (!res.ok){ el.innerHTML = updBad('Could not check for updates (' + res.status + ')'); return; }
+      var p = await res.json();
+      updateRevertCmd = p.revert_command || null;
+      var rows = ['<span>running: ' + esc('v' + p.current) + '</span>'];
+      if (p.target) rows.push('<span>newest release: ' + esc(p.target) + '</span>');
+      (p.blockers || []).forEach(function(b){
+        rows.push(b.severity === 'error' ? updBad(b.message) : updOk(b.message));
+      });
+      if (p.branch_note) rows.push('<span>' + esc(p.branch_note) + '</span>');
+      if (p.update_available){
+        rows.push(updOk('Ready to update: v' + p.current + ' → ' + p.target));
+        updateTarget = p.target;
+        apply.disabled = false;
+        apply.textContent = 'Update to ' + p.target;
+      }
+      if (p.changelog){
+        cl.style.display = 'block';
+        cl.textContent = p.changelog + (p.changelog_truncated ? '\n… (truncated)' : '');
+      } else if (p.changelog_note){
+        cl.style.display = 'block';
+        cl.textContent = p.changelog_note;
+      }
+      el.innerHTML = rows.join('');
+    } catch(e){ el.innerHTML = updBad('Could not check for updates: ' + e.message); }
+    loadUpdateState();
+  }
+
+  // EventSource cannot set X-Admin-Token, so the SSE stream is read with fetch + a reader — the
+  // same reason /logs/stream is consumed this way.
+  async function streamUpdate(url, body, out){
+    var res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                 body: JSON.stringify(body) });
+    if (!res.ok){
+      var detail = '';
+      try { detail = (await res.json()).detail || ''; } catch(e){ detail = ''; }
+      out.textContent += '\n' + (detail || ('request failed (' + res.status + ')'));
+      return { ok: false, state: 'refused', detail: detail, restart: null };
+    }
+    var reader = res.body.getReader(), dec = new TextDecoder(), buf = '', last = null;
+    while (true){
+      var chunk = await reader.read();
+      if (chunk.done) break;
+      buf += dec.decode(chunk.value, { stream: true });
+      var frames = buf.split('\n\n');
+      buf = frames.pop();
+      frames.forEach(function(f){
+        if (f.indexOf('data: ') !== 0) return;
+        var ev;
+        try { ev = JSON.parse(f.slice(6)); } catch(e){ return; }
+        if (ev.type === 'step') out.textContent += '\n== ' + ev.step + ': ' + ev.text + '\n';
+        else if (ev.type === 'log') out.textContent += ev.line + '\n';
+        else if (ev.type === 'done') last = ev;
+        out.scrollTop = out.scrollHeight;
+      });
+    }
+    return last || { ok: false, state: 'unknown', detail: 'the stream ended without a result',
+                     restart: null };
+  }
+
+  async function pollForNewVersion(el, was){
+    // The process is gone for a moment; /version answering with something new is the proof it came
+    // back on the new code.
+    for (var i = 0; i < 60; i++){
+      await new Promise(function(r){ setTimeout(r, 1000); });
+      try {
+        var v = (await (await fetch('/version')).json()).version;
+        if (v && v !== was){
+          el.innerHTML = updOk('Updated · running v' + v);
+          toast('Argus is back on v' + v, 'ok');
+          loadUpdateState();
+          return true;
+        }
+      } catch(e){ /* expected while it is down */ }
+    }
+    el.innerHTML = updBad("Argus hasn't come back on this port after 60 seconds. It may still be "
+      + "starting, or the restart failed. To go back: " + (updateRevertCmd || '(no recorded ref)'));
+    return false;
+  }
+
+  async function finishUpdate(result, out, wasVersion){
+    var el = $('updateStatus');
+    if (!result.ok){
+      el.innerHTML = updBad('Update failed at ' + (result.failed_step || '?') + ' — state: '
+        + (result.state || '?') + (result.state === 'reverted' ? ' (rolled back; still running v'
+        + wasVersion + ')' : ''));
+      // Where the rollback put the tree it found. This is a CARD line, not a log line: the output
+      // pane can be scrolled past or closed, and nothing else in either UI ever mentions it.
+      if (result.stash){
+        el.innerHTML += '<span>Your version of the files it replaced was saved to the git stash as "'
+          + esc(result.stash) + '" — recover it with: git stash list</span>';
+        // Deliberately NOT the obvious pair. Popping the stash FAILS in the exact shape this saves
+        // for ("already exists, no checkout") because the rollback has since put the release's own
+        // copy back at that path; and a bare `show -p` prints nothing at all, exit 0, for an entry
+        // that holds only untracked files — so the user concludes it is empty.
+        //
+        // The index is written stash@{N} rather than stash@{0} because there can be TWO entries and
+        // the name above carries each one's own index. Printing 0 for both sent a user whose files
+        // were in the older entry to the wrong one, which reads exactly like "my work is gone".
+        out.textContent += '\nYour version of the files it replaced was saved to the git stash as "'
+          + result.stash + '" (use the stash@{N} index shown for each entry):\n  git stash list\n'
+          + '  git stash show -p --include-untracked "stash@{N}"\n'
+          + '  git checkout "stash@{N}" -- <path>       # a file that was tracked\n'
+          + '  git checkout "stash@{N}^3" -- <path>     # one that was untracked or ignored\n';
+      }
+      var cmds = (result.commands && result.commands.length) ? result.commands
+                 : (result.revert_command ? [result.revert_command] : []);
+      if (cmds.length) out.textContent += '\nTo put this install back by hand:\n' + cmds.join('\n') + '\n';
+      toast('Update failed — see the output', 'err');
+      loadUpdateState();
+      return;
+    }
+    el.innerHTML = updOk('Installed — restarting…');
+    // A SUCCESSFUL run can have a stash too, and it is the common case for one: the Revert button
+    // preserves the tree before it checks the old release out, and reverting an install that has
+    // been running for days is exactly when there is runtime data at a path that release ships. The
+    // failure branch above returns, so without this the name reached nobody on the likelier path.
+    var stashNote = '';
+    if (result.stash){
+      stashNote = '<span>Your version of the files it replaced was saved to the git stash as "'
+        + esc(result.stash) + '" — recover it with: git stash list</span>';
+      el.innerHTML += stashNote;
+      out.textContent += '\nYour version of the files it replaced was saved to the git stash as "'
+        + result.stash + '" (use the stash@{N} index shown for each entry):\n  git stash list\n'
+        + '  git stash show -p --include-untracked "stash@{N}"\n'
+        + '  git checkout "stash@{N}" -- <path>       # a file that was tracked\n'
+        + '  git checkout "stash@{N}^3" -- <path>     # one that was untracked or ignored\n';
+    }
+    var r = await (await fetch('/update/restart', { method: 'POST' })).json();
+    if (r.strategy === 'manual'){
+      el.innerHTML = updBad('Installed — restart required') + stashNote;
+      out.textContent += '\n' + (r.instruction || '') + '\n';
+      toast('Installed — restart Argus to finish', 'ok');
+      return;
+    }
+    await pollForNewVersion(el, wasVersion);
+    // Re-appended: every exit from pollForNewVersion REPLACES the card's contents, so without this
+    // the one line telling the user where their files went is visible only during the restart.
+    if (stashNote) el.innerHTML += stashNote;
+  }
+
+  if ($('updateCheckBtn')){
+    $('updateCheckBtn').addEventListener('click', loadUpdatePreview);
+    $('updateApplyBtn').addEventListener('click', function(){
+      if (!updateTarget) return;
+      // requireText is the TARGET VERSION, so the only way to confirm is to have read the preview.
+      confirmDelete({
+        title: 'Update Argus',
+        message: 'This installs ' + updateTarget + ' and restarts Argus. Your .env, databases, '
+               + 'connections, workspaces and routines are not touched. If the install fails it is '
+               + 'rolled back automatically.',
+        requireText: updateTarget, danger: false, confirmLabel: 'Update',
+        onConfirm: async function(){
+          var out = $('updateOutput'), apply = $('updateApplyBtn'), check = $('updateCheckBtn');
+          var was = '';
+          try { was = (await (await fetch('/version')).json()).version || ''; } catch(e){}
+          apply.disabled = true; check.disabled = true;
+          out.style.display = 'block'; out.textContent = 'starting update to ' + updateTarget + '…\n';
+          $('updateStatus').innerHTML = '<span>updating…</span>';
+          try {
+            var result = await streamUpdate('/update/apply',
+              { target: updateTarget, confirm: updateTarget }, out);
+            await finishUpdate(result, out, was);
+            // A refused or failed update leaves this install exactly where it was, so Apply has to
+            // come back — otherwise the only way to retry is to re-check first.
+            if (!result.ok && updateTarget) apply.disabled = false;
+          } catch(e){
+            $('updateStatus').innerHTML = updBad('Update stream failed: ' + e.message);
+            out.textContent += '\n' + e.message + '\n';
+            if (updateTarget) apply.disabled = false;
+          }
+          check.disabled = false;
+        }
+      });
+    });
+    $('updateRevertBtn').addEventListener('click', function(){
+      var back = this.dataset.fromTag || 'the previous version';
+      confirmDelete({
+        title: 'Revert Argus',
+        message: 'This puts Argus back on ' + back + ' and restarts it.',
+        requireText: 'revert', danger: true, confirmLabel: 'Revert',
+        onConfirm: async function(){
+          var out = $('updateOutput');
+          var was = '';
+          try { was = (await (await fetch('/version')).json()).version || ''; } catch(e){}
+          out.style.display = 'block'; out.textContent = 'reverting to ' + back + '…\n';
+          $('updateStatus').innerHTML = '<span>reverting…</span>';
+          var result = await streamUpdate('/update/revert', { confirm: 'revert' }, out);
+          await finishUpdate(result, out, was);
+        }
+      });
+    });
+  }
+
   /* ---- controls popover ---- */
   var controlsBtn = $('controlsBtn');
   var controlsPopover = $('controlsPopover');
@@ -3171,6 +3399,9 @@
     loadRoles(); loadCommands(); loadNotify();
     loadSystemPrompt(); loadSoul(); loadEnv();
     loadSandboxStatus(); loadServiceStatus();
+    // Only the cheap local state — /update/preview fetches from the remote, so it stays on demand
+    // behind the "Check for updates" button rather than firing on every settings visit.
+    loadUpdateState();
   };
 
   var startPage = (function(){ try { return localStorage.getItem('argus_page') || 'console'; } catch(e){ return 'console'; } })();

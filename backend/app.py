@@ -557,6 +557,175 @@ def create_app(engine: Engine) -> FastAPI:
         from engine import service
         return await run_in_threadpool(service.uninstall)
 
+    # ---- self-update (follows release TAGS, never main) — see engine/updater.py. Every route is
+    # admin-gated and every blocking call runs off the event loop. This is the most consequential
+    # button in the product: it replaces the running process on the instance someone uses daily,
+    # so the server never trusts the client's idea of what is safe — /update/apply re-runs the FULL
+    # preflight itself before it touches anything. ----
+    def _update_sse(work) -> StreamingResponse:
+        """Run the AWAITABLE `work(emit)` and stream its events as SSE.
+
+        `work` is one of updater's *_async entry points: it takes the update lock on this loop and
+        only then hands the git + pip build (minutes long) to a worker thread, so nothing blocking
+        happens here. Events therefore arrive from that thread, and cross back with
+        loop.call_soon_threadsafe — the only thread-safe way to feed an asyncio.Queue from a foreign
+        thread. The sentinel goes through the same call, so a refusal emitted on THIS thread (no
+        update ran) is still queued ahead of it."""
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        sentinel = object()
+
+        def emit(ev: dict) -> None:
+            loop.call_soon_threadsafe(queue.put_nowait, ev)
+
+        async def runner():
+            try:
+                await work(emit)
+            except Exception as e:                       # noqa: BLE001 - never strand the stream
+                emit({"type": "done", "ok": False, "state": "failed", "failed_step": "internal",
+                      "detail": f"the update crashed: {e}", "restart": None, "commands": []})
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, sentinel)
+
+        async def gen():
+            fut = asyncio.ensure_future(runner())
+            try:
+                while True:
+                    item = await queue.get()
+                    if item is sentinel:
+                        break
+                    yield f"data: {json.dumps(item)}\n\n"
+            finally:
+                await fut
+        # Same headers as /logs/stream: no buffering anywhere between here and the browser, or a
+        # multi-minute pip step looks like a hung request.
+        return StreamingResponse(gen(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    @app.get("/update/preview")
+    async def update_preview(request: Request):
+        _require_admin(request)
+        from engine import updater
+        # Read-only: fetches refs (never the working tree) and reads the target tag's CHANGELOG.
+        return await run_in_threadpool(updater.preview)
+
+    @app.get("/update/state")
+    async def update_state(request: Request):
+        _require_admin(request)
+        from engine import updater
+        return updater.read_state() or {"state": "none"}
+
+    @app.post("/update/apply")
+    async def update_apply(request: Request, body: Optional[dict] = None):
+        _require_admin(request)
+        from engine import updater
+        body = body or {}
+        target = (body.get("target") or "").strip()
+        if not target:
+            raise HTTPException(400, "body must include 'target'")
+        if body.get("confirm") != target:
+            raise HTTPException(400, f"'confirm' must be exactly the target version ({target})")
+        pf = await run_in_threadpool(updater.preflight)
+        errors = [b for b in pf.get("blockers", []) if b.get("severity") == "error"]
+        if errors:
+            raise HTTPException(409, "This install cannot be updated right now — "
+                                     + " ".join(b["message"] for b in errors))
+        if pf.get("target") != target:
+            raise HTTPException(409, f"The newest release changed while you were reading the preview "
+                                     f"({target} -> {pf.get('target')}) — re-check before applying.")
+        # The verdict, not just the errors. up_to_date and ahead_of_tags are INFO blockers, so the
+        # errors check above lets them through — and applying then is a DOWNGRADE onto an older tag,
+        # reachable from nothing worse than a stale dashboard tab. `update_available` is the one
+        # field that means "moving to this tag is going forwards"; honour it.
+        if not pf.get("update_available"):
+            why = " ".join(b["message"] for b in pf.get("blockers", []) if b.get("message"))
+            raise HTTPException(409, "There is no update to apply — "
+                                     + (why or f"{target} is not newer than what is running."))
+        return _update_sse(lambda emit: updater.apply_update_async(target, emit=emit))
+
+    @app.post("/update/restart")
+    async def update_restart(request: Request):
+        """Return FIRST, restart after. The process performing the restart is the process being
+        replaced, so the response has to be fully flushed before it dies — otherwise the UI hangs
+        on a socket that will never answer. Same shape as /admin/restart."""
+        _require_admin(request)
+        from engine import updater
+        state = updater.read_state()
+        if updater.update_in_progress():
+            # An update is mid-flight (possibly started from Telegram). Restarting now kills pip
+            # halfway through writing site-packages, with HEAD already on the new tag and the
+            # rollback never reached — the exact way to brick this install.
+            #
+            # Asked of the LOCK, not of state["state"]. The state file says "applying" until finish()
+            # clears it, so a process that died mid-apply — the very thing a stalled pip provokes
+            # someone to arrange — leaves "applying" behind forever and would 409 this button for
+            # good, with no way to clear it from the UI. The lock is held only by a live apply.
+            raise HTTPException(409, "An update is being installed right now — restarting would "
+                                     "kill it halfway through. Wait for it to finish.")
+        info = await run_in_threadpool(updater.restart_strategy)
+        # The check above is a POINT-IN-TIME read, and it is followed by an await (the threadpool
+        # dispatch) and then by a >=0.6s wait inside the task below. An apply started from Telegram
+        # anywhere in that window takes the lock legitimately, AFTER the check, and is killed
+        # mid-pip. So the gate is asked three times: here, again immediately before the process is
+        # actually replaced, and — for the other direction, an apply arriving after this point —
+        # from apply_update_async, via the restart_pending flag set below.
+        if updater.update_in_progress():
+            raise HTTPException(409, "An update is being installed right now — restarting would "
+                                     "kill it halfway through. Wait for it to finish.")
+        if info["strategy"] == "manual":
+            # Windows: no restart is attempted. The instruction is the whole answer — and nothing is
+            # scheduled, so nothing has to be fenced off.
+            updater.write_state(state="restarting", before_restart=state.get("state"),
+                                strategy=info["strategy"],
+                                pending_notice=state.get("pending_notice"))
+            return {"restarting": False, **info}
+
+        updater.mark_restart_pending()
+        # before_restart carries the outcome we are restarting INTO across the restart: the boot-side
+        # settle (deliver_pending_update_notice) has to put it back, and hardcoding "applied" there
+        # turns a revert into an "applied" record that offers to revert to the release already running.
+        updater.write_state(state="restarting", before_restart=state.get("state"),
+                            strategy=info["strategy"],
+                            pending_notice=state.get("pending_notice"))
+
+        async def _do():
+            await asyncio.sleep(0.6)          # let the HTTP response flush first
+            if updater.update_in_progress():
+                # An update took the lock before the flag went up. Killing it here is the exact
+                # brick this route refuses at the door, so stand down and put the state back.
+                updater.clear_restart_pending()
+                updater.write_state(state=state.get("state") or "none",
+                                    before_restart=None,
+                                    pending_notice=state.get("pending_notice"))
+                return
+            try:
+                updater.perform_restart(info)
+            except Exception as e:                 # noqa: BLE001
+                # We are still here, so the restart did not happen — Popen can raise OSError on a
+                # fork failure, and "right after a pip install" is when memory pressure makes that
+                # real. Leaving the pending flag up would refuse every future apply and revert with
+                # "try again once it is back" from a process that is never coming back, curable only
+                # from a terminal. Hand the install back instead.
+                updater.clear_restart_pending()
+                updater.write_state(state=state.get("state") or "none",
+                                    before_restart=None,
+                                    pending_notice=state.get("pending_notice"))
+                print(f"[update] restart failed, this process is still running: {e}",
+                      file=sys.stderr, flush=True)
+        asyncio.create_task(_do())
+        return {"restarting": True, **info}
+
+    @app.post("/update/revert")
+    async def update_revert(request: Request, body: Optional[dict] = None):
+        _require_admin(request)
+        from engine import updater
+        if (body or {}).get("confirm") != "revert":
+            raise HTTPException(400, "body must include confirm:'revert'")
+        ok, reason = await run_in_threadpool(updater.can_revert)
+        if not ok:
+            raise HTTPException(409, reason)
+        return _update_sse(lambda emit: updater.revert_async(emit=emit))
+
     # ---- approval-gated dependency installs ----
     @app.get("/deps")
     async def deps():

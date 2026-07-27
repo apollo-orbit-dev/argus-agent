@@ -610,6 +610,22 @@
         </div>
 
         <div class="card" style="margin-bottom:16px;">
+          <div class="card-head"><span class="card-title">Update Argus</span></div>
+          <div class="field-note">Updates follow published <strong>release tags</strong>, not the main
+            branch — so you get versions the release process has signed off, never whatever landed on
+            <code>main</code> twenty minutes ago. Your <code>.env</code>, databases, connections,
+            workspaces and routines are never touched.</div>
+          <div class="sandbox-status" id="updateStatus">not checked yet</div>
+          <pre class="sandbox-output" id="updateChangelog" style="display:none;"></pre>
+          <div class="small-btn-row">
+            <button class="btn btn-sm" id="updateCheckBtn">Check for updates</button>
+            <button class="btn btn-sm btn-primary" id="updateApplyBtn" disabled>Update Argus</button>
+            <button class="btn btn-sm" id="updateRevertBtn" style="display:none;">Revert</button>
+          </div>
+          <pre class="sandbox-output" id="updateOutput" style="display:none;"></pre>
+        </div>
+
+        <div class="card" style="margin-bottom:16px;">
           <div class="card-head"><span class="card-title">Run trace persistence</span></div>
           <div class="field row-inline" style="justify-content:space-between;">
             <label class="switch"><input type="checkbox" id="swTracePersist"><span class="track"><span class="thumb"></span></span>Persist run trace (survives restart)</label>

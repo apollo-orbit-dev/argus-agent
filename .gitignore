@@ -14,6 +14,11 @@ dep_approvals.json
 # ============================================================================
 # memory.db, tables.db, knowledge.db, datastore.db, ...
 *.db
+# SQLite WAL sidecars. sessions.db (and friends) run in journal_mode=WAL, so a LIVE instance always
+# has these two next to every open database. They are not source and must never look like a change.
+*.db-wal
+*.db-shm
+*.db-journal
 memory/*.db
 scheduled_jobs.json
 watches.json
@@ -21,6 +26,11 @@ rules.json
 approvals.json
 permissions.json
 custom_commands.yaml
+# in-app updater bookkeeping (previous ref, so a revert is still offerable after a restart)
+.argus-update.json
+# in-app updater mutual exclusion — no longer written (it is an asyncio.Lock now); still ignored so
+# a file left behind by an older version does not show up as a change
+.argus-update.lock
 # user-authored routines (repo-root runtime data dir only — not engine/routines/ source)
 /routines/
 # agent-created tools / skills

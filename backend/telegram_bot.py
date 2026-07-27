@@ -64,6 +64,7 @@ BOT_COMMANDS = [
     ("status", "Show whether the agent is working and which step it's on"),
     ("stop", "Interrupt whatever the agent is currently doing"),
     ("restart", "Restart the Argus server"),
+    ("update", "Check for a new release — /update confirm installs it"),
     ("verbose", "Show full tool/skill call history per turn: /verbose on|off"),
     ("pending", "List dependency installs awaiting your approval"),
     ("approve", "Approve a pending install: /approve <id>"),
@@ -318,7 +319,10 @@ async def reply_html(msg, text: str) -> None:
         await msg.reply_text(text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
     except Exception:
         try:
-            stripped = re.sub(r"</?(code|b|i)>", "", text)
+            # Every tag this module emits — <pre> included: /update wraps the changelog and the pip
+            # tail in one, and a leftover "<pre>" in the plain-text fallback is exactly what the
+            # fallback exists to avoid.
+            stripped = re.sub(r"</?(code|b|i|u|s|pre|blockquote)>", "", text)
             await msg.reply_text(_html.unescape(stripped))
         except Exception:
             log.debug("could not send reply_html fallback", exc_info=True)
@@ -686,6 +690,45 @@ async def register_bot_commands(app: Application) -> None:
     except Exception:
         log.debug("could not clear group-chat scope commands", exc_info=True)
     log.info("registered %d Telegram slash commands (default + private scopes)", len(BOT_COMMANDS))
+    await deliver_pending_update_notice(app)
+
+
+async def deliver_pending_update_notice(app: Application) -> None:
+    """Say "✅ update complete" on the way back UP.
+
+    An update ends by replacing this process, so the turn that started it can never report success
+    — the reply would have to be sent by a process that no longer exists. Instead /update records a
+    pending_notice in the update state file and the newly-booted process delivers it here. Also
+    catches the nasty case where the restart came back on the WRONG version (e.g. pip installed into
+    a different environment), which would otherwise look like a clean success."""
+    try:
+        from engine import updater
+        from engine.version import get_version
+        state = updater.read_state()
+        if state.get("state") != "restarting":
+            return
+        # What the install actually IS on the other side of the restart, recorded by whoever asked
+        # for it. NOT a hardcoded "applied": a revert also restarts, and calling its result "applied"
+        # makes can_revert() offer "Revert to v0.1.0" on an install already running v0.1.0.
+        settled = state.get("before_restart") or "applied"
+        notice = state.get("pending_notice") or {}
+        chat_id = notice.get("chat_id")
+        if not chat_id:
+            # A dashboard-initiated restart has nobody to tell. Settle the state anyway: leaving it
+            # at "restarting" forever means the NEXT boot that happens to find a pending_notice
+            # would deliver a stale "update complete" for an update that finished long ago.
+            updater.write_state(state=settled, before_restart=None, pending_notice=None)
+            return
+        running, expected = f"v{get_version()}", notice.get("to")
+        if expected and running != expected:
+            text = (f"⚠️ Argus restarted but is running <b>{_esc(running)}</b>, not the expected "
+                    f"<b>{_esc(expected)}</b>.")
+        else:
+            text = f"✅ Update complete — now running <b>{_esc(running)}</b>."
+        await app.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+        updater.write_state(state=settled, before_restart=None, pending_notice=None)
+    except Exception:
+        log.debug("could not deliver the post-update notice", exc_info=True)
 
 
 def build_telegram_app(engine: Any, config: Any) -> Application:
@@ -875,6 +918,181 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
             import os
             import sys
             os.execv(sys.executable, [sys.executable] + sys.argv)   # re-exec in place
+        asyncio.create_task(_do())
+
+    async def on_update(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """/update — the Telegram half of the update button. Two-step by construction: there is no
+        modal here, so `/update` only ever PREVIEWS and `/update confirm` is the one that acts.
+
+        Same engine path as the dashboard (engine/updater.py) — the preflight, the rollback and the
+        restart strategy are not reimplemented here."""
+        chat_id = await _guard(update)
+        if chat_id is None:
+            return
+        msg = update.effective_message
+        from engine import updater
+        args = [a.lower() for a in (ctx.args or [])]
+
+        if args and args[0] == "revert":
+            await _update_revert(msg, args[1:2] == ["confirm"], updater)
+            return
+        if args and args[0] != "confirm":
+            await reply_html(msg, "Usage: <code>/update</code> to check · "
+                                  "<code>/update confirm</code> to install · "
+                                  "<code>/update revert</code> to go back")
+            return
+
+        pv = await asyncio.to_thread(updater.preview)
+        errors = [b for b in pv["blockers"] if b.get("severity") == "error"]
+        if errors:
+            await reply_html(msg, "❌ This install can't be updated right now:\n"
+                             + "\n".join("• " + _esc(b["message"]) for b in errors))
+            return
+        if not pv.get("update_available"):
+            infos = [b for b in pv["blockers"] if b.get("severity") != "error"]
+            note = infos[0]["message"] if infos else f"Already up to date — running v{pv['current']}."
+            await reply_html(msg, "✅ " + _esc(note))
+            return
+
+        target = pv["target"]
+        if args[:1] != ["confirm"]:
+            lines = [f"⬆️ Update available: <b>v{_esc(pv['current'])}</b> → <b>{_esc(target)}</b>"]
+            if pv.get("branch_note"):
+                lines.append(_esc(pv["branch_note"]))
+            if pv.get("changelog"):
+                body = pv["changelog"][:1500]
+                if len(pv["changelog"]) > 1500 or pv.get("changelog_truncated"):
+                    body += "\n… (truncated)"
+                lines += ["", f"<pre>{_esc(body)}</pre>"]
+            elif pv.get("changelog_note"):
+                lines += ["", _esc(pv["changelog_note"])]
+            lines += ["", "Your .env, databases, connections, workspaces and routines are never "
+                          "touched — updates follow published release tags, not the main branch.",
+                      "", f"Send <code>/update confirm</code> to install {_esc(target)} and restart."]
+            await reply_html(msg, "\n".join(lines))
+            return
+
+        await reply_html(msg, f"⏳ Installing {_esc(target)} — this can take a few minutes…")
+        log_lines: list[str] = []
+
+        def _collect(ev: dict) -> None:
+            if ev.get("type") == "log":
+                log_lines.append(str(ev.get("line", "")))
+            elif ev.get("type") == "step":
+                log_lines.append(f"== {ev.get('step')}: {ev.get('text')}")
+
+        res = await updater.apply_update_async(target, updater.ROOT, _collect)
+        await _update_finish(msg, chat_id, res, updater, log_lines)
+
+    async def _update_revert(msg, confirmed: bool, updater) -> None:
+        ok, reason = await asyncio.to_thread(updater.can_revert)
+        if not ok:
+            await reply_html(msg, "❌ " + _esc(reason))
+            return
+        state = updater.read_state()
+        back_to = state.get("from_tag") or state.get("from_ref")
+        if not confirmed:
+            await reply_html(msg, f"↩️ This would put Argus back on <b>{_esc(back_to)}</b>.\n"
+                                  f"Send <code>/update revert confirm</code> to do it.")
+            return
+        await reply_html(msg, f"⏳ Reverting to {_esc(back_to)}…")
+        log_lines: list[str] = []
+        res = await updater.revert_async(updater.ROOT,
+                                         lambda ev: log_lines.append(str(ev.get("line", ""))))
+        await _update_finish(msg, None, res, updater, log_lines)
+
+    async def _update_finish(msg, chat_id, res: dict, updater, log_lines: list[str]) -> None:
+        """Report the outcome and, on success, hand off to the restart strategy.
+
+        The process dies before it can say "done", so the ✅ is delivered on the way back up — see
+        register_bot_commands, which reads the pending_notice this writes."""
+        from engine.version import get_version
+
+        def _stash_html(stash: str) -> str:
+            """Where the tree went, for a message body. `git stash pop` is NOT offered on purpose: it
+            fails in the exact shape this saves for ("<path> already exists, no checkout"), because
+            the checkout has since put the release's own copy back at that path. And a plain
+            `git stash show -p` prints nothing at all for an untracked-only entry.
+
+            stash@{N}, never stash@{0}: there can be TWO entries and `stash` carries each one's own
+            index. Naming 0 for both sent a user whose files were in the older entry to the wrong
+            one, and an advertised recovery that shows the wrong entry reads as "it is gone"."""
+            return ("Your version of the files it replaced was saved to the git stash as "
+                    f"<code>{_esc(str(stash))}</code> — list it with "
+                    f"<code>git stash list</code>, see what is in an entry with "
+                    f"<code>git stash show -p --include-untracked \"stash@{{N}}\"</code> (its own "
+                    f"index, as shown above), and take a file back with "
+                    f"<code>git checkout \"stash@{{N}}\" -- &lt;path&gt;</code> "
+                    f"(<code>\"stash@{{N}}^3\"</code> if it was untracked or ignored).")
+
+        if not res.get("ok"):
+            tail = "\n".join(log_lines[-20:]) or "(no output)"
+            state, step = res.get("state"), _esc(res.get("failed_step") or "?")
+            if state == "reverted":
+                headline = (f"❌ Update failed at <b>{step}</b> and was rolled back — still running "
+                            f"v{_esc(get_version())}.")
+            elif state == "needs_manual":
+                headline = (f"⚠️ Update failed at <b>{step}</b> AND the automatic rollback also "
+                            f"failed — this install needs manual attention.")
+            else:
+                headline = "❌ Update failed: " + _esc(res.get("detail") or "unknown error")
+            body = [headline]
+            # ABOVE the log tail, not inside it. Only the last 20 lines are quoted, and the rollback
+            # writes this one first — so as a log line it fell off the top exactly when the update
+            # produced enough output to matter.
+            if res.get("stash"):
+                body += ["", _stash_html(res["stash"])]
+            body += ["", f"<pre>{_esc(tail)}</pre>"]
+            cmd = res.get("revert_command") or (res.get("commands") or [None])[0]
+            if cmd:
+                body += ["", "To put it back by hand:", f"<code>{_esc(cmd)}</code>"]
+            await reply_html(msg, "\n".join(body))
+            return
+
+        # A SUCCESSFUL run can have a stash too, and the revert is where that is the common case: the
+        # tree is preserved before the old release is checked out, and an install that has been
+        # running for days is exactly the one with runtime data at a path that release ships. Only
+        # the failure branch above ever mentioned it, so on the likelier path it reached nobody.
+        stash_line = ["", _stash_html(res["stash"])] if res.get("stash") else []
+
+        info = res.get("restart") or updater.restart_strategy()
+        if info.get("strategy") == "manual":
+            await reply_html(msg, "\n".join(
+                ["✅ Installed — but a restart is required and cannot be done "
+                 "automatically on this platform:",
+                 f"<pre>{_esc(info.get('instruction') or '')}</pre>"] + stash_line))
+            return
+        notice = {"chat_id": chat_id, "to": res.get("to_tag") or res.get("from_tag")}
+        # Mirrors /update/restart in app.py, and for the same reason: between here and the moment
+        # the process is actually replaced there is an await and a 0.6s sleep, and an apply started
+        # from the dashboard inside that window takes the lock legitimately and is then killed
+        # mid-pip. Without this mark, apply_update_async's restart_pending() guard is dead weight
+        # against a Telegram-initiated restart — half of that protection would not exist.
+        updater.mark_restart_pending()
+        # before_restart: what this install IS now ("applied" or "reverted"). The boot-side settle
+        # restores it — see deliver_pending_update_notice for why hardcoding "applied" there lied.
+        updater.write_state(state="restarting", before_restart=res.get("state"),
+                            pending_notice=notice if chat_id else None)
+        await reply_html(msg, "\n".join(["🔄 Restarting… I'll say when I'm back."] + stash_line))
+
+        async def _do():
+            await asyncio.sleep(0.6)          # let the reply flush before the process dies
+            if updater.update_in_progress():
+                # An update took the lock after the mark. Killing it here is the brick this guard
+                # exists to prevent — stand down and put the recorded state back.
+                updater.clear_restart_pending()
+                updater.write_state(state=res.get("state") or "none", before_restart=None,
+                                    pending_notice=None)
+                return
+            try:
+                updater.perform_restart(info)
+            except Exception as e:            # noqa: BLE001
+                # Still here, so it did not happen. A pending flag left up refuses every future
+                # update from a process that is never coming back.
+                updater.clear_restart_pending()
+                updater.write_state(state=res.get("state") or "none", before_restart=None,
+                                    pending_notice=None)
+                log.warning("restart failed, this process is still running: %s", e)
         asyncio.create_task(_do())
 
     async def on_mode(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1184,6 +1402,7 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
     app.add_handler(CommandHandler("status", on_status))
     app.add_handler(CommandHandler("stop", on_stop))
     app.add_handler(CommandHandler("restart", on_restart))
+    app.add_handler(CommandHandler("update", on_update))
     app.add_handler(CommandHandler("verbose", on_verbose))
     app.add_handler(CommandHandler("pending", on_pending))
     app.add_handler(CommandHandler("approve", on_approve))
