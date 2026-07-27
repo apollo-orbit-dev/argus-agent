@@ -26,6 +26,17 @@ def _ocr_image(png_bytes: bytes) -> str:
     return pytesseract.image_to_string(Image.open(io.BytesIO(png_bytes))).strip()
 
 
+def _ocr_note(exc: Exception) -> str:
+    """What to tell the model about a page that is an image and could not be OCR'd. When OCR is
+    simply not installed, no amount of re-reading will ever produce text — name that and the way
+    round it, rather than surfacing an ImportError as if the file were at fault."""
+    if isinstance(exc, (ImportError, ModuleNotFoundError)) or "tesseract" in str(exc).lower():
+        return ("this page is a scanned image and OCR is NOT installed on this server, so its text "
+                "cannot be extracted here at all — ask the user for a text version of the file, or "
+                "to install OCR (pip install 'argus[ocr]' plus the Tesseract binary)")
+    return f"no text and OCR failed: {exc}"
+
+
 def _read_pdf(path: str) -> str:
     import fitz  # PyMuPDF
     doc = fitz.open(path)
@@ -40,7 +51,11 @@ def _read_pdf(path: str) -> str:
                     txt, _ = ocr, ocr_pages
                     ocr_pages += 1
             except Exception as e:                    # OCR missing/broken — keep going
-                txt = txt or f"[page {i+1}: no text and OCR failed: {e}]"
+                # OCR is an OPT-IN extra (pyproject `[ocr]`, plus the Tesseract BINARY), while
+                # read_document is always registered and advertises "handles SCANNED PDFs
+                # automatically". When the extra isn't there, every scanned page fails the same way
+                # forever — say so, instead of a bare exception the model can only read as "retry".
+                txt = txt or f"[page {i+1}: {_ocr_note(e)}]"
         parts.append(f"--- page {i+1} ---\n{txt}")
     doc.close()
     head = f"[{len(parts)} page(s), {ocr_pages} via OCR]\n" if ocr_pages else ""

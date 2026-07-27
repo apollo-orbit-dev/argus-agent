@@ -408,6 +408,12 @@ def build_params_model(name: str, params_spec: dict) -> type[BaseModel]:
     return create_model(f"{name}_Params", **fields)
 
 
+# The way OUT of a blocked sandbox egress, for a created tool specifically: it can be re-authored
+# to run host-side, where httpx (and the same public-host policy, minus the proxy) applies.
+CREATED_TOOL_EGRESS_ESCAPE = ("Use an https:// URL on a public host, or re-create this tool with "
+                              "sandboxed=false to run it host-side with httpx.")
+
+
 def _tool_fn(tname: str, call_tool: Callable) -> Callable:
     """Wrap a tool as a plain callable so sandboxed code can invoke it the INTUITIVE way —
     `get_account_data({'date_range': 'last 7 days'})` — instead of CALL_TOOL('name', {...})
@@ -424,7 +430,12 @@ def _make_call_tool(registry, loop, timeout: float = 120.0) -> Callable:
     back to the event loop. Never raises into tool code — returns a 'CALL_TOOL error: ...'."""
     def call_tool(name, args=None):
         if registry is None:
-            return "CALL_TOOL error: tool composition is unavailable in this context"
+            # Not a code bug: this tool was built without a registry (e.g. reloaded from disk at
+            # startup), so composition is off FOR IT, permanently — rewriting the call won't fix it.
+            return ("CALL_TOOL error: tool composition is unavailable in this context — this tool "
+                    "has no tool registry, so it cannot call other tools no matter how the call is "
+                    "written. Call that tool directly in your turn, or re-create this one with "
+                    "create_tool (same name) to rebuild it with composition.")
         tool = registry.get(name)
         if tool is None:
             return f"CALL_TOOL error: no tool named '{name}'. Available: {', '.join(registry.names())}"
@@ -458,7 +469,12 @@ class DynamicTool(Tool):
 
     async def run(self, args: BaseModel) -> str:
         if self.sandboxed:
-            return await self._run_in_container(args)
+            # A blocked egress surfaces as raw client text ("Tunnel connection failed") in EITHER
+            # the result (tool code that caught the exception and returned a message — the common
+            # case) or the error, so the hint is applied to the whole container result, not to one
+            # branch of _run_in_container.
+            from engine.sandbox.egress_policy import with_egress_hint
+            return with_egress_hint(await self._run_in_container(args), CREATED_TOOL_EGRESS_ESCAPE)
         return await self._run_host_side(args)
 
     async def _run_in_container(self, args: BaseModel) -> str:
@@ -478,7 +494,10 @@ class DynamicTool(Tool):
                 self.workspace, ["python", "/opt/argus/runner.py"], stdin=payload,
                 timeout=self._timeout))
         except SandboxUnavailable as e:
-            return f"{self.name}: the sandbox is unavailable ({e})."
+            return (f"{self.name}: the container sandbox is unavailable ({e}), and this tool is "
+                    "sandboxed so it runs nowhere else — retrying won't help. Ask the user to "
+                    "enable or restart it in the dashboard's Settings > Sandbox, or re-create this "
+                    "tool with sandboxed=false to run it host-side.")
         except Exception as e:                       # noqa: BLE001 - never crash the loop
             return f"{self.name} error: {type(e).__name__}: {e}"
         if r.timed_out:

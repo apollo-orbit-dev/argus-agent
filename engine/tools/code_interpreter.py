@@ -36,6 +36,11 @@ from engine.tools.base import Tool
 
 _MAX_OUTPUT = 4000        # cap returned text so a runaway print() can't flood the model's context
 
+# The way OUT of a blocked sandbox egress, for exec_python: unlike a created tool it has no
+# "run it host-side" switch, so the escape is the URL or a built-in tool that runs outside.
+_EGRESS_ESCAPE = ("Use an https:// URL on a public host, or fetch it with a built-in tool "
+                  "(web_search, download_file) — those run outside the sandbox.")
+
 
 class CodeInterpreter:
     """Owns the per-session REPL namespaces and runs snippets in the shared sandbox. Held once on
@@ -84,7 +89,10 @@ class CodeInterpreter:
                 None, lambda: self.runtime.exec(
                     self.workspace, ["python", "-c", code], timeout=self.container_timeout))
         except SandboxUnavailable as e:
-            return f"exec_python error: the sandbox is unavailable ({e})."
+            return (f"exec_python error: the container sandbox is unavailable ({e}), and "
+                    "exec_python runs nowhere else — retrying won't help. Ask the user to enable "
+                    "or restart it in the dashboard's Settings > Sandbox, or use calculator "
+                    "instead for arithmetic.")
         except Exception as e:                       # noqa: BLE001 - never kill the turn
             return f"exec_python error: {type(e).__name__}: {e}"
         if r.timed_out:
@@ -96,7 +104,10 @@ class CodeInterpreter:
             parts.append("stderr:\n" + r.stderr[:_MAX_OUTPUT])
         if not parts:
             parts.append("(no output)")
-        return "\n".join(parts)
+        # A refused CONNECT reaches the model as raw client text on stdout or stderr ("Tunnel
+        # connection failed"), which names neither the constraint nor a way out — say both.
+        from engine.sandbox.egress_policy import with_egress_hint
+        return with_egress_hint("\n".join(parts), _EGRESS_ESCAPE)
 
     async def run(self, session_id: str, code: str, reset: bool = False) -> str:
         if self.runtime is not None:

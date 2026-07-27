@@ -48,6 +48,15 @@ def parse_time(s: str):
     return h, mn
 
 
+def _bad_time(raw: str) -> str:
+    """The clock format is the parser's own — nothing the caller can see states it, and the old
+    message ("couldn't read the time 'X'") named neither the accepted form nor the fact that ONE
+    schedule holds ONE time. A model asked for '9am, 3pm, 9pm, 3am' got told its input was
+    unreadable and had no way to learn that four times means four schedule_task calls."""
+    return (f"couldn't read the time '{raw}' — a schedule holds ONE time, written as '8am', "
+            "'8:30am', '20:15' or '14:00'. For several times a day, call it once per time.")
+
+
 def parse_schedule(text: str, now: Optional[datetime] = None):
     """(spec, error). spec is a JSON-able dict with a 'type'. Local timezone."""
     now = now or now_local()
@@ -77,19 +86,19 @@ def parse_schedule(text: str, now: Optional[datetime] = None):
     if m:
         tm = parse_time(m.group(1))
         return ({"type": "daily", "hour": tm[0], "minute": tm[1]}, None) if tm \
-            else (None, f"couldn't read the time '{m.group(1)}'")
+            else (None, _bad_time(m.group(1)))
 
     m = re.match(r"^every\s+(\w+)\s+at\s+(.+)$", t)
     if m and m.group(1) in _WEEKDAYS:
         tm = parse_time(m.group(2))
         return ({"type": "weekly", "weekday": _WEEKDAYS[m.group(1)], "hour": tm[0],
-                 "minute": tm[1]}, None) if tm else (None, f"couldn't read the time '{m.group(2)}'")
+                 "minute": tm[1]}, None) if tm else (None, _bad_time(m.group(2)))
 
     m = re.match(r"^tomorrow\s+at\s+(.+)$", t)
     if m:
         tm = parse_time(m.group(1))
         if not tm:
-            return None, f"couldn't read the time '{m.group(1)}'"
+            return None, _bad_time(m.group(1))
         dt = (now + timedelta(days=1)).replace(hour=tm[0], minute=tm[1], second=0, microsecond=0)
         return {"type": "once", "at": dt.isoformat()}, None
 
@@ -97,7 +106,7 @@ def parse_schedule(text: str, now: Optional[datetime] = None):
     if m:
         tm = parse_time(m.group(1))
         if not tm:
-            return None, f"couldn't read the time '{m.group(1)}'"
+            return None, _bad_time(m.group(1))
         dt = now.replace(hour=tm[0], minute=tm[1], second=0, microsecond=0)
         if dt <= now:
             dt += timedelta(days=1)

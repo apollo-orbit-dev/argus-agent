@@ -19,6 +19,16 @@ from engine.tools.artifacts import ensure_document, inline_workspace_images, slu
 from engine.tools.base import Tool
 from engine.tools.files import FileWorkspace, safe_name
 
+# WeasyPrint is an OPTIONAL extra (pyproject `[pdf]`, and it needs native GTK/Pango/cairo), but
+# make_pdf/convert_to_pdf are gated on the enable_pdf CONFIG FLAG, not on the library being present.
+# Flag on + library absent is therefore a normal deployment state, and it reached the model as a
+# bare "could not render the PDF (ModuleNotFoundError: No module named 'weasyprint')" — a message
+# that invites rewriting perfectly good HTML forever. Name the missing piece and the way around it.
+_NO_RENDERER = ("the PDF renderer (WeasyPrint) is not installed on this server, so NO html will "
+                "render here — the document isn't the problem. Save it with write_file as .html "
+                "or .md instead, and tell the user to install it (pip install 'argus[pdf]') to "
+                "turn PDFs on.")
+
 _DOC_CSS = (
     "body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;line-height:1.55;color:#1a1a1a;"
     "font-size:12pt}h1,h2,h3{line-height:1.25}pre{white-space:pre-wrap;word-wrap:break-word;"
@@ -64,6 +74,23 @@ def file_to_html(name: str, text: str, ws) -> str:
     raise ValueError(f"can't convert '.{ext}' to PDF")
 
 
+class RendererMissing(RuntimeError):
+    """WeasyPrint (or one of its native libraries) could not be imported — an environment gap, not
+    a problem with the HTML. Distinct from a render failure so the two get different advice."""
+
+
+def _weasy_html():
+    """Import weasyprint.HTML, or raise RendererMissing. OSError is caught alongside ImportError on
+    purpose: with the Python package present but GTK/Pango/cairo absent (the usual half-installed
+    state) weasyprint raises OSError('cannot load library ...') at import, which is the SAME
+    environment gap and must not be reported as a rendering fault."""
+    try:
+        from weasyprint import HTML
+    except (ImportError, OSError) as e:
+        raise RendererMissing(str(e)) from e
+    return HTML
+
+
 def _no_external_fetch(url: str):
     """WeasyPrint url_fetcher: allow inlined data: URIs only; block http/file/relative so PDF
     rendering can't fetch external resources or read local files."""
@@ -96,11 +123,13 @@ class MakePdfTool(Tool):
             return "make_pdf error: html is empty — write the document content."
         try:
             return await asyncio.to_thread(self._render, args)
+        except RendererMissing:
+            return f"make_pdf error: {_NO_RENDERER}"
         except Exception as e:
             return f"make_pdf error: could not render the PDF ({type(e).__name__}: {e})."
 
     def _render(self, args: "MakePdfTool.Params") -> str:
-        from weasyprint import HTML
+        HTML = _weasy_html()
         doc = ensure_document(args.html, args.title.strip() or "document")
         doc = inline_workspace_images(doc, self.ws)          # embed referenced charts/images
         base = slugify(safe_name(args.name) or args.title) or "document"
@@ -135,11 +164,13 @@ class ConvertToPdfTool(Tool):
             return await asyncio.to_thread(self._render, args.name, path)
         except ValueError as e:
             return f"convert_to_pdf: {e}."
+        except RendererMissing:
+            return f"convert_to_pdf error: {_NO_RENDERER}"
         except Exception as e:
             return f"convert_to_pdf error: could not convert ({type(e).__name__}: {e})."
 
     def _render(self, name: str, path: str) -> str:
-        from weasyprint import HTML
+        HTML = _weasy_html()
         ext = os.path.splitext(name)[1].lower().lstrip(".")
         base = slugify(os.path.splitext(os.path.basename(name))[0]) or "document"
         if ext == "pdf":
