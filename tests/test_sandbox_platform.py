@@ -35,6 +35,15 @@ def test_status_reports_unsupported_on_windows(monkeypatch):
     assert st["reason"] == SANDBOX_UNSUPPORTED_REASON
 
 
+def test_unsupported_platform_is_not_a_restart_prompt(monkeypatch):
+    """Restarting can't make Windows support the sandbox, so the unsupported branch must never
+    carry needs_restart — the dashboard branches on its presence alone."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    st = _client(enable_sandbox=True).get("/sandbox/status").json()
+    assert st["reason"] == SANDBOX_UNSUPPORTED_REASON
+    assert not st.get("needs_restart")
+
+
 def test_setup_refuses_on_windows_without_shelling_out(monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
     # If the endpoint ever reaches the bash invocation on Windows, blow up — proving it returned early.

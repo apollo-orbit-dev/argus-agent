@@ -769,6 +769,8 @@
     display:flex; flex-direction:column; gap:2px; }
   .sandbox-status .sb-ok{ color:var(--ok); }
   .sandbox-status .sb-bad{ color:var(--danger); }
+  /* pending operator action (e.g. restart to start the sandbox) — not a failure */
+  .sandbox-status .sb-act{ color:var(--amber); }
   .sandbox-output{ margin-top:8px; padding:9px 11px; max-height:260px; overflow:auto;
     background:var(--panel-2); border:1px solid var(--border); border-radius:7px;
     font-family:var(--font-mono); font-size:10.5px; color:var(--muted); white-space:pre-wrap; }
