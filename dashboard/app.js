@@ -629,17 +629,33 @@
 
   /* ---- control channel: a SEPARATE, session-independent EventSource on the reserved pseudo-session
      "__control__", carrying server-side state-change notifications that are NOT run steps (e.g. an
-     out-of-band session rename from another tab, Telegram, or background auto-title). Deliberately
-     NOT routed through wireEventHandlers/processEvent: processEvent registers any unseen run_id as a
-     new run, so a control event would spawn a phantom run that never completes. Opened once at page
-     load and never reopened per-session (see openControlEvents() call near the end of this file). */
+     out-of-band session rename from another tab, Telegram, or background auto-title; a rule Argus
+     auto-drafted for itself mid-turn). Deliberately NOT routed through wireEventHandlers/
+     processEvent: processEvent registers any unseen run_id as a new run, so a control event would
+     spawn a phantom run that never completes. Opened once at page load and never reopened
+     per-session (see openControlEvents() call near the end of this file). */
   var ces = null;
   var cesPendingRender = null;
+  var cesOpenedAt = 0;
   function openControlEvents(){
     if (ces) return;
+    cesOpenedAt = Date.now();
     ces = new EventSource("/events?session_id=__control__");
     ces.onmessage = function(m){
       var ev; try { ev = JSON.parse(m.data); } catch(e){ return; }
+      if (ev.kind === 'rule_saved'){
+        // A standing rule autodetect just saved. Announce it and refresh the Rules panel — but
+        // only for events that arrive AFTER this page connected: /events replays the control ring
+        // buffer on connect, and a reload must not re-announce (or re-fetch for) old rules. The
+        // guard is on receive time, not ev.ts, so it doesn't depend on client/server clock skew.
+        if (Date.now() - cesOpenedAt > 1500){
+          var rules = (ev.data && ev.data.rules) || [];
+          var first = rules[0] && rules[0].text;
+          toast('📌 New standing rule: ' + truncate(first || '(saved)', 60));
+          loadRules();
+        }
+        return;
+      }
       if (ev.kind !== 'session_changed') return;
       // Coalesce bursts (e.g. a replayed ring of many renames on connect) into one render instead
       // of one fetch('/sessions') + innerHTML rewrite (and sidebar scroll reset) per event.
