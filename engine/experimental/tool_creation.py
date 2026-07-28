@@ -430,8 +430,9 @@ def _make_call_tool(registry, loop, timeout: float = 120.0) -> Callable:
     back to the event loop. Never raises into tool code — returns a 'CALL_TOOL error: ...'."""
     def call_tool(name, args=None):
         if registry is None:
-            # Not a code bug: this tool was built without a registry (e.g. reloaded from disk at
-            # startup), so composition is off FOR IT, permanently — rewriting the call won't fix it.
+            # Not a code bug: this tool was built without a registry — a SANDBOXED tool, which has
+            # no bridge back to the event loop — so composition is off FOR IT and rewriting the call
+            # won't fix it. (Reload-from-disk used to land here too; it now gets a registry.)
             return ("CALL_TOOL error: tool composition is unavailable in this context — this tool "
                     "has no tool registry, so it cannot call other tools no matter how the call is "
                     "written. Call that tool directly in your turn, or re-create this one with "
