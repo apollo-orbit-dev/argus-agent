@@ -1015,6 +1015,112 @@ def test_load_persisted_tool_without_flag_is_host_side():
     assert len(tools) == 1 and tools[0].sandboxed is False
 
 
+# ---- reloaded tools keep tool-composition across a restart (argus-9hd) ----
+#
+# The defect: load_persisted_tools rebuilt every previously-created tool WITHOUT a registry, so a
+# tool that calls another tool worked in the session it was created in (the live create path passes
+# self.registry) and silently stopped composing after the next restart — for something create_tool's
+# own description actively instructs the model to do.
+#
+# Why a plain constructor argument is enough (and why these tests pass an EMPTY registry on
+# purpose): ToolRegistry is mutated IN PLACE by register(), and DynamicTool resolves names through
+# `self.registry` at CALL time, not at construction (_run_host_side rebuilds CALL_TOOL and the
+# bare-name globals on every run). So a tool constructed against an empty registry sees everything
+# registered into that same object afterwards, whatever the load order.
+
+def _persist_composing_pair(dirpath, caller_file="a_caller.json", dep_file="b_dep.json"):
+    """Write two manifests: `dep` (adds 1) and `caller` (calls dep by BARE NAME and via CALL_TOOL).
+    Default filenames make load_persisted_tools (which sorts) build the CALLER FIRST, before its
+    dependency exists at all — the load order that matters."""
+    import json
+    import os
+    with open(os.path.join(dirpath, dep_file), "w") as fh:
+        json.dump({"name": "dep", "description": "add one",
+                   "parameters": {"n": {"type": "integer"}},
+                   "code": "def run(args):\n    return str(args['n'] + 1)"}, fh)
+    with open(os.path.join(dirpath, caller_file), "w") as fh:
+        json.dump({"name": "caller", "description": "compose dep",
+                   "parameters": {"n": {"type": "integer"}},
+                   "code": ("def run(args):\n"
+                            "    return dep({'n': args['n']}) + '/' "
+                            "+ CALL_TOOL('dep', {'n': args['n']})\n")}, fh)
+
+
+async def test_persisted_tool_still_composes_after_a_reload():
+    """Spec test 1: assert the RESULT of the other tool, not merely that the tool loads."""
+    persist = tempfile.mkdtemp()
+    _persist_composing_pair(persist)
+    reg = ToolRegistry()
+    tools = load_persisted_tools(persist, registry=reg)
+    for t in tools:
+        reg.register(t)
+    caller = reg.get("caller")
+    assert await caller.run(caller.Params(n=41)) == "42/42"   # both call styles resolved
+
+
+def test_reload_path_passes_a_registry():
+    """Spec test 2: guards the omission coming back. The rebuilt tool must hold the registry it was
+    given — the same wiring the live create path (CreateToolTool) does."""
+    persist = tempfile.mkdtemp()
+    _persist_composing_pair(persist)
+    reg = ToolRegistry()
+    tools = load_persisted_tools(persist, registry=reg)
+    assert tools and all(t.registry is reg for t in tools)
+
+
+async def test_tool_loaded_before_its_dependency_can_still_call_it():
+    """Spec test 3: the one that catches an eagerly-captured registry. `caller` is built FIRST,
+    from a registry that is still EMPTY, and its dependency is registered only afterwards — so this
+    passes only if lookup happens at call time through the same live registry object."""
+    persist = tempfile.mkdtemp()
+    _persist_composing_pair(persist)
+    reg = ToolRegistry()
+    assert reg.names() == []                       # nothing to capture at construction time
+    tools = load_persisted_tools(persist, registry=reg)
+    assert [t.name for t in tools] == ["caller", "dep"]   # caller really did load first
+    caller, dep = tools
+    reg.register(caller)
+    assert await caller.run(caller.Params(n=1)) == (   # dependency genuinely absent so far
+        "caller error: NameError: name 'dep' is not defined")
+    reg.register(dep)                              # ...now it exists, in the SAME registry object
+    assert await caller.run(caller.Params(n=1)) == "2/2"
+
+
+async def test_tool_loaded_with_no_registry_still_gets_the_clear_call_tool_error():
+    """Spec test 4: building without a registry stays legitimate (a caller may not have one) and
+    must keep returning the explicit CALL_TOOL message rather than crashing or composing."""
+    import json
+    import os
+    persist = tempfile.mkdtemp()
+    with open(os.path.join(persist, "c.json"), "w") as fh:
+        json.dump({"name": "caller", "description": "compose", "parameters": {},
+                   "code": "def run(args):\n    return CALL_TOOL('dep', {'n': 1})\n"}, fh)
+    tools = load_persisted_tools(persist)          # no registry= at all
+    caller = next(t for t in tools if t.name == "caller")
+    assert caller.registry is None
+    out = await caller.run(caller.Params())
+    assert "CALL_TOOL error: tool composition is unavailable in this context" in out
+
+
+async def test_engine_hands_persisted_tools_a_live_registry_on_restart(tmp_path):
+    """The restart itself, through the real Engine: a tool persisted by an earlier run comes back
+    composition-capable, wired to the engine's own registry, with no re-creation."""
+    import os
+    created = tmp_path / "created_tools"
+    os.makedirs(created)
+    _persist_composing_pair(str(created))
+    cfg = Config(model_base_url="http://x/v1", model_name="main", telegram_bot_token="",
+                 enable_tool_creation=True)
+    e = Engine(cfg, data_dir=str(tmp_path))
+    caller = next(t for t in e._created_tools if t.name == "caller")
+    assert caller.registry is e.registry, "reloaded tool arrived with composition switched off"
+    # ...and it composes for real once the created tools are in a registry together, which is what
+    # every run path (run_task, _routine_registry) builds.
+    reg = e._routine_registry("s")
+    tool = reg.get("caller")
+    assert await tool.run(tool.Params(n=1)) == "2/2"
+
+
 # ---- end-to-end: a real podman container ----
 import shutil
 

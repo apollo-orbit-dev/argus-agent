@@ -538,14 +538,24 @@ class DynamicTool(Tool):
 def load_persisted_tools(persist_dir: str, timeout: float = 15.0,
                          extra_modules: Optional[set] = None,
                          secrets: Optional[dict] = None, trust_store=None,
-                         *, sandbox_runtime=None, sandbox_workspace: str = "default") -> list:
+                         *, registry=None, sandbox_runtime=None,
+                         sandbox_workspace: str = "default") -> list:
     """Recompile previously-created tools (JSON manifests) into DynamicTools at startup.
     Compile only — the tool body runs only when actually called. Skips any that fail.
     `extra_modules` are approved packages so tools that used them still compile. A manifest marked
     trusted is compiled UNSANDBOXED only if the trust store still trusts it at the exact code hash
     (revoked or changed → falls back to the sandbox, which will likely reject and skip it).
     A manifest marked `sandboxed` is NOT compiled host-side at all (its code may `import os`) —
-    it's shipped raw to the container's runner.py at run time."""
+    it's shipped raw to the container's runner.py at run time.
+
+    `registry` is the SAME thing the live create path passes (CreateToolTool passes self.registry):
+    it enables CALL_TOOL / bare-name composition. Omitting it here is what made a tool that calls
+    another tool work in the session it was created in and silently stop composing after the next
+    restart. It is safe to pass a registry that is still EMPTY: DynamicTool resolves names through
+    it at CALL time (see _run_host_side / _make_call_tool), never at construction, so tools loaded
+    before their dependency still find it once both are registered into that same object. A caller
+    that hands each tool a DIFFERENT registry later (the engine builds a fresh per-run registry)
+    must keep rebinding `tool.registry`; that late binding also works, for the same reason."""
     from engine.experimental.trust_store import code_hash as _chash
     tools = []
     if not persist_dir or not os.path.isdir(persist_dir):
@@ -558,7 +568,9 @@ def load_persisted_tools(persist_dir: str, timeout: float = 15.0,
             params = build_params_model(m["name"], m.get("parameters", {}))
             if m.get("sandboxed"):
                 # Container tool: DON'T compile host-side (its code may `import os`). Ship the raw
-                # code to runner.py at run time.
+                # code to runner.py at run time. No registry: composition is host-side only (the
+                # container has no bridge back to the loop), so handing one over would only imply
+                # a capability the sandboxed path does not have.
                 tools.append(DynamicTool(m["name"], m["description"], params, run_fn=None,
                                          timeout=timeout, sandboxed=True, code=m["code"],
                                          runtime=sandbox_runtime, workspace=sandbox_workspace))
@@ -569,7 +581,10 @@ def load_persisted_tools(persist_dir: str, timeout: float = 15.0,
                 run_fn = _compile_trusted(m["code"], secrets)
             else:
                 run_fn = _compile_run(m["code"], m.get("allow_network", False), extra_modules, secrets)
-            tools.append(DynamicTool(m["name"], m["description"], params, run_fn, timeout))
+            # registry= mirrors the live create path (see CreateToolTool.run) — without it a
+            # reloaded tool loses composition permanently.
+            tools.append(DynamicTool(m["name"], m["description"], params, run_fn, timeout,
+                                     registry=registry))
         except Exception:
             log.exception("could not load persisted tool %s", fn)
     return tools
