@@ -889,6 +889,10 @@
     setTranscriptActive(true);
     renderRunsList();
     renderSessionList();
+    // The run box is shared, so its state is DERIVED from the session now being viewed: enabled for
+    // an idle one even while another session's turn is in flight, disabled again on switching back
+    // to a session that is still running.
+    syncRunControls();
   }
 
   async function renameSession(id){
@@ -957,6 +961,35 @@
   var runBtn = $('runBtn');
   var runStatus = $('runStatus');
 
+  /* ---- in-flight turns are tracked PER SESSION ----
+     The backend runs turns concurrently across sessions (Engine._running is a session_id -> task
+     dict, /run is async, there is no global lock), but there is only ONE run box in the UI. So the
+     button's state must be DERIVED from whether the session currently being VIEWED is busy — a
+     turn in flight on another session must not block sending here, and switching back to a session
+     that is still running must show the button disabled again. The guard is still real for the
+     SAME session: two concurrent turns on one session would share a conversation and working set. */
+  var runningSessions = new Set();
+  // Last run status line, per session — a global one would show another session's result after a switch.
+  var runStatusBySession = Object.create(null);
+
+  function isSessionBusy(id){ return runningSessions.has(id === undefined ? SESSION : id); }
+
+  // Re-derive every control that gates on "is a turn in flight" from the VIEWED session.
+  function syncRunControls(){
+    if (runBtn) runBtn.disabled = isSessionBusy(SESSION);
+    if (runStatus){
+      var st = runStatusBySession[SESSION];
+      runStatus.textContent = st ? st.text : 'idle';   // 'idle' is the initial markup's empty state
+      runStatus.style.color = st ? st.color : '';
+    }
+  }
+
+  function setRunStatus(id, text, color){
+    if (text) runStatusBySession[id] = { text: text, color: color || '' };
+    else delete runStatusBySession[id];
+    syncRunControls();
+  }
+
   /* ---- auto-growing prompt textarea: 1 line when empty (no scrollbar) up to ~20 lines,
      then internal scroll. Height is driven by content, not a fixed focus-state jump. ---- */
   var RUNNER_INPUT_MAX_H = 312; // ~20 lines
@@ -980,52 +1013,67 @@
     // the transcript is what's on screen; a run trace view must not be yanked away by a send.
     var optimisticNode = (currentView === 'transcript') ? appendOptimisticUserMessage(text) : null;
 
-    runBtn.disabled = true;
+    // The turn belongs to THIS session for its whole life, even if the user switches views mid-flight.
+    var sid = SESSION;
+    // Clear the box NOW, not after the turn. The box is shared across sessions, so text left in it
+    // during a 30s turn is text the user can send to a DIFFERENT session by switching and pressing
+    // Enter — newly reachable, because until this change Run was disabled everywhere while any turn
+    // ran. Nothing is lost: the optimistic echo already shows the text, and a failed send puts it
+    // back below.
+    runnerInput.value = '';
+    autosizeRunnerInput();
+    runningSessions.add(sid);
     // any clarify-option buttons from a prior turn are now stale — retire them so a scrolled-back
     // old choice can't be sent as this turn's answer.
     document.querySelectorAll('.clarify-opt').forEach(function(b){ b.disabled = true; });
-    runStatus.textContent = 'running…';
-    runStatus.style.color = 'var(--cyan)';
+    setRunStatus(sid, 'running…', 'var(--cyan)');
     var started = performance.now();
     try {
       var res = await fetch('/run', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: SESSION, text: text, skill: skill })
+        body: JSON.stringify({ session_id: sid, text: text, skill: skill })
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       await res.json();
       var secs = ((performance.now() - started) / 1000).toFixed(1);
-      runStatus.textContent = 'completed in ' + secs + 's';
-      runStatus.style.color = '';
-      runnerInput.value = '';
-      autosizeRunnerInput();
+      setRunStatus(sid, 'completed in ' + secs + 's', '');
       loadUsage();
       // Not every 200-OK /run path emits an SSE 'final' event (model-call failure, parse-failure
       // give-up, max-steps exhausted, or a paused approval that times out all return normally
       // without one) — so the reconciling reload above can never fire and the optimistic echo is
       // stuck pending forever. Force a reload here whenever the transcript is on screen; it's a
       // wholesale viewerBody replace, so a redundant reload (when 'final' DID already fire) is harmless.
-      if (currentView === 'transcript') loadTranscript(SESSION);
+      // …and only while that session is still the one on screen: switching away already reloaded
+      // the new session's transcript, and this turn's result must not stomp it.
+      if (SESSION === sid && currentView === 'transcript') loadTranscript(sid);
     } catch (e) {
-      runStatus.textContent = 'run failed';
-      runStatus.style.color = 'var(--danger)';
+      setRunStatus(sid, 'run failed', 'var(--danger)');
       toast('Run failed: ' + e.message, 'err');
       // The POST may have failed before the server ever recorded the message — don't imply it was
       // delivered, but don't silently erase what the user typed either.
       if (optimisticNode) markOptimisticFailed(optimisticNode);
+      // The send failed, so give the text back — but only into an EMPTY box on the session it was
+      // typed for, so it can never stomp a draft the user has since started elsewhere.
+      if (SESSION === sid && !runnerInput.value){
+        runnerInput.value = text;
+        autosizeRunnerInput();
+      }
     } finally {
-      runBtn.disabled = false;
+      // Unconditional, exactly as the old global clear was: completion, error and abort all release
+      // this session, so a failed turn can never strand it as permanently busy.
+      runningSessions.delete(sid);
+      syncRunControls();
     }
   }
   runBtn.addEventListener('click', runTask);
   runnerInput.addEventListener('keydown', function(e){
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!runBtn.disabled) runTask(); }
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); if (!runBtn.disabled) runTask(); }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!isSessionBusy()) runTask(); }
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); if (!isSessionBusy()) runTask(); }
   });
   // Clarification choice buttons: clicking an option sends it as the user's next message.
   document.addEventListener('click', function(e){
     var opt = e.target.closest('[data-clarify-opt]');
-    if (!opt || runBtn.disabled) return;
+    if (!opt || isSessionBusy()) return;
     runnerInput.value = opt.getAttribute('data-clarify-opt');
     autosizeRunnerInput();
     runTask();
