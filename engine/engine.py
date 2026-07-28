@@ -2071,14 +2071,35 @@ class Engine:
         return saved
 
     async def _notify_rule_saved(self, session_id: str, saved: list[dict]) -> None:
-        """Surface auto-saved rules to the owner (reviewable) + emit a trace event. Delivers over
-        the same channel autoextract's _notify_memory_saved uses; no-ops for non-numeric
-        (dashboard) session ids."""
+        """Surface auto-saved rules to the owner (reviewable), two ways.
+
+        (1) A notification event on the reserved control pseudo-session "__control__" — NOT on the
+        affected session's own stream. This used to emit with the synthetic run_id "autodetect" on
+        the session's stream, but dashboard/app.js's processEvent registers ANY unseen run_id as a
+        new run, so an auto-detected rule added a phantom "autodete" row to the Runs list that
+        never receives a `final` and therefore never completes (the hazard _approval_emit's
+        docstring describes). __control__ is the seam for session-independent notifications like
+        this one; mirrors _emit_session_changed's create_task/_bg_tasks/RuntimeError->asyncio.run
+        shape plus a broad except, because this must never raise into its caller.
+
+        (2) An owner-facing push over the same channel autoextract's _notify_memory_saved uses
+        (scheduler.deliver -> Telegram); that one no-ops for non-numeric (dashboard) session ids,
+        where the Rules panel shows the rule instead."""
         try:
-            await self.emit("autodetect", session_id, 0, "rule_saved",
-                            {"rules": [{"id": r["id"], "text": r["text"]} for r in saved]})
+            import time as _t
+            ev = StepEvent(run_id="control", session_id="__control__", step=0,
+                           kind="rule_saved",
+                           data={"session_id": session_id,
+                                 "rules": [{"id": r["id"], "text": r["text"]} for r in saved]},
+                           ts=_t.time())
+            try:
+                t = asyncio.get_running_loop().create_task(self.events.publish(ev))
+                self._bg_tasks.add(t)
+                t.add_done_callback(self._bg_tasks.discard)
+            except RuntimeError:
+                asyncio.run(self.events.publish(ev))
         except Exception:
-            pass
+            log.debug("_notify_rule_saved control emit failed", exc_info=True)
         deliver = getattr(self.scheduler, "deliver", None)
         if not deliver:
             return
