@@ -529,10 +529,18 @@ class Engine:
         from engine.custom_commands import CustomCommandStore
         self.commands = CustomCommandStore(str(root / "custom_commands.yaml"))
         from engine.experimental.tool_creation import load_persisted_tools
+        # registry=self.registry: a reloaded tool must arrive composition-CAPABLE, exactly like one
+        # created live (CreateToolTool passes its registry). Without it, a tool that calls another
+        # tool worked in the session it was created in and silently stopped after the next restart.
+        # This is the FLOOR, not the whole story: run_task and _routine_registry build a fresh
+        # registry per run and rebind `t.registry` to it (that clone, not this one, is where created
+        # tools are registered), so sibling-to-sibling composition rides on that late binding.
+        # Binding here is what covers a created tool that calls a BUILT-IN, and what keeps the
+        # omission from silently returning if a future call site forgets to rebind.
         self._created_tools = load_persisted_tools(
             self._created_tools_dir, timeout=config.created_tool_timeout,
             extra_modules=self.deps.approved_modules(), secrets=self._tool_secrets(),
-            trust_store=self.trust,
+            trust_store=self.trust, registry=self.registry,
             sandbox_runtime=self.sandbox, sandbox_workspace=config.sandbox_workspace)
         # persistent memory (facts + trust; keyword recall, semantic when configured)
         from engine.memory.store import MemoryStore
