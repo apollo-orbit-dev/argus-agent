@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## 0.14.0
 
 ### Added
 - **Update Argus from the dashboard and from Telegram.** A new "Update Argus" card in Settings and an
@@ -28,6 +28,46 @@ All notable changes to this project are documented here.
   - `/update` previews, `/update confirm` installs, `/update revert confirm` goes back. The "✅ update
     complete" acknowledgement is delivered on the way back up, and warns if the booted version is not
     the expected one.
+- **Friction log.** The loop already knew when it gave up — an exact-repeat tool thrash, or a second
+  parse failure — and threw the signal away. Those are now appended to a log with the tool, the
+  attempt count and the error actually hit, readable with `argus friction`, grouped by frequency so
+  the top of the list is the next thing to fix. Records, never intervenes: the turn is identical with
+  the log enabled, disabled, or failing to write.
+- **`answered`, a second benchmark metric.** `solved` requires the declared tool chain AND a passing
+  judge, so a model that answers correctly without reaching for the tool scored as a failure.
+  `answered` is the judge verdict alone. The gap between them is the share of tasks a model got right
+  by its own route — near zero for a 3B, 14-16 points for a capable model.
+
+### Fixed
+- **`create_tool` no longer advertises `httpx` to sandboxed tools.** The tool description told every
+  model it could import `httpx`, while new tools default INTO the container sandbox, which has the
+  standard library and nothing else. Argus instructed the model to do the thing it then failed it
+  for, and the failure said "fix the code" when the code was fine. The description is now built for
+  the environment the tool actually lands in, and a missing module in a sandboxed run names the
+  module and both real escapes.
+- **Environment failures state the constraint and the escape.** Audited all 120 error strings a model
+  can read: 58 environment, 62 caller-input. Caller-input messages are unchanged — a bad table name
+  is self-evident. Eleven environment ones now say what to do instead: blocked sandbox egress, the
+  `schedule_task` time format, sandbox-down for `exec_python` and created tools, `CALL_TOOL`
+  composition, `ask_data` with no model, PDF rendering (missing *or* half-installed), and OCR.
+- **The Run button reflects the session you are looking at.** One global flag meant a turn in flight
+  on any session blocked sending to every session, though the backend has always supported
+  concurrent turns. The button, the status line, the Enter/Ctrl-Enter handlers and the clarify gate
+  all derive from the viewed session, and the run box clears at send so it cannot fire one session's
+  prompt at another.
+- **Sandbox status distinguishes "disabled" from "not started yet."** Toggling the sandbox on left
+  three indicators contradicting each other, because one condition collapsed two states. Enabled but
+  unconstructed now says so and asks for a restart, rendered as an action rather than an error.
+- **An auto-detected rule no longer invents a run.** `rule_saved` emitted a synthetic run id on the
+  session's own stream, and the dashboard treats any unseen run id as a new run — so it registered a
+  run that never completed and showed permanently as an error. Now routed through the `__control__`
+  channel.
+- **Telegram `/reset` clears the event trace**, matching the dashboard. The same user-facing action
+  did two different things depending on the surface.
+- **`create_tool` cap-2 rubrics no longer double-count tool use.** 35 of 56 benchmark rubrics named a
+  tool, so the judge graded tool use — which the chain predicate already measures — and flipped
+  between readings, scoring the identical answer 3 in one arm and 0 in another. Rubrics now assert
+  answer quality only; the tool requirements moved into `expect` where they belong.
 
 ## 0.13.0
 
