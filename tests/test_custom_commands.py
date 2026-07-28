@@ -109,16 +109,19 @@ async def test_alias_to_builtin_command_dispatches(tmp_path):
         def __init__(self, cmds):
             self._cmds = cmds
             self.reset_calls = []
+            self.new_session_calls = []
         def custom_command_expand(self, name):
             return self._cmds.get(name)
         def reset(self, session_id):
             self.reset_calls.append(session_id)
+        def new_session(self, session_id):
+            self.new_session_calls.append(session_id)
 
     class Cfg:
         telegram_bot_token = "123:abc"
         allowed_chat_ids = [1]
 
-    eng = FakeEngine({"fresh": "/new"})           # alias /fresh -> built-in /new (engine.reset)
+    eng = FakeEngine({"fresh": "/new"})           # alias /fresh -> built-in /new (engine.new_session)
     app = build_telegram_app(engine=eng, config=Cfg())
     catch_all = app.handlers[0][-1].callback      # on_custom_command is registered last
 
@@ -128,7 +131,8 @@ async def test_alias_to_builtin_command_dispatches(tmp_path):
     update = NS(effective_chat=NS(id=1),
                 effective_message=NS(text="/fresh", reply_text=reply_text, photo=None))
     await catch_all(update, NS(args=None))
-    assert eng.reset_calls == ["1"]               # the built-in actually ran (not sent to the model)
+    assert eng.new_session_calls == ["1"]         # the built-in actually ran (not sent to the model)
+    assert eng.reset_calls == []                  # and it's the wider clear, not the narrower one
     assert any("same session" in r for r in replies)
 
 

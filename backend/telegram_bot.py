@@ -884,7 +884,7 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
         chat_id = await _guard(update)
         if chat_id is None:
             return
-        engine.reset(str(chat_id))
+        engine.new_session(str(chat_id))
         await update.effective_message.reply_text(
             "↺ Conversation reset — I've cleared my working context. This is still the same "
             "session and the transcript is kept; /session shows its id.")

@@ -67,6 +67,8 @@ class _FakeEngine:
     def __init__(self, sessions=None):
         self._sessions = sessions if sessions is not None else []
         self.renamed = []
+        self.reset_calls = []
+        self.new_session_calls = []
 
     def list_sessions(self):
         return self._sessions
@@ -75,7 +77,10 @@ class _FakeEngine:
         self.renamed.append((session_id, name))
 
     def reset(self, session_id):
-        pass
+        self.reset_calls.append(session_id)
+
+    def new_session(self, session_id):
+        self.new_session_calls.append(session_id)
 
 
 def test_reset_advertised_new_hidden_same_callback():
@@ -206,6 +211,29 @@ async def test_on_new_reply_mentions_same_session_not_new_conversation():
     assert len(replies) == 1
     assert "same session" in replies[0]
     assert "New conversation" not in replies[0]
+
+
+async def test_on_new_calls_new_session_not_reset_for_both_aliases():
+    # argus-nyp: /reset must clear the same things the dashboard's reset does — the working
+    # set AND the event/trace buffers, i.e. engine.new_session, not the narrower engine.reset.
+    # Both the /reset command and its /new alias share the same callback; check both entries.
+    from types import SimpleNamespace as NS
+
+    for alias in ("reset", "new"):
+        eng = _FakeEngine()
+        app = build_telegram_app(engine=eng, config=_Cfg())
+        handlers = {c: h.callback for h in app.handlers[0] for c in (getattr(h, "commands", None) or [])}
+        on_new = handlers[alias]
+
+        replies = []
+
+        async def reply_text(text, **kw):
+            replies.append(text)
+        update = NS(effective_chat=NS(id=1), effective_message=NS(reply_text=reply_text))
+        await on_new(update, NS(args=[]))
+
+        assert eng.new_session_calls == ["1"], f"/{alias} should call engine.new_session(chat_id)"
+        assert eng.reset_calls == [], f"/{alias} must not call the narrower engine.reset"
 
 
 # --------------------------------------------------------------------------
