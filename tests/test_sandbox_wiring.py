@@ -67,6 +67,45 @@ def test_sandbox_status_when_disabled():
                                     "image": "argus-sandbox:local", "workspaces": []}
 
 
+# ---- "disabled" vs "enabled but never constructed" -------------------------------------------
+# The runtime is built ONLY at startup (see Engine.__init__). Flipping enable_sandbox on a running
+# instance updates config and .env but leaves self.sandbox None — a state that is emphatically not
+# "disabled", and reporting it as such contradicts both the toggle and GET /config.
+
+def test_sandbox_status_enabled_but_not_constructed_asks_for_a_restart():
+    eng = _engine(enable_sandbox=False)     # nothing constructed at boot…
+    eng._config.enable_sandbox = True       # …then the operator flips the switch
+    assert eng.sandbox is None
+    st = eng.sandbox_status()
+    assert st["enabled"] is True
+    assert st["available"] is False
+    assert st["needs_restart"] is True
+    assert "restart" in st["reason"].lower()
+    assert "disabled" not in st["reason"].lower()
+
+
+def test_disabled_status_is_not_a_restart_prompt():
+    """Guards the regression the split could cause: the OFF branch must keep its exact wording (the
+    UI and other tests read it) and must never carry needs_restart."""
+    st = _engine(enable_sandbox=False).sandbox_status()
+    assert st["reason"] == "sandbox is disabled"
+    assert st["enabled"] is False
+    assert not st.get("needs_restart")
+
+
+def test_runtime_unavailable_status_is_not_a_restart_prompt():
+    """A constructed-but-broken runtime is a failure, not a pending action: restarting won't fix a
+    missing podman binary, so needs_restart must stay falsy and the reason must come from the
+    runtime, unchanged."""
+    eng = _engine(enable_sandbox=True, sandbox_runtime=_FAKE_BINARY)
+    st = eng.sandbox_status()
+    assert st["enabled"] is True
+    assert st["available"] is False
+    assert not st.get("needs_restart")
+    assert st["reason"] == eng.sandbox.status()["reason"]
+    assert "restart" not in st["reason"].lower()
+
+
 async def test_exec_python_runs_through_the_runtime_when_sandboxed():
     from engine.tools.code_interpreter import CodeInterpreter
     fake = FakeRuntime(result=ExecResult(0, "42\n", ""))

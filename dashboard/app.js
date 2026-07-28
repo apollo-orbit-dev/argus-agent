@@ -1354,13 +1354,19 @@
     if (!el) return;
     try {
       var s = await (await fetch('/sandbox/status')).json();
-      var cls = s.available ? 'sb-ok' : 'sb-bad';
+      // needs_restart is an ACTION pending, not a failure — the sandbox is on in config and the
+      // runtime simply starts at boot. Style it amber, never as an error, and branch on the flag
+      // itself rather than on the reason text.
+      var cls = s.available ? 'sb-ok' : (s.needs_restart ? 'sb-act' : 'sb-bad');
       var rows = [
         '<span>runtime: <span class="' + cls + '">' + esc(s.runtime || '?') +
           (s.version ? ' ' + esc(s.version) : '') + '</span></span>',
         '<span>status: <span class="' + cls + '">' +
           (s.available ? 'ready' : esc(s.reason || 'unavailable')) + '</span></span>'
       ];
+      if (s.needs_restart)
+        rows.push('<span class="sb-act">action: restart Argus — the container runtime is only ' +
+          'started at boot, so the switch you just flipped takes effect then</span>');
       if (s.image) rows.push('<span>image: ' + esc(s.image) +
         (s.image_present === false ? ' <span class="sb-bad">(not built)</span>' : '') + '</span>');
       if (s.workspaces && s.workspaces.length)

@@ -2284,8 +2284,17 @@ class Engine:
             return {"enabled": False, "available": False, "supported": False,
                     "reason": SANDBOX_UNSUPPORTED_REASON,
                     "runtime": c.sandbox_runtime, "image": c.sandbox_image, "workspaces": []}
-        if not c.enable_sandbox or self.sandbox is None:
+        if not c.enable_sandbox:
             return {"enabled": False, "available": False, "reason": "sandbox is disabled",
+                    "runtime": c.sandbox_runtime, "image": c.sandbox_image, "workspaces": []}
+        # Enabled in config but no runtime object: the operator flipped the switch on a RUNNING
+        # instance. The runtime is only ever constructed at startup (see __init__), so this is not
+        # "disabled" — saying so contradicts the toggle and GET /config, which both read true. It's
+        # a pending action, flagged with needs_restart so the dashboard can style it as one without
+        # parsing the reason. needs_restart is absent on every other branch.
+        if self.sandbox is None:
+            return {"enabled": True, "available": False, "needs_restart": True,
+                    "reason": "enabled in config — restart Argus to start the sandbox",
                     "runtime": c.sandbox_runtime, "image": c.sandbox_image, "workspaces": []}
         return {"enabled": True, **self.sandbox.status()}
 
