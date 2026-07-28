@@ -999,6 +999,13 @@
 
     // The turn belongs to THIS session for its whole life, even if the user switches views mid-flight.
     var sid = SESSION;
+    // Clear the box NOW, not after the turn. The box is shared across sessions, so text left in it
+    // during a 30s turn is text the user can send to a DIFFERENT session by switching and pressing
+    // Enter — newly reachable, because until this change Run was disabled everywhere while any turn
+    // ran. Nothing is lost: the optimistic echo already shows the text, and a failed send puts it
+    // back below.
+    runnerInput.value = '';
+    autosizeRunnerInput();
     runningSessions.add(sid);
     // any clarify-option buttons from a prior turn are now stale — retire them so a scrolled-back
     // old choice can't be sent as this turn's answer.
@@ -1014,11 +1021,6 @@
       await res.json();
       var secs = ((performance.now() - started) / 1000).toFixed(1);
       setRunStatus(sid, 'completed in ' + secs + 's', '');
-      // Don't wipe the box if the user has switched away and is drafting for another session.
-      if (SESSION === sid){
-        runnerInput.value = '';
-        autosizeRunnerInput();
-      }
       loadUsage();
       // Not every 200-OK /run path emits an SSE 'final' event (model-call failure, parse-failure
       // give-up, max-steps exhausted, or a paused approval that times out all return normally
@@ -1034,6 +1036,12 @@
       // The POST may have failed before the server ever recorded the message — don't imply it was
       // delivered, but don't silently erase what the user typed either.
       if (optimisticNode) markOptimisticFailed(optimisticNode);
+      // The send failed, so give the text back — but only into an EMPTY box on the session it was
+      // typed for, so it can never stomp a draft the user has since started elsewhere.
+      if (SESSION === sid && !runnerInput.value){
+        runnerInput.value = text;
+        autosizeRunnerInput();
+      }
     } finally {
       // Unconditional, exactly as the old global clear was: completion, error and abort all release
       // this session, so a failed turn can never strand it as permanently busy.
