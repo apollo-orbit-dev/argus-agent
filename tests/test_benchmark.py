@@ -945,3 +945,76 @@ def test_canary_evidence_distinguishes_regression_from_never_working():
     assert ev["canary_ever_passed"] is True and ev["worst_canary_streak"] == 2
     _, ev = V.canary_verdict([{"passed": False}, {"passed": False}])
     assert ev["canary_ever_passed"] is False
+
+
+# ------------------------------- argus-2gd: incremental persistence -------------------------------
+
+def test_result_path_is_keyed_on_started_not_date(tmp_path, monkeypatch):
+    """A checkpoint and the final write must land on the SAME file. `date` moves with every
+    checkpoint, so keying on it would scatter one run across 56 files."""
+    import engine.eval.benchmark as bm
+    monkeypatch.setattr(bm, "RESULTS", tmp_path)
+    early = {"model": "m", "battery_version": "cap-2",
+             "started": "2026-07-30T10:00:00+00:00", "date": "2026-07-30T10:05:00+00:00"}
+    late = {**early, "date": "2026-07-30T11:30:00+00:00"}
+    assert bm._result_path(early) == bm._result_path(late)
+
+
+def test_result_path_falls_back_to_date_for_legacy():
+    """Legacy results have no `started` — `date` is the only timestamp they have."""
+    import engine.eval.benchmark as bm
+    p = bm._result_path({"model": "m", "battery_version": "cap-1", "date": "2026-01-01T00:00:00+00:00"})
+    assert "20260101T000000" in p.name
+
+
+def test_checkpoint_write_does_not_touch_the_index(tmp_path, monkeypatch):
+    """One index entry per RUN, appended by the final write — not 56 entries for one file."""
+    import engine.eval.benchmark as bm, json as _j
+    monkeypatch.setattr(bm, "RESULTS", tmp_path)
+    r = {"model": "m", "params": 1, "mode": "native", "battery_version": "cap-2",
+         "started": "2026-07-30T10:00:00+00:00", "date": "2026-07-30T10:00:00+00:00"}
+    for _ in range(3):
+        bm._write_result(r, index=False)
+    assert not (tmp_path / "index.json").exists()
+    bm._write_result(r, index=True)
+    assert len(_j.loads((tmp_path / "index.json").read_text())) == 1
+
+
+def test_partial_result_is_excluded_from_the_size_curve():
+    """A partial covers only the first N tasks, and the battery is ordered T1..T4 — so a partial is
+    biased EASY. Plotting it as a size-curve point would read as capability."""
+    full = {"battery_version": "cap-2", "params": 7, "complete": True,
+            "per_tier": {"1": {"chain_pass": 0.9, "judge_mean": 3.0}}}
+    part = {"battery_version": "cap-2", "params": 8, "complete": False,
+            "per_tier": {"1": {"chain_pass": 1.0, "judge_mean": 3.0}}}
+    s = build_series([full, part], "cap-2")
+    assert [p[0] for p in s["1"]] == [7]         # the partial is absent
+
+
+def test_legacy_result_without_complete_key_still_charts():
+    """Absence of `complete` means a result that predates the field, not an incomplete one."""
+    legacy = {"battery_version": "cap-2", "params": 5,
+              "per_tier": {"1": {"chain_pass": 0.5, "judge_mean": 2.0}}}
+    assert [p[0] for p in build_series([legacy], "cap-2")["1"]] == [5]
+
+
+def test_report_marks_a_partial_row(tmp_path, monkeypatch):
+    import engine.eval.benchmark as bm, json as _j
+    monkeypatch.setattr(bm, "RESULTS", tmp_path)
+    monkeypatch.setattr(bm, "_battery_for", lambda bv: None)
+    r = {"model": "crashed", "params": 9, "mode": "native", "scaffold": "on", "k": 3,
+         "battery_version": "cap-2", "complete": False, "tasks_run": 48, "tasks_planned": 56,
+         "started": "2026-07-30T10:00:00+00:00", "date": "2026-07-30T11:00:00+00:00",
+         "tasks": [], "per_tier": {"1": {"chain_pass": 0.5, "judge_mean": 2.0, "solved": 0.5,
+                                          "answered": 0.5}},
+         "overall": {"chain_pass": 0.5, "judge_mean": 2.0, "solved": 0.5, "answered": 0.5}}
+    (tmp_path / "crashed-cap-2-x.json").write_text(_j.dumps(r))
+    md, ok = bm.render_report("cap-2")
+    assert ok and "**PARTIAL 48/56**" in md
+    assert "biased EASY" in md          # the footnote explains why it is not comparable
+
+
+def test_aborted_run_is_marked_incomplete():
+    """A canary abort stops early BY DESIGN — it is not a complete arm either."""
+    from engine.eval import validity as V
+    assert V.canary_verdict([{"passed": False}, {"passed": False}])[0] is True

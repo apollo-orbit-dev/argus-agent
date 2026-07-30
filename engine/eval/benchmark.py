@@ -156,7 +156,11 @@ def _backfill_solved(result: dict) -> dict:
 def build_series(results: list, battery_version: str, metric: str = "chain_pass") -> dict:
     """Group committed result dicts (of one battery_version) into per-tier series sorted by params:
     {tier: [(params, <metric>, judge_mean), ...]} where <metric> is the selected series (default chain_pass)."""
-    rows = [r for r in results if r.get("battery_version") == battery_version]
+    # A partial (crashed or canary-aborted) arm covers only the tasks it reached — and because the
+    # battery is ordered T1..T4, a partial is biased EASY. Plotting it as a size-curve point would
+    # read as capability. Legacy results have no `complete` key and are complete by definition.
+    rows = [r for r in results
+            if r.get("battery_version") == battery_version and r.get("complete", True)]
     # One point per model size on the curve: when the same params was run more than once (a re-run
     # at a higher token budget, or the same model in native vs manual mode), plot the best-demonstrated
     # run — highest max_tokens first, then highest overall chain-pass. The report TABLE still lists
@@ -319,7 +323,7 @@ async def _run_canary(cfg, timeout: float, idx: int) -> bool:
 
 async def run_model(model_spec: str, params: int, mode: str | None, k: int, judge_spec: str,
                     battery_path: Path, timeout: float, baseline: bool = False,
-                    disclosure: str | None = None) -> dict:
+                    disclosure: str | None = None, checkpoint: bool = True) -> dict:
     from engine.eval.judge_runner import make_judge
     battery = json.loads(battery_path.read_text())
     cfg = resolve_config(model_spec, mode, baseline, disclosure)
@@ -333,6 +337,35 @@ async def run_model(model_spec: str, params: int, mode: str | None, k: int, judg
     streak = 0
     aborted_after = None
     tasks = battery["tasks"]
+    name = model_spec.partition("=")[0]
+    started = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    def _snapshot(complete: bool) -> dict:
+        agg = aggregate(results)
+        r = {"model": name, "params": params, "mode": mode or cfg.tool_calling_mode,
+             "scaffold": "off" if baseline else "on",   # Argus scaffolding on (full config) vs off (baseline arm)
+             "disclosure": cfg.tool_disclosure_mode,    # progressive tool disclosure arm (its own axis)
+             "max_tokens": cfg.model_max_tokens,   # completion cap this run used (reasoning models need headroom)
+             "battery_version": battery["battery_version"], "k": k,
+             "started": started,
+             "date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+             "complete": complete,
+             "canaries": canaries,
+             "tasks_planned": len(tasks), "tasks_run": len(results),
+             "per_tier": agg["per_tier"], "overall": agg["overall"], "tasks": results}
+        r.update(validity.assess(r, battery))
+        return r
+
+    def _checkpoint():
+        """Best-effort. A checkpoint failure must NEVER kill a run that is otherwise fine —
+        losing the safety net is bad, losing the run to the safety net is worse."""
+        if not checkpoint:
+            return
+        try:
+            _write_result(_snapshot(False), index=False)
+        except Exception as e:              # noqa: BLE001 - see docstring
+            print(f"  (checkpoint failed, run continues: {type(e).__name__}: {e})", flush=True)
+
     for idx, task in enumerate(tasks):
         # Probe before the first task, then every CANARY_EVERY tasks. Two consecutive failures
         # ABORT: spending another two hours to produce data that will be thrown away is the
@@ -349,35 +382,39 @@ async def run_model(model_spec: str, params: int, mode: str | None, k: int, judg
                       f"compromised, not the model. {len(tasks) - idx} tasks not run.", flush=True)
                 break
         results.append(await _run_task(cfg, judge_fn, task, k, timeout, fixtures_dir))
+        # Persist after EVERY task. A host reboot at task 48/56 previously discarded 48 tasks of
+        # completed, already-judged work (and ~$0.63 of paid inference). The partial is marked
+        # complete:false so nothing downstream can mistake it for a finished arm.
+        _checkpoint()
     if aborted_after is None:
         ok = await _run_canary(cfg, timeout, len(canaries))
         canaries.append({"before_task_index": len(tasks), "passed": ok})
         print(f"  canary #{len(canaries)} after last task: {'pass' if ok else 'FAIL'}", flush=True)
-    agg = aggregate(results)
-    name = model_spec.partition("=")[0]
-    result = {"model": name, "params": params, "mode": mode or cfg.tool_calling_mode,
-              "scaffold": "off" if baseline else "on",   # Argus scaffolding on (full config) vs off (baseline arm)
-              "disclosure": cfg.tool_disclosure_mode,    # progressive tool disclosure arm (its own axis)
-              "max_tokens": cfg.model_max_tokens,   # completion cap this run used (reasoning models need headroom)
-              "battery_version": battery["battery_version"], "k": k,
-              "date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-              "canaries": canaries,
-              "tasks_planned": len(tasks), "tasks_run": len(results),
-              "per_tier": agg["per_tier"], "overall": agg["overall"], "tasks": results}
-    result.update(validity.assess(result, battery))
-    return result
+    # An aborted arm stopped early BY DESIGN (canary), so it is not "complete" either — the
+    # remaining tasks were never run and its aggregate covers only what did.
+    return _snapshot(complete=aborted_after is None)
 
 
-def _write_result(result: dict) -> Path:
+def _result_path(result: dict) -> Path:
+    """Keyed on `started`, NOT `date`. A checkpoint and the final write must land on the same
+    file, and `date` moves with every checkpoint — keying on it would scatter one run across 56
+    files. Legacy results have no `started` and fall back to `date`, which for them is the only
+    timestamp there is."""
+    stamp = (result.get("started") or result["date"]).replace(":", "").replace("-", "")[:15]
+    return RESULTS / f"{result['model']}-{result['battery_version']}-{stamp}.json"
+
+
+def _write_result(result: dict, index: bool = True) -> Path:
+    """Write (or rewrite) a result. `index=False` for checkpoints: the index gets ONE entry per
+    run, appended by the final write, not 56 entries for the same file."""
     RESULTS.mkdir(parents=True, exist_ok=True)
-    stamp = result["date"].replace(":", "").replace("-", "")[:15]   # to the second (avoid overwrites)
-    out = RESULTS / f"{result['model']}-{result['battery_version']}-{stamp}.json"
+    out = _result_path(result)
     out.write_text(json.dumps(result, indent=2, default=str))
-    # update the index
-    idx_path = RESULTS / "index.json"
-    idx = json.loads(idx_path.read_text()) if idx_path.exists() else []
-    idx.append({k: result[k] for k in ("model", "params", "mode", "battery_version", "date")} | {"file": out.name})
-    idx_path.write_text(json.dumps(idx, indent=2))
+    if index:
+        idx_path = RESULTS / "index.json"
+        idx = json.loads(idx_path.read_text()) if idx_path.exists() else []
+        idx.append({k: result[k] for k in ("model", "params", "mode", "battery_version", "date")} | {"file": out.name})
+        idx_path.write_text(json.dumps(idx, indent=2))
     return out
 
 
@@ -502,9 +539,29 @@ def _backfill_validity(result: dict) -> dict:
     return result
 
 
+def _is_result(d) -> bool:
+    """A result file, as opposed to anything else that happens to be JSON in this directory.
+    The glob used to assume every *.json but index.json was a result, so one stray file crashed
+    report generation with a bare KeyError — a bad failure mode for a directory a human drops
+    files into."""
+    return isinstance(d, dict) and "model" in d and "battery_version" in d
+
+
 def _load_results() -> list:
-    return [_backfill_validity(_backfill_solved(json.loads(p.read_text())))
-            for p in sorted(RESULTS.glob("*.json")) if p.name != "index.json"]
+    out = []
+    for p in sorted(RESULTS.glob("*.json")):
+        if p.name == "index.json":
+            continue
+        try:
+            d = json.loads(p.read_text())
+        except Exception:               # noqa: BLE001 - a corrupt file must not sink the report
+            print(f"note: skipping unreadable {p.name}", file=sys.stderr)
+            continue
+        if not _is_result(d):
+            print(f"note: skipping non-result {p.name}", file=sys.stderr)
+            continue
+        out.append(_backfill_validity(_backfill_solved(d)))
+    return out
 
 
 def render_report(battery_version: str) -> tuple[str, bool]:
@@ -539,6 +596,10 @@ def render_report(battery_version: str) -> tuple[str, bool]:
         # A non-ok row is NOT a measurement of the model. Bold it so it cannot be skimmed as one.
         v = r.get("validity") or "—"
         valid_cell = v if v == "ok" else f"**{v.upper()}**"
+        # A partial arm reached only the first N tasks. The battery is ordered T1..T4, so a partial
+        # is biased EASY — its `solved` is not comparable to a full arm's at all.
+        if not r.get("complete", True):
+            valid_cell = f"**PARTIAL {r.get('tasks_run', '?')}/{r.get('tasks_planned', '?')}**"
         comp = r.get("compliance") or {}
         gap = comp.get("compliance_gap")
         gap_cell = _pct(gap) + ("&nbsp;⚠" if comp.get("high_compliance_gap") else "")
@@ -566,6 +627,10 @@ def render_report(battery_version: str) -> tuple[str, bool]:
               "*flat*). `ABORTED` = two consecutive canary failures stopped the run early; the "
               "partial numbers are kept only to preserve the onset for diagnosis. **A non-ok row "
               "must never be read as a measurement of the model.**",
+              "`PARTIAL n/m` = the run wrote n of m tasks and stopped (a crash, or a canary abort). "
+              "The result is checkpointed after every task so completed work survives, but the "
+              "battery is ordered T1..T4, which makes a partial arm biased EASY — its rates are "
+              "NOT comparable to a full arm's, and it is excluded from the size curve entirely.",
               "`gap` = `answered` - `solved`: the share of tasks answered correctly by a path the "
               "rubric did not prescribe. ⚠ marks >= 15%. This is NOT a failure — the run is real "
               "and so is the model. It is a warning that `solved` is measuring path-COMPLIANCE "
