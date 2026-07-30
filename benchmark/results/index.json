@@ -272,38 +272,6 @@
     "file": "gemma-4-E2B-it-cap-2-20260725T034649.json"
   },
   {
-    "model": "Qwen3.6-27B-FP8",
-    "params": 27,
-    "mode": "native",
-    "battery_version": "cap-2",
-    "date": "2026-07-25T16:21:28+00:00",
-    "file": "Qwen3.6-27B-FP8-cap-2-20260725T162128.json"
-  },
-  {
-    "model": "Qwen3.6-27B-FP8",
-    "params": 27,
-    "mode": "manual",
-    "battery_version": "cap-2",
-    "date": "2026-07-25T19:48:52+00:00",
-    "file": "Qwen3.6-27B-FP8-cap-2-20260725T194852.json"
-  },
-  {
-    "model": "Qwen3.6-27B-FP8",
-    "params": 27,
-    "mode": "native",
-    "battery_version": "cap-2",
-    "date": "2026-07-25T21:52:11+00:00",
-    "file": "Qwen3.6-27B-FP8-cap-2-20260725T215211.json"
-  },
-  {
-    "model": "Qwen3.6-27B-FP8",
-    "params": 27,
-    "mode": "manual",
-    "battery_version": "cap-2",
-    "date": "2026-07-26T00:27:28+00:00",
-    "file": "Qwen3.6-27B-FP8-cap-2-20260726T002728.json"
-  },
-  {
     "model": "Agents-A1-FP8",
     "params": 35,
     "mode": "native",
@@ -366,5 +334,37 @@
     "battery_version": "cap-2",
     "date": "2026-07-29T17:17:26+00:00",
     "file": "Qwen3.6-35B-A3B-FP8-cap-2-20260729T171726.json"
+  },
+  {
+    "model": "Qwen3.6-27B-FP8",
+    "params": 27,
+    "mode": "native",
+    "battery_version": "cap-2",
+    "date": "2026-07-29T23:06:22+00:00",
+    "file": "Qwen3.6-27B-FP8-cap-2-20260729T230622.json"
+  },
+  {
+    "model": "Qwen3.6-27B-FP8",
+    "params": 27,
+    "mode": "manual",
+    "battery_version": "cap-2",
+    "date": "2026-07-29T23:37:08+00:00",
+    "file": "Qwen3.6-27B-FP8-cap-2-20260729T233708.json"
+  },
+  {
+    "model": "Qwen3.6-27B-FP8",
+    "params": 27,
+    "mode": "native",
+    "battery_version": "cap-2",
+    "date": "2026-07-29T23:43:55+00:00",
+    "file": "Qwen3.6-27B-FP8-cap-2-20260729T234355.json"
+  },
+  {
+    "model": "Qwen3.6-27B-FP8",
+    "params": 27,
+    "mode": "manual",
+    "battery_version": "cap-2",
+    "date": "2026-07-30T00:37:44+00:00",
+    "file": "Qwen3.6-27B-FP8-cap-2-20260730T003744.json"
   }
 ]

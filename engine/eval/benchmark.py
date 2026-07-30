@@ -487,24 +487,9 @@ def render_report(battery_version: str) -> tuple[str, bool]:
               "tool-call thrash); diagnostic only, not part of `solved`. `—` = predates the metric "
               "(no observer data was ever recorded for that result). `n/a` = observer disabled "
               "(baseline arm — `--baseline` turns `enable_observer` off, so it can't fire).",
-              # One cell still measures a serving bug rather than a model. The 35B's cells were
-              # re-generated with speculative decoding disabled and are now valid; drop this note
-              # entirely once the 27B has had the same treatment (see argus-1ib).
-              "**KNOWN-INVALID CELL — do not read this as model capability.** "
-              "`Qwen3.6-27B-FP8 native/on` (95 of 168 runs) emitted token-corrupted tool calls that "
-              "no parser could recover, so the call was dropped and the run scored as a failure. "
-              "ROOT CAUSE, identified by experiment: vLLM speculative decoding "
-              "(`--speculative-config {\"method\":\"mtp\",...}`). Removing that one flag and changing "
-              "nothing else took the equivalent Qwen3.6-35B cell from 112/168 broken to 0/168, and "
-              "its `solved` from 0.250 to 0.571 — those 35B rows are re-generated and valid. It was "
-              "NOT the chat template and NOT the tool-call parser: swapping `qwen3_coder` for "
-              "`qwen3_xml` did not help, because the payloads were corrupted rather than merely "
-              "mis-formatted (one captured sample was not valid JSON at all; another lost its "
-              "function name to a duplicate key). Flat latency across the onset is the tell — a "
-              "resource problem slows down, speculative decoding does not. `manual` cells are "
-              "unaffected throughout, since manual mode never relies on the provider extracting a "
-              "structured call. This cell stays invalid until RE-GENERATED (not re-judged) with "
-              "speculative decoding off."]
+              # Historical note, kept deliberately: this cost three days and a dozen wrong
+              # hypotheses, and the same flag will be enabled again by someone eventually.
+              "**A NOTE ON SERVING CONFIGURATION.** Two cells in this table were once badly wrong — `Qwen3.6-35B-A3B native/off` at 112/168 runs producing no usable tool call, and `Qwen3.6-27B native/on` at 95/168 — and both are now re-generated and valid. The cause was vLLM **speculative decoding** (`--speculative-config {\"method\":\"mtp\",...}`): draft tokens accepted that should not have been, corrupting output at unchanged latency. Removing that one flag took the 35B cell from 112/168 broken to 0/168 and its `solved` from 0.250 to 0.571, and the 27B cell from 95/168 to 9/168 and 0.357 to 0.625. It was NOT the chat template and NOT the tool-call parser — the payloads were token-corrupted, not mis-formatted, so no parser could recover them. Flat latency across the onset is the diagnostic tell: a resource problem slows down; speculative decoding does not. Manual-mode answers were degraded too, just less visibly. If a future row looks inexplicably bad in native mode, check the serving flags before anything else."]
     return "\n".join(lines) + "\n", True
 
 
