@@ -366,5 +366,37 @@
     "battery_version": "cap-2",
     "date": "2026-07-30T00:37:44+00:00",
     "file": "Qwen3.6-27B-FP8-cap-2-20260730T003744.json"
+  },
+  {
+    "model": "deepseek-v4-flash",
+    "params": 284,
+    "mode": "native",
+    "battery_version": "cap-2",
+    "date": "2026-07-30T16:23:32+00:00",
+    "file": "deepseek-v4-flash-cap-2-20260730T150835.json"
+  },
+  {
+    "model": "deepseek-v4-flash",
+    "params": 284,
+    "mode": "manual",
+    "battery_version": "cap-2",
+    "date": "2026-07-30T17:33:08+00:00",
+    "file": "deepseek-v4-flash-cap-2-20260730T164323.json"
+  },
+  {
+    "model": "deepseek-v4-flash",
+    "params": 284,
+    "mode": "native",
+    "battery_version": "cap-2",
+    "date": "2026-07-30T17:33:14+00:00",
+    "file": "deepseek-v4-flash-cap-2-20260730T164303.json"
+  },
+  {
+    "model": "deepseek-v4-flash",
+    "params": 284,
+    "mode": "manual",
+    "battery_version": "cap-2",
+    "date": "2026-07-30T17:58:20+00:00",
+    "file": "deepseek-v4-flash-cap-2-20260730T164243.json"
   }
 ]
