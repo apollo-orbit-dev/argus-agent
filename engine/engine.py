@@ -753,6 +753,39 @@ class Engine:
                 log.warning("scheduled routine '%s' telegram delivery failed: %s", name, e)
         return res.output
 
+    async def drain_background(self, timeout: float = 30.0) -> None:
+        """Wait for this engine's fire-and-forget background work to finish. MUST be awaited by any
+        caller that is about to tear down the engine's data_dir.
+
+        run_task's tail dispatches memory auto-extraction, rule auto-detection and session
+        auto-titling as detached asyncio tasks (held in self._bg_tasks so they aren't GC'd) — they
+        deliberately outlive the turn so they never add reply latency. That is fine for a
+        long-lived process, but a caller with a per-run temp data_dir (engine.eval.benchmark) would
+        otherwise remove the directory out from under them: the writes then fail ("attempt to write
+        a readonly database", "No such file or directory: .../rules.json.tmp") and, worse, the
+        features are never actually exercised.
+
+        Drains in a LOOP because a background task can spawn more background work (autoextract ->
+        _notify_memory_saved -> events.publish). Past the budget, stragglers are cancelled and
+        awaited, so this returns only when nothing of ours can still touch the data_dir. Never
+        raises on a task's own failure — a background exception is that task's business."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(0.0, timeout)
+        while True:
+            pending = {t for t in self._bg_tasks if not t.done()}
+            if not pending:
+                break
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            await asyncio.wait(pending, timeout=remaining)
+        stragglers = {t for t in self._bg_tasks if not t.done()}
+        for t in stragglers:
+            t.cancel()
+        if stragglers:
+            log.debug("drain_background: cancelled %d task(s) after %.1fs", len(stragglers), timeout)
+            await asyncio.gather(*stragglers, return_exceptions=True)
+
     def _emit_routine_result(self, payload: dict) -> None:
         """Publish a routine's whole-run outcome onto the event stream so the reliability collector
         (and any future consumer) sees it uniformly with tool/loop events. Called by the routine

@@ -1018,3 +1018,112 @@ def test_aborted_run_is_marked_incomplete():
     """A canary abort stops early BY DESIGN — it is not a complete arm either."""
     from engine.eval import validity as V
     assert V.canary_verdict([{"passed": False}, {"passed": False}])[0] is True
+# ------- background work must FINISH before the per-run temp data_dir is torn down (argus-7ob) -------
+
+
+async def test_drain_background_awaits_in_flight_tasks_and_their_children():
+    """Engine.drain_background waits for detached background work — including work a background
+    task spawns itself (autoextract -> _notify_memory_saved -> events.publish), which a single
+    asyncio.wait() over the initial set would miss."""
+    import asyncio
+
+    from engine.engine import Engine
+
+    class _Fake:
+        def __init__(self):
+            self._bg_tasks = set()
+            self.done = []
+
+        def _spawn(self, coro):
+            t = asyncio.create_task(coro)
+            self._bg_tasks.add(t)
+            t.add_done_callback(self._bg_tasks.discard)
+
+        async def _child(self):
+            await asyncio.sleep(0.02)
+            self.done.append("child")
+
+        async def _parent(self):
+            await asyncio.sleep(0.02)
+            self.done.append("parent")
+            self._spawn(self._child())          # more background work, spawned mid-drain
+
+    f = _Fake()
+    f._spawn(f._parent())
+    await Engine.drain_background(f, timeout=5.0)
+    assert f.done == ["parent", "child"]        # both ran to completion, not just the first
+    assert not [t for t in f._bg_tasks if not t.done()]
+
+
+async def test_drain_background_cancels_stragglers_past_the_budget():
+    """A wedged background task must not stall a sweep forever: past the budget it is cancelled AND
+    awaited, so once drain returns nothing of ours can still touch the data_dir."""
+    import asyncio
+
+    from engine.engine import Engine
+
+    class _Fake:
+        def __init__(self):
+            self._bg_tasks = set()
+            self.wrote = False
+
+        async def _wedged(self):
+            await asyncio.sleep(30)
+            self.wrote = True
+
+    f = _Fake()
+    t = asyncio.create_task(f._wedged())
+    f._bg_tasks.add(t)
+    t.add_done_callback(f._bg_tasks.discard)
+    await Engine.drain_background(f, timeout=0.05)
+    assert t.done() and t.cancelled()
+    assert f.wrote is False
+
+
+async def test_run_task_lets_background_work_finish_before_removing_the_data_dir(monkeypatch):
+    """argus-7ob: _run_task built an Engine on a per-run temp data_dir and rmtree'd it in `finally`
+    while memory auto-extraction / rule auto-detection were still in flight — so those writes blew
+    up ("attempt to write a readonly database", missing rules.json.tmp) and, worse, the features
+    were never actually exercised by any scaffold-on benchmark arm. Teardown must drain first."""
+    import asyncio
+    from pathlib import Path
+
+    from engine.engine import Engine
+    from engine.eval import benchmark as B
+
+    seen = {}
+
+    class _StubEngine:
+        drain_background = Engine.drain_background     # the real drain, under test
+
+        def __init__(self, cfg, data_dir):
+            self._data_dir = data_dir
+            self._bg_tasks = set()
+
+        async def _late_write(self):
+            # stands in for autoextract/autodetect_rule: a background write into data_dir that
+            # lands AFTER run_task has already returned its answer.
+            await asyncio.sleep(0.05)
+            p = Path(self._data_dir) / "rules.json"
+            try:
+                p.write_text("[]")
+                seen["wrote"] = p.exists()
+            except Exception as e:      # noqa: BLE001 - recorded, not raised: the dir may be gone
+                seen["error"] = f"{type(e).__name__}: {e}"
+
+    async def _fake_capture(engine, session, prompt, timeout=120.0):
+        # mirrors run_task's tail: dispatch detached background work, then return the answer
+        t = asyncio.create_task(engine._late_write())
+        engine._bg_tasks.add(t)
+        t.add_done_callback(engine._bg_tasks.discard)
+        return {"tools": [], "create_table_args": [], "observer": [], "final": "ok", "error": None}
+
+    monkeypatch.setattr("engine.engine.Engine", _StubEngine)
+    monkeypatch.setattr("engine.eval.capture.run_and_capture", _fake_capture)
+
+    r = await B._run_task(cfg=None, judge_fn=None, task={"id": "bg", "tier": 1, "prompt": "hi"},
+                          k=1, timeout=1)
+
+    assert r["skipped"] is False and len(r["runs"]) == 1 and r["runs"][0]["error"] is None
+    assert "error" not in seen, f"background work raced teardown: {seen.get('error')}"
+    assert seen.get("wrote") is True, "background work never completed before teardown"

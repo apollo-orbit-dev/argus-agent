@@ -31,6 +31,9 @@ RESULTS = BENCH / "results"                 # shared across batteries — filena
 PASS_FRACTION = 0.6
 JUDGE_SOLVED_MIN = 2          # a run is "solved" iff it chained correctly AND judge_score >= this
 ABORT_ISSUES = ("stuck_repeating",)   # observer issues that END the turn (v1: exact-repeat only)
+BG_DRAIN_SECONDS = 30.0       # per-run budget for the engine's background work (memory auto-extraction,
+                              # rule auto-detection, auto-titling) to FINISH before its temp data_dir is
+                              # removed. Bounded: a wedged aux call must not stall a whole sweep.
 FROZEN_BATTERIES = ("cap-1",)         # published + closed: `rejudge` refuses to touch these
 
 # ------------------------------- pure helpers (unit-tested) -------------------------------
@@ -264,6 +267,7 @@ async def _run_task(cfg, judge_fn, task: dict, k: int, timeout: float, fixtures_
     runs = []
     for i in range(k):
         tmp = tempfile.mkdtemp(prefix="bench-")
+        engine = None
         try:
             engine = Engine(cfg, data_dir=tmp)
             for src in ([task["source"]] if isinstance(task.get("source"), str) else task.get("source") or []):
@@ -297,6 +301,17 @@ async def _run_task(cfg, judge_fn, task: dict, k: int, timeout: float, fixtures_
                 cell["chain_correct"] = False
             runs.append(cell)
         finally:
+            # run_task returns as soon as the ANSWER is ready; memory auto-extraction and rule
+            # auto-detection keep running as detached tasks. Removing tmp now would race them —
+            # which is not merely noisy (readonly-database / missing rules.json.tmp tracebacks in
+            # the run log): it means those features are never exercised by any scaffold-on arm of
+            # the benchmark, so whatever capability they contribute goes unmeasured. Let them
+            # finish first, on a bounded budget.
+            if engine is not None:
+                try:
+                    await engine.drain_background(timeout=BG_DRAIN_SECONDS)
+                except Exception:       # noqa: BLE001 - teardown must still remove the temp dir
+                    pass
             shutil.rmtree(tmp, ignore_errors=True)
     v = task_verdict(runs, k)
     return {"id": task["id"], "tier": task["tier"], "category": task.get("category"),
