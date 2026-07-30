@@ -22,6 +22,8 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from engine.eval import validity
+
 ROOT = Path(__file__).resolve().parents[2]
 BENCH = ROOT / "benchmark"
 FIXTURES = BENCH / "cap-1" / "fixtures"     # the default battery's fixtures (cap-1); others resolve beside their own battery.json
@@ -297,6 +299,24 @@ async def _run_task(cfg, judge_fn, task: dict, k: int, timeout: float, fixtures_
             "skipped": False, **v, "runs": runs}
 
 
+async def _run_canary(cfg, timeout: float, idx: int) -> bool:
+    """Run the trivial canary probe once. Any exception is a FAILURE, not a re-raise: the canary
+    exists to detect a broken instrument, and 'the probe crashed' is exactly that. It never
+    enters any score — it is not a battery task."""
+    from engine.engine import Engine
+    from engine.eval.capture import run_and_capture
+
+    tmp = tempfile.mkdtemp(prefix="canary-")
+    try:
+        engine = Engine(cfg, data_dir=tmp)
+        cap = await run_and_capture(engine, f"canary-{idx}", validity.CANARY_PROMPT, timeout)
+        return validity.canary_passed(cap)
+    except Exception:                   # noqa: BLE001 - see docstring
+        return False
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 async def run_model(model_spec: str, params: int, mode: str | None, k: int, judge_spec: str,
                     battery_path: Path, timeout: float, baseline: bool = False,
                     disclosure: str | None = None) -> dict:
@@ -309,17 +329,43 @@ async def run_model(model_spec: str, params: int, mode: str | None, k: int, judg
     # (benchmark/cap-1/battery.json) resolves to benchmark/cap-1/fixtures/.
     fixtures_dir = battery_path.parent / "fixtures"
     results = []
-    for task in battery["tasks"]:
+    canaries: list = []
+    streak = 0
+    aborted_after = None
+    tasks = battery["tasks"]
+    for idx, task in enumerate(tasks):
+        # Probe before the first task, then every CANARY_EVERY tasks. Two consecutive failures
+        # ABORT: spending another two hours to produce data that will be thrown away is the
+        # failure mode this whole mechanism exists to prevent.
+        if idx % validity.CANARY_EVERY == 0:
+            ok = await _run_canary(cfg, timeout, len(canaries))
+            canaries.append({"before_task_index": idx, "passed": ok})
+            streak = 0 if ok else streak + 1
+            print(f"  canary #{len(canaries)} before task {idx}: {'pass' if ok else 'FAIL'}"
+                  + (f" (streak {streak})" if streak else ""), flush=True)
+            if streak >= validity.CANARY_ABORT_STREAK:
+                aborted_after = idx
+                print(f"  ABORTING: {streak} consecutive canary failures — the instrument is "
+                      f"compromised, not the model. {len(tasks) - idx} tasks not run.", flush=True)
+                break
         results.append(await _run_task(cfg, judge_fn, task, k, timeout, fixtures_dir))
+    if aborted_after is None:
+        ok = await _run_canary(cfg, timeout, len(canaries))
+        canaries.append({"before_task_index": len(tasks), "passed": ok})
+        print(f"  canary #{len(canaries)} after last task: {'pass' if ok else 'FAIL'}", flush=True)
     agg = aggregate(results)
     name = model_spec.partition("=")[0]
-    return {"model": name, "params": params, "mode": mode or cfg.tool_calling_mode,
-            "scaffold": "off" if baseline else "on",   # Argus scaffolding on (full config) vs off (baseline arm)
-            "disclosure": cfg.tool_disclosure_mode,    # progressive tool disclosure arm (its own axis)
-            "max_tokens": cfg.model_max_tokens,   # completion cap this run used (reasoning models need headroom)
-            "battery_version": battery["battery_version"], "k": k,
-            "date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "per_tier": agg["per_tier"], "overall": agg["overall"], "tasks": results}
+    result = {"model": name, "params": params, "mode": mode or cfg.tool_calling_mode,
+              "scaffold": "off" if baseline else "on",   # Argus scaffolding on (full config) vs off (baseline arm)
+              "disclosure": cfg.tool_disclosure_mode,    # progressive tool disclosure arm (its own axis)
+              "max_tokens": cfg.model_max_tokens,   # completion cap this run used (reasoning models need headroom)
+              "battery_version": battery["battery_version"], "k": k,
+              "date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+              "canaries": canaries,
+              "tasks_planned": len(tasks), "tasks_run": len(results),
+              "per_tier": agg["per_tier"], "overall": agg["overall"], "tasks": results}
+    result.update(validity.assess(result, battery))
+    return result
 
 
 def _write_result(result: dict) -> Path:
@@ -435,8 +481,29 @@ async def rejudge_result(result: dict, battery: dict, judge_fn, task_ids=None,
 # ------------------------------- report / curve -------------------------------
 
 
+def _battery_for(battery_version: str) -> dict | None:
+    """The battery a stored result was run against, for the tool-required task set the shape
+    rule needs. None when unavailable — assess() then falls back to an all-runs shape and
+    records that basis, rather than silently computing a different number under the same name."""
+    try:
+        return json.loads((BENCH / battery_version / "battery.json").read_text())
+    except Exception:                   # noqa: BLE001 - missing/renamed battery is not fatal
+        return None
+
+
+def _backfill_validity(result: dict) -> dict:
+    """Add validity/shape/compliance to a result that predates them. Fully derivable from the
+    per-run data every committed result already carries — no re-runs, the same pattern
+    `answered` used. A result with no `canaries` key has no canary evidence; that absence is
+    recorded (canaries_run: 0) and is NOT itself a failure — those runs predate the probe."""
+    if result.get("validity"):
+        return result
+    result.update(validity.assess(result, _battery_for(result.get("battery_version") or "")))
+    return result
+
+
 def _load_results() -> list:
-    return [_backfill_solved(json.loads(p.read_text()))
+    return [_backfill_validity(_backfill_solved(json.loads(p.read_text())))
             for p in sorted(RESULTS.glob("*.json")) if p.name != "index.json"]
 
 
@@ -449,8 +516,8 @@ def render_report(battery_version: str) -> tuple[str, bool]:
     lines = [f"# Model-Capability Benchmark — `{battery_version}`", "",
              f"{len(results)} model(s), by param count. Chain = deterministic tool-chain pass-rate; "
              "Judge = Opus quality mean (0–3). A tier's line falling off below some size is the shelf.", "",
-             "| model | params (B) | mode | scaffold | disclosure | max_tok | solved | answered | abort | " + " | ".join(f"T{t} chain / judge" for t in tiers) + " | overall |",
-             "|---|---|---|---|---|---|---|---|---|" + "|".join(["---"] * (len(tiers) + 1)) + "|"]
+             "| model | params (B) | mode | scaffold | disclosure | max_tok | valid | solved | answered | gap | no-tool shape | abort | " + " | ".join(f"T{t} chain / judge" for t in tiers) + " | overall |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|" + "|".join(["---"] * (len(tiers) + 1)) + "|"]
     def _pct(x):
         return "—" if x is None else f"{x:.0%}"
 
@@ -469,9 +536,18 @@ def render_report(battery_version: str) -> tuple[str, bool]:
         # baseline arm runs with enable_observer=False (BASELINE_OVERRIDES) -- the observer physically
         # cannot fire, so an abort_rate of 0% there would be a misleading artifact, not a real measurement.
         abort_cell = "n/a" if r.get("scaffold") == "off" else _pct(ov.get("abort_rate"))
-        lines.append(f"| {r['model']} | {r['params']} | {r.get('mode', '?')} | {r.get('scaffold', 'on')} | "
+        # A non-ok row is NOT a measurement of the model. Bold it so it cannot be skimmed as one.
+        v = r.get("validity") or "—"
+        valid_cell = v if v == "ok" else f"**{v.upper()}**"
+        comp = r.get("compliance") or {}
+        gap = comp.get("compliance_gap")
+        gap_cell = _pct(gap) + ("&nbsp;⚠" if comp.get("high_compliance_gap") else "")
+        shape_cell = f"`{validity.sparkline(r.get('no_tool_shape') or [])}`" if r.get("no_tool_shape") else "—"
+        model_cell = r["model"] if v == "ok" else f"{r['model']} ⚠"
+        lines.append(f"| {model_cell} | {r['params']} | {r.get('mode', '?')} | {r.get('scaffold', 'on')} | "
                      f"{r.get('disclosure', 'off')} | "
-                     f"{mt if mt is not None else '—'} | {_pct(solved)} | {_pct(ov.get('answered'))} | "
+                     f"{mt if mt is not None else '—'} | {valid_cell} | {_pct(solved)} | "
+                     f"{_pct(ov.get('answered'))} | {gap_cell} | {shape_cell} | "
                      f"{abort_cell} | " + " | ".join(cells) + " |")
     lines += ["",
               "`max_tok` = the completion-token cap for the run. `—` = not recorded (runs predating this "
@@ -483,6 +559,23 @@ def render_report(battery_version: str) -> tuple[str, bool]:
               "and `solved` is the share of tasks the model got RIGHT WITHOUT using the declared "
               "tools — a reasoning model answering inside its reasoning pass. `—` = no judge verdict "
               "(unjudged tasks are not counted as vacuously answered).",
+              "`valid` = does this row measure the MODEL or the INSTRUMENT? `ok` = trustworthy. "
+              "`DEGRADED` = the no-tool rate in the last third of runs is >= 3x the first third "
+              "AND above 50% — a step change that never recovers, which is what a serving "
+              "regression looks like and is NOT what a weak model looks like (a weak model fails "
+              "*flat*). `ABORTED` = two consecutive canary failures stopped the run early; the "
+              "partial numbers are kept only to preserve the onset for diagnosis. **A non-ok row "
+              "must never be read as a measurement of the model.**",
+              "`gap` = `answered` - `solved`: the share of tasks answered correctly by a path the "
+              "rubric did not prescribe. ⚠ marks >= 15%. This is NOT a failure — the run is real "
+              "and so is the model. It is a warning that `solved` is measuring path-COMPLIANCE "
+              "for this model, and that `answered` is the fairer number to compare across sizes. "
+              "The bias grows with capability: a weak model cannot shortcut, a strong one does it "
+              "constantly, so `solved` systematically understates the strong end of the curve.",
+              "`no-tool shape` = per-decile share of runs that called no tool, in run order, over "
+              "tasks whose `expect` actually requires one (restraint tasks are excluded — for them "
+              "calling nothing is correct). A rising staircase is an instrument failing mid-run; "
+              "the flat aggregate that preceded this column concealed exactly that.",
               "`abort` = share of runs the loop itself ended on `stuck_repeating` (an exact-repeat "
               "tool-call thrash); diagnostic only, not part of `solved`. `—` = predates the metric "
               "(no observer data was ever recorded for that result). `n/a` = observer disabled "
@@ -610,6 +703,7 @@ def main(argv=None):
     if args.cmd == "rejudge":
         return _cmd_rejudge(args)
 
+    compromised = None
     if args.cmd == "run":
         result = asyncio.run(run_model(args.model, args.params, args.mode, args.k, args.judge,
                                        Path(args.battery), args.timeout, args.baseline,
@@ -617,6 +711,12 @@ def main(argv=None):
         out = _write_result(result)
         print(f"\nresult: {out}")
         bv = result["battery_version"]
+        v = result.get("validity")
+        if v != "ok":
+            # Non-zero so a shell/cron wrapper cannot mistake a compromised run for a good one --
+            # but the report is still regenerated below, because the row has to be VISIBLE and
+            # marked. Hiding it would leave the previous, healthier-looking table in place.
+            compromised = (v, result.get("evidence") or {})
     else:
         bv = args.battery_version
         if not bv:
@@ -642,6 +742,12 @@ def main(argv=None):
               f"model_tiers[_solved|_answered].png")
     except ImportError:
         print("note: matplotlib not available — skipped stackup/model_tiers charts")
+    if compromised:
+        v, ev = compromised
+        print(f"\n*** validity: {v.upper()} — this run does NOT measure the model.")
+        print(f"*** evidence: {ev}")
+        print("*** The row is written and marked in the report. Do not quote it as capability.")
+        return 1
     return 0
 
 

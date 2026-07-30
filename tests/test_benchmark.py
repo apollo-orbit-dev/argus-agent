@@ -236,6 +236,13 @@ def test_render_report_has_solved_column():
     assert ok and "solved" in md.splitlines()[4].lower()  # header row includes the column
 
 
+def _report_cols(md):
+    """Header name -> cell index. Tests must NOT hardcode a column position: the report gains
+    columns over time (disclosure, answered, then valid/gap/shape for argus-2oj), and a positional
+    index either breaks or — worse — silently starts asserting on a different column."""
+    return {c.strip().lower(): i for i, c in enumerate(md.splitlines()[4].split("|"))}
+
+
 def test_render_report_has_abort_column():
     from engine.eval import benchmark as B
     md, ok = B.render_report("cap-1")  # cap-1 results exist in the repo (all pre-argus-92a: legacy)
@@ -254,10 +261,7 @@ def test_render_report_has_abort_column():
     assert len(body_lines) == len(results)
     for line, r in zip(body_lines, results):
         cells = [c.strip() for c in line.split("|")]
-        # abort is the 9th cell: | model | params | mode | scaffold | disclosure | max_tok |
-        # solved | answered | abort | ...   (`disclosure` was added when progressive tool disclosure
-        # landed; `answered` when the second headline metric landed, argus-3zn)
-        abort_cell = cells[9]
+        abort_cell = cells[_report_cols(md)["abort"]]
         has_observer_data = r.get("scaffold") != "off" and any(
             "aborted" in run or "observer" in run
             for t in r.get("tasks", []) for run in t.get("runs", []))
@@ -403,8 +407,9 @@ def test_report_renders_the_answered_column():
         assert cols[cols.index("solved") + 1] == "answered"
         rows = {l.split("|")[1].strip(): [c.strip() for c in l.split("|")]
                 for l in md.splitlines()[6:] if l.startswith("|")}
-        assert rows["has-answered"][8] == "50%"
-        assert rows["no-answered"][8] == "—"    # absent -> em dash, never a fabricated number
+        ai = _report_cols(md)["answered"]
+        assert rows["has-answered"][ai] == "50%"
+        assert rows["no-answered"][ai] == "—"   # absent -> em dash, never a fabricated number
         footnotes = [l for l in md.splitlines() if l.startswith("`answered`")]
         assert footnotes and "GAP" in footnotes[0]   # the footnote names the gap
     finally:
@@ -754,3 +759,179 @@ def test_captured_from_run_carries_the_schemas_the_judge_prompt_renders():
                              "create_table_args": [{"name": "t", "columns": ["a", "b"]}]})
     user = build_judge_prompt({"prompt": "p", "rubric": ["r"]}, cap)[1]["content"]
     assert "t(a, b)" in user and "rows inserted: 1" in user
+
+
+# ------------------------------- argus-2oj: validity, shape, compliance -------------------------------
+
+def _mkresult(no_tool_flags, *, judges=None, chains=None, tier=1, ids=None, canaries=None):
+    """A result dict with one run per flag, in order. no_tool_flags[i]=1 -> that run called no tool."""
+    n = len(no_tool_flags)
+    judges = judges if judges is not None else [3] * n
+    chains = chains if chains is not None else [True] * n
+    ids = ids or [f"t{i}" for i in range(n)]
+    tasks = [{"id": ids[i], "tier": tier, "skipped": False,
+              "runs": [{"tools": ([] if no_tool_flags[i] else ["calculator"]),
+                        "judge_score": judges[i], "chain_correct": chains[i]}]}
+             for i in range(n)]
+    r = {"battery_version": "cap-2", "k": 1, "tasks": tasks,
+         "overall": {"solved": 0.5, "answered": 0.5}, "per_tier": {}}
+    if canaries is not None:
+        r["canaries"] = canaries
+    return r
+
+
+def _battery(ids):
+    return {"tasks": [{"id": i, "expect": {"tools_in_order": ["calculator"]}} for i in ids]}
+
+
+def test_validity_step_change_is_degraded():
+    """Test 1: the canonical instrument failure — clean, then 100% no-tool, and never recovers."""
+    from engine.eval import validity as V
+    flags = [0] * 30 + [1] * 30
+    r = _mkresult(flags)
+    a = V.assess(r, _battery([t["id"] for t in r["tasks"]]))
+    assert a["validity"] == "degraded", a["evidence"]
+    assert a["evidence"]["no_tool_last_third"] == 1.0
+    assert a["no_tool_shape"][0] == 0.0 and a["no_tool_shape"][-1] == 1.0
+
+
+def test_validity_flat_weak_model_is_ok():
+    """Test 2: THE test that keeps the rule honest. A uniformly bad model is a MEASUREMENT, not a
+    broken instrument. If this ever fails, the rule has started punishing weak models."""
+    from engine.eval import validity as V
+    flags = [1, 1, 0] * 20               # a flat 67% no-tool rate — high, but not a step change
+    r = _mkresult(flags)
+    a = V.assess(r, _battery([t["id"] for t in r["tasks"]]))
+    assert a["validity"] == "ok", a["evidence"]
+
+
+def test_validity_every_committed_result_is_ok():
+    """The no-false-positive property, locked against the real corpus. The battery is ordered
+    T1..T4, so 'first third vs last third' is also 'easy vs hard' — this proves the rule does not
+    condemn a model for merely having a difficulty gradient."""
+    import glob, json as _json
+    from engine.eval.benchmark import _backfill_validity
+    files = [f for f in glob.glob("benchmark/results/*cap-2*.json")]
+    if not files:
+        import pytest; pytest.skip("no committed cap-2 results in this checkout")
+    bad = []
+    for f in files:
+        d = _backfill_validity(_json.loads(open(f).read()))
+        if (d.get("overall") or {}).get("solved") is None:
+            continue
+        if d.get("validity") != "ok":
+            bad.append((f.split("/")[-1], d.get("validity"), d.get("evidence")))
+    assert not bad, "the rule condemned a known-good run:\n" + "\n".join(map(str, bad))
+
+
+def test_canary_two_consecutive_failures_aborts():
+    """Test 3/4: two in a row aborts; a single fumble does not."""
+    from engine.eval import validity as V
+    assert V.canary_verdict([{"passed": True}, {"passed": False}, {"passed": False}])[0] is True
+    assert V.canary_verdict([{"passed": False}, {"passed": True}, {"passed": False}])[0] is False
+    assert V.canary_verdict([])[0] is False
+
+
+def test_canary_pass_requires_tool_and_exact_answer():
+    from engine.eval import validity as V
+    assert V.canary_passed({"tools": ["calculator"], "final": "It is 220401."})
+    assert V.canary_passed({"tools": ["calculator"], "final": "220,401"})     # separators stripped
+    assert not V.canary_passed({"tools": [], "final": "220401"})              # no tool used
+    assert not V.canary_passed({"tools": ["calculator"], "final": "220400"})  # wrong product
+
+
+def test_aborted_beats_degraded():
+    """An aborted run is incomplete, so its shape is not a measurement of anything."""
+    from engine.eval import validity as V
+    r = _mkresult([0] * 30 + [1] * 30, canaries=[{"passed": False}, {"passed": False}])
+    a = V.assess(r, _battery([t["id"] for t in r["tasks"]]))
+    assert a["validity"] == "aborted"
+
+
+def test_restraint_tasks_excluded_from_shape():
+    """A task whose `expect` requires no tool must not count as a no-tool run: for it, calling
+    nothing is CORRECT. Those tasks cluster in T1/T2, so including them would bias the thirds."""
+    from engine.eval import validity as V
+    r = _mkresult([1] * 12)                       # every run called no tool...
+    b = {"tasks": [{"id": t["id"], "expect": {}} for t in r["tasks"]]}   # ...but none required one
+    series, basis = V.no_tool_series(r, b)
+    assert series == [] and basis == "all_runs"    # nothing tool-required -> falls back, records it
+
+
+def test_compliance_gap_flags_shortcutting_model_but_stays_valid():
+    """Test 7: a strong model that reaches the right answer its own way is flagged, NOT condemned.
+    validity and compliance must not collapse into each other."""
+    from engine.eval import validity as V
+    n = 30
+    r = _mkresult([0] * n, chains=[False] * n, judges=[3] * n)   # chain fails, judge accepts
+    r["overall"] = {"solved": 0.70, "answered": 0.95}
+    a = V.assess(r, _battery([t["id"] for t in r["tasks"]]))
+    assert a["validity"] == "ok", a["evidence"]
+    c = a["compliance"]
+    assert c["compliance_gap"] == 0.25 and c["high_compliance_gap"] is True
+    assert c["runs"]["chain_fail_answer_ok"] == n and c["runs"]["answer_wrong"] == 0
+
+
+def test_compliance_gap_zero_when_no_chain_failures():
+    """Test 8."""
+    from engine.eval import validity as V
+    r = _mkresult([0] * 12)
+    r["overall"] = {"solved": 0.8, "answered": 0.8}
+    c = V.assess(r, _battery([t["id"] for t in r["tasks"]]))["compliance"]
+    assert c["compliance_gap"] == 0.0 and c["high_compliance_gap"] is False
+    assert c["runs"]["chain_fail_answer_ok"] == 0
+
+
+def test_compliance_counts_no_tool_answer_ok_separately():
+    """The T1/T2 signature: right answer, no tool at all (did the arithmetic in its head)."""
+    from engine.eval import validity as V
+    r = _mkresult([1, 1, 0], chains=[False, False, False], judges=[3, 3, 3])
+    c = V.compliance_stats(r)
+    assert c["runs"]["chain_fail_answer_ok"] == 3
+    assert c["runs"]["no_tool_answer_ok"] == 2
+
+
+def test_shape_ratio_is_json_serializable():
+    """0% -> nonzero is the canonical case; an inf ratio must not break serialization."""
+    import json as _json
+    from engine.eval import validity as V
+    _, ev = V.shape_verdict([0] * 30 + [1] * 30)
+    assert ev["no_tool_ratio"] is None
+    _json.dumps(ev)
+
+
+def test_validity_short_run_not_judged():
+    from engine.eval import validity as V
+    ok, ev = V.shape_verdict([1, 1, 1])
+    assert ok is False and "too few runs" in ev["shape_note"]
+
+
+def test_sparkline_shows_the_step():
+    from engine.eval import validity as V
+    s = V.sparkline(V.decile_shape([0] * 30 + [1] * 30))
+    assert s[0] == "▁" and s[-1] == "█" and len(s) == 10
+    assert V.sparkline([]) == ""
+
+
+def test_report_marks_a_degraded_row(tmp_path, monkeypatch):
+    """Test 6: a non-ok row is visibly marked, and the gap column renders."""
+    import engine.eval.benchmark as bm
+    monkeypatch.setattr(bm, "RESULTS", tmp_path)
+    r = _mkresult([0] * 30 + [1] * 30)
+    # the synthetic task ids are not in the real cap-2 battery, so the tool-required set would
+    # exclude every run and the shape would be empty -- feed the matching battery instead
+    monkeypatch.setattr(bm, "_battery_for", lambda bv: _battery([t["id"] for t in r["tasks"]]))
+    r.update({"model": "brokenmodel", "params": 7, "mode": "native", "scaffold": "on",
+              "date": "2026-07-30T00:00:00+00:00",
+              "per_tier": {"1": {"chain_pass": 0.5, "judge_mean": 2.0, "solved": 0.5, "answered": 0.7}},
+              "overall": {"chain_pass": 0.5, "judge_mean": 2.0, "solved": 0.5, "answered": 0.7}})
+    (tmp_path / "brokenmodel-cap-2-20260730.json").write_text(_json_dumps(r))
+    md, ok = bm.render_report("cap-2")
+    assert ok
+    assert "**DEGRADED**" in md and "brokenmodel ⚠" in md
+    assert "no-tool shape" in md and "`valid`" in md
+
+
+def _json_dumps(o):
+    import json as _j
+    return _j.dumps(o)
