@@ -935,3 +935,13 @@ def test_report_marks_a_degraded_row(tmp_path, monkeypatch):
 def _json_dumps(o):
     import json as _j
     return _j.dumps(o)
+
+
+def test_canary_evidence_distinguishes_regression_from_never_working():
+    """Same abort either way, but the diagnosis differs: an instrument that passed and then
+    stopped is a serving regression; one that never passed may just be a very weak model."""
+    from engine.eval import validity as V
+    _, ev = V.canary_verdict([{"passed": True}, {"passed": False}, {"passed": False}])
+    assert ev["canary_ever_passed"] is True and ev["worst_canary_streak"] == 2
+    _, ev = V.canary_verdict([{"passed": False}, {"passed": False}])
+    assert ev["canary_ever_passed"] is False

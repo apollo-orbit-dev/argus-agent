@@ -62,10 +62,17 @@ def canary_verdict(canaries: list) -> tuple[bool, dict]:
     for c in canaries:
         streak = 0 if c.get("passed") else streak + 1
         worst = max(worst, streak)
+    ever = any(c.get("passed") for c in canaries)
     return worst >= CANARY_ABORT_STREAK, {
         "canaries_run": len(canaries),
         "canary_failures": sum(1 for c in canaries if not c.get("passed")),
         "worst_canary_streak": worst,
+        # Distinguishes an instrument that REGRESSED mid-run (passed, then stopped) from one that
+        # never worked at all — or from a model too weak to call one obvious tool. Same abort
+        # either way (there is nothing worth harvesting from either), but the diagnosis differs,
+        # and "canary_ever_passed: false" on a tiny model is a prompt/model question, not a
+        # serving question. Recorded, deliberately, rather than inferred later from the streak.
+        "canary_ever_passed": ever,
     }
 
 
