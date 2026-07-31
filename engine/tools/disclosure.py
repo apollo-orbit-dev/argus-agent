@@ -107,9 +107,14 @@ def score_tool(tool: Tool, qtok: set[str], query_l: str,
 def rank_tools(registry: ToolRegistry, user_text: str, *, mode: str = "keyword",
                doc_embs: Optional[dict[str, list[float]]] = None,
                query_emb: Optional[list[float]] = None,
-               exclude: Iterable[str] = ()) -> list[tuple[str, float]]:
+               exclude: Iterable[str] = (),
+               include_denied: bool = False) -> list[tuple[str, float]]:
     """Every tool in `registry`, best first. Ties break on REGISTRY INSERTION ORDER, so the same
-    inputs always produce the same view."""
+    inputs always produce the same view.
+
+    Denied tools are skipped by default: they can never be advertised, so letting one rank would
+    silently spend a slot of the K budget on a tool the schema builders then drop. `find_tool`
+    passes include_denied=True because it needs to know a match was blocked in order to SAY so."""
     embeddings_usable = bool(doc_embs) and bool(query_emb)
     if mode in ("embedding", "hybrid") and not embeddings_usable:
         # Embeddings unconfigured or the request failed — fall back to keyword FOR THIS TURN.
@@ -117,6 +122,8 @@ def rank_tools(registry: ToolRegistry, user_text: str, *, mode: str = "keyword",
     qtok = set() if mode == "embedding" else tokens(user_text)
     query_l = (user_text or "").lower()
     skip = set(exclude)
+    if not include_denied:
+        skip |= registry.denied_names()
     scored: list[tuple[float, int, str]] = []
     for i, tool in enumerate(registry.list()):
         if tool.name in skip:
@@ -141,7 +148,10 @@ def select_visible(registry: ToolRegistry, user_text: str, *, mode: str = "keywo
     slightly larger schema block. Names not registered (a gated-off dependency, a typo in the
     configured core list) are ignored silently.
     """
-    known = set(registry.names())
+    # Denied tools are not advertisable, so they are not selectable either — not even via `core`
+    # or `pinned`. A denied name in the configured core list would otherwise burn a slot of K on a
+    # tool openai_schema()/text_schema() then drop.
+    known = set(registry.names()) - registry.denied_names()
     keep = {n for n in core if n in known} | {n for n in pinned if n in known}
     if len(keep) >= k:
         return set(keep)
@@ -198,20 +208,35 @@ class DisclosedRegistry(ToolRegistry):
     - `list()` stays full, so tools_overview() / builtin_tool_names() / the routine registry are
       untouched: disclosure is a per-turn presentation change, not a capability change.
     - `register()` auto-reveals, so a tool create_tool builds mid-turn can never be unseeable.
+
+    Deny is the ONE thing this view cannot widen. `reveal()`/`register()` still add unconditionally
+    (they know nothing about policy), but the deny filter lives in the schema builders, downstream
+    of both — see `_visible_view()`. So neither find_tool nor a mid-turn create_tool can advertise
+    a tool the owner denied.
     """
 
     def __init__(self, full: ToolRegistry, visible: Iterable[str]):
         self.full = full
         self._tools = full._tools               # shared by REFERENCE — never a copy
         self._visible = set(visible)
+        # The deny resolver must survive the wrap, and must survive _visible_view()'s fresh
+        # ToolRegistry below. Disclosure ("worth showing this turn?") and deny ("may not be used at
+        # all") are independent axes, and deny is the one that must never be lost by a copy.
+        self.permissions = getattr(full, "permissions", None)
 
     # ---- disclosure surface ----
     def visible_names(self) -> list[str]:
-        """Advertised names, in registry insertion order."""
-        return [n for n in self._tools if n in self._visible]
+        """ADVERTISED names, in registry insertion order — what the schemas actually contain.
+        A denied tool is never advertised, even if it is in the disclosure view (reveal() and
+        register() both add unconditionally; the deny filter is applied AFTER them, here)."""
+        denied = self.denied_names()
+        return [n for n in self._tools if n in self._visible and n not in denied]
 
     def hidden_names(self) -> list[str]:
-        return [n for n in self._tools if n not in self._visible]
+        """The complement of visible_names() — everything registered but NOT advertised, which
+        includes denied tools (unadvertisable, but still dispatchable and still gated)."""
+        shown = set(self.visible_names())
+        return [n for n in self._tools if n not in shown]
 
     def reveal(self, names: Iterable[str]) -> list[str]:
         """Add `names` to the view. Returns the ones actually added (registered and not already
@@ -229,7 +254,12 @@ class DisclosedRegistry(ToolRegistry):
 
     # ---- presentation (the ONLY narrowed methods) ----
     def _visible_view(self) -> ToolRegistry:
-        r = ToolRegistry()
+        # `permissions` MUST be carried into this fresh registry. It is built per call, AFTER any
+        # reveal()/register() has already grown `_visible`, which is precisely what makes the deny
+        # filter un-bypassable: find_tool can reveal a denied tool and create_tool can register one
+        # mid-turn, and neither ends up in a catalog. Drop the resolver here and deny silently
+        # stops working the moment disclosure is switched on.
+        r = ToolRegistry(permissions=self.permissions)
         for name, tool in self._tools.items():
             if name in self._visible:
                 r.register(tool)
@@ -274,16 +304,34 @@ class FindToolTool(Tool):
         if reg is None:
             return "find_tool error: no tool registry is available."
         q = (args.query or "").strip()
+        # find_tool exists to REVEAL hidden tools, so it is the obvious way to resurrect a denied
+        # one ("I have no web access" -> find_tool('search the web')). Denied tools are excluded
+        # from everything it offers; a denied MATCH is reported honestly instead, because silently
+        # returning nothing would send the model looking for a workaround.
+        denied = reg.denied_names()
         if not q or q.lower() in ("all", "*", "everything"):
             lines = [f"- {t.name}: {(t.description or '').split('.')[0].strip()}"
-                     for t in reg.list()]
+                     for t in reg.list() if t.name not in denied]
+            if not lines:
+                return "find_tool: no tools are available (every tool is disabled by your policy)."
             return ("Full tool catalog (call any of these by name):\n" + "\n".join(lines))
         # Exclude what's already visible: revealing tools the model can already see would make
         # find_tool a no-op that still claims "these are now available to you". A view exposes
         # visible_names(); a plain ToolRegistry (disclosure off) has nothing to exclude.
         already_visible = set(reg.visible_names()) if hasattr(reg, "visible_names") else set()
         ranked = rank_tools(reg, q, mode="keyword", exclude=already_visible)[:self.top]
+        # Ranked a second time WITH the denied tools, purely to answer "did the thing you asked for
+        # exist but get turned off?". Kept separate so a denied match never costs a usable tool its
+        # slot in the reveal above — ranking is pure, so this is free.
+        blocked = [n for n, _s in rank_tools(reg, q, mode="keyword", exclude=already_visible,
+                                             include_denied=True)[:self.top] if n in denied]
+        note = ("" if not blocked else
+                f"\nNote: {', '.join(blocked)} also match, but are disabled by your policy and "
+                f"cannot be used. Don't try to call them.")
         if not ranked:
+            if blocked:
+                return (f"find_tool: the only tools matching {q!r} ({', '.join(blocked)}) are "
+                        f"disabled by your policy and cannot be used.")
             return f"find_tool: no tools matched {q!r}."
         names = [n for n, _s in ranked]
         if hasattr(reg, "reveal"):
@@ -294,7 +342,8 @@ class FindToolTool(Tool):
             if tool is None:
                 continue
             blocks.append(f"- {tool.name}: {tool.description}\n  args:\n{_arg_lines(tool)}")
-        return ("These tools are now available to you — call one directly:\n" + "\n".join(blocks))
+        return ("These tools are now available to you — call one directly:\n"
+                + "\n".join(blocks) + note)
 
 
 def _arg_lines(tool: Tool) -> str:

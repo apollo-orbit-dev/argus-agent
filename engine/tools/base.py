@@ -7,11 +7,14 @@ the loop hands back to the model.
 """
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 from pydantic import BaseModel, ValidationError
+
+log = logging.getLogger("argus.tools")
 
 
 class Tool(ABC):
@@ -43,8 +46,48 @@ def _compact_pydantic_error(exc: ValidationError) -> str:
 
 
 class ToolRegistry:
-    def __init__(self):
+    """Every registered tool, plus the two catalogs the model is shown.
+
+    `permissions` is an OPTIONAL resolver — a callable `name -> "allow"|"ask"|"deny"` — and is the
+    registry's entire knowledge of the approvals system (no import, no hard dependency, so a
+    benchmark or eval harness constructing a bare registry is unaffected). A tool whose effective
+    state is `deny` is NOT ADVERTISED: it is absent from openai_schema() and text_schema(), so the
+    model neither pays for its schema every turn nor is told it has a capability it does not have.
+
+    VISIBILITY IS NOT THE SECURITY BOUNDARY. Filtering the catalog is an optimization and a hint;
+    enforcement stays at ApprovalBroker.gate() on every call (engine/loop.py). Dispatch —
+    get/validate/names/list — is deliberately NOT filtered, exactly as with progressive disclosure:
+    a denied tool named out of conversation history is still a real, resolvable tool, and the gate
+    refuses it there with "Blocked by your policy".
+    """
+
+    def __init__(self, permissions: Optional[Callable[[str], str]] = None):
         self._tools: dict[str, Tool] = {}
+        self.permissions = permissions
+
+    # ---- permission-aware catalog (advertising only; dispatch is never filtered) ----
+    def is_denied(self, name: str) -> bool:
+        """True when `name`'s effective permission is deny. No resolver -> nothing is denied.
+
+        A resolver that raises must never take down a turn: the gate is the real boundary, so a
+        broken resolver degrades to today's behaviour (advertise it) rather than to a hard error."""
+        if self.permissions is None:
+            return False
+        try:
+            return self.permissions(name) == "deny"
+        except Exception:
+            log.debug("permission resolver failed for %r; advertising it", name, exc_info=True)
+            return False
+
+    def denied_names(self) -> set[str]:
+        """Registered tools whose permission is deny — the ones no catalog may advertise."""
+        if self.permissions is None:
+            return set()
+        return {n for n in self._tools if self.is_denied(n)}
+
+    def advertised(self) -> list[Tool]:
+        """The tools both schema builders offer the model, in registry insertion order."""
+        return [t for n, t in self._tools.items() if not self.is_denied(n)]
 
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
@@ -75,9 +118,9 @@ class ToolRegistry:
         return ValidationResult(ok=True, args=parsed)
 
     def openai_schema(self) -> list[dict]:
-        """OpenAI-compatible `tools` array for native mode."""
+        """OpenAI-compatible `tools` array for native mode. Denied tools are not offered."""
         out = []
-        for t in self._tools.values():
+        for t in self.advertised():
             out.append({
                 "type": "function",
                 "function": {
@@ -89,9 +132,12 @@ class ToolRegistry:
         return out
 
     def text_schema(self) -> str:
-        """Human/model-readable tool catalog for manual-mode system-prompt injection."""
+        """Human/model-readable tool catalog for manual-mode system-prompt injection.
+
+        Filtered too: manual mode injects this INTO the system prompt, so skipping it would leave
+        denied tools fully advertised in the one mode that is immune to native parse failures."""
         lines = []
-        for t in self._tools.values():
+        for t in self.advertised():
             schema = t.Params.model_json_schema()
             props = schema.get("properties", {})
             required = set(schema.get("required", []))

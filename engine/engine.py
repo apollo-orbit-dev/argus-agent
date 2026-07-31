@@ -516,6 +516,12 @@ class Engine:
         # Every other gated tool (update_soul, exec_python, forget, delete_row, notify, ...) shares
         # one generic deferred resume: re-run the turn with its original prompt (Task 4).
         self.approvals.set_default_resume(self._resume_default)
+        # A tool set to Deny is not ADVERTISED (its schema is dropped from both catalogs). Attached
+        # here rather than inside build_base_registry because the permission store only exists now;
+        # every per-run clone below copies `permissions` forward. Enforcement is unchanged and still
+        # lives at ApprovalBroker.gate() — this only stops re-sending a denied tool's schema (and
+        # inviting the model to pick it) on every single turn.
+        self.registry.permissions = self._permission_state
         from engine.rules.store import RulesStore
         self.rules = RulesStore(str(self._data_dir / "rules.json"))
         from engine.model_presets import ModelPresetStore
@@ -1345,6 +1351,17 @@ class Engine:
     def approvals_list(self) -> list[dict]:
         return self.approval_store.pending()
 
+    def _permission_state(self, name: str) -> str:
+        """Effective Allow/Ask/Deny for a tool name — the registry's deny-filter resolver.
+
+        Reads `self._config` live, so a config PATCH takes effect on the next turn. When interactive
+        approvals are OFF nothing is gated at call time, so nothing may be hidden either: the two
+        layers are switched by the same flag and can never disagree (hiding a tool that no gate
+        would refuse would remove a capability with no enforcement behind it)."""
+        if not self._config.enable_interactive_approvals:
+            return "allow"
+        return self.permissions.get(name)
+
     def permissions_list(self) -> list[dict]:
         # Full tool enumeration (Task 5): every tool a turn could see, via tools_overview()
         # (builtin + conditional_enabled + created). states() dedups and always adds "dep-install".
@@ -1551,7 +1568,7 @@ class Engine:
                 # base registry would leak find_tool (and any mid-turn create_tool) into every
                 # later run and into tools_overview().
                 or c.tool_disclosure_mode != "off"):
-            run_registry = ToolRegistry()
+            run_registry = ToolRegistry(permissions=self.registry.permissions)
             for t in self.registry.list():
                 run_registry.register(t)
             for t in ctx.extra_tools:
@@ -1826,7 +1843,7 @@ class Engine:
         # direction — it is a plain ToolRegistry, not a view, so this bounded follow-up sees more,
         # never fewer, tools than the turn it's completing.
         import dataclasses
-        lean = ToolRegistry()
+        lean = ToolRegistry(permissions=getattr(deps.registry, "permissions", None))
         for t in deps.registry.list():
             if t.name not in ("create_tool", "create_skill"):
                 lean.register(t)
