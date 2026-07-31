@@ -15,6 +15,11 @@ class ApprovalBroker:
     def __init__(self, store, policy, emit=None, window: float = 60, resume=None):
         self.store = store
         self.policy = policy
+        # Optional `session_id -> policy` resolver. Agent profiles own the per-tool permission
+        # matrix, and the active profile is PER-SESSION, so which matrix applies is a property of
+        # the turn, not of the broker. Left None (the default) the broker behaves exactly as before:
+        # one global PermissionStore for every session.
+        self.policy_resolver = None
         self._emit = emit                       # async (session_id, run_id, step, kind, data) -> None  (dashboard trace)
         self.window = window
         self._pending: dict[str, asyncio.Future] = {}
@@ -24,6 +29,19 @@ class ApprovalBroker:
         self._default_resume = None             # fallback async (req) -> None for any other kind
         self._telegram = None                   # async (session_id, req) -> None; set by engine
         self._resume_tasks: set[asyncio.Task] = set()   # GC guard for fire-and-forget resume tasks
+
+    def policy_for(self, session_id: str):
+        """The permission policy that governs this session (the active profile's matrix when
+        profiles are wired, else the global store). A resolver that raises must never take a turn
+        down — fall back to the global policy, which is what ran before profiles existed."""
+        if self.policy_resolver is None:
+            return self.policy
+        try:
+            return self.policy_resolver(session_id) or self.policy
+        except Exception:
+            log.debug("policy resolver failed for session %r; using the global policy",
+                      session_id, exc_info=True)
+            return self.policy
 
     def register_resume(self, kind: str, fn) -> None:
         self._resume[kind] = fn
@@ -52,7 +70,7 @@ class ApprovalBroker:
         if key in self._oneshots:                          # deferred pre-approval consumed once
             self._oneshots.discard(key)
             return Decision(approved=True, one_shot=True)
-        state = self.policy.get(kind)
+        state = self.policy_for(session_id).get(kind)
         if state == "allow":
             return Decision(approved=True, auto=True)
         if state == "deny":
@@ -94,9 +112,12 @@ class ApprovalBroker:
         approved = action in ("approve_once", "always_allow")
         if action in _ACTION_STATE:
             try:
-                self.policy.set(kind, _ACTION_STATE[action])
-            except ValueError:
-                return "unknown"                            # e.g. always_allow on a deny-only gate
+                # Pinned into the matrix that GOVERNED this request — i.e. the profile that was
+                # live for that session, not the global store. "Prompted once, then pin it into the
+                # profile" is exactly what the staleness rule promises.
+                self.policy_for(session_id).set(kind, _ACTION_STATE[action])
+            except (ValueError, KeyError):
+                return "unknown"      # e.g. always_allow on a deny-only gate, or a deleted profile
         decision = Decision(approved=approved, denied=not approved, actor=actor)
         fut = self._pending.get(req_id)
         if fut is not None and not fut.done():              # LIVE: unblock the waiting turn

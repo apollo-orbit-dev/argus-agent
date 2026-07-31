@@ -25,6 +25,8 @@ watches.json
 rules.json
 approvals.json
 permissions.json
+# agent profiles: per-install personas, prompts, permission matrices and session bindings
+profiles.json
 custom_commands.yaml
 # where the loop notes turns it gave up on. `detail` quotes tool output, which can quote whatever
 # the user asked about — this is user data and must never be committable.
