@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Changed
+- **A tool set to Deny is no longer advertised to the model.** It used to be sent in full — name,
+  description and JSON schema — on every single turn, and was only refused once the model had
+  already spent the tokens and picked it. Now it is absent from both catalogs (native `tools` array
+  and the manual-mode system prompt), so a denied tool costs nothing per turn and the model is no
+  longer told it has a capability it does not have.
+  - **The gate is unchanged.** Not advertising a tool is an optimization and a hint, never the
+    security boundary: a denied tool named out of conversation history (or hallucinated) is still
+    refused at call time with "Blocked by your policy", and dispatch (`get`/`validate`/`names`) is
+    still deliberately unfiltered. Verified live against two providers — both models did re-emit a
+    call for a tool removed mid-session, and both were refused.
+  - **Composes with progressive tool disclosure.** Neither `find_tool` nor a tool created mid-turn
+    can re-admit a denied tool, and a denied tool no longer consumes a slot of the disclosure
+    budget. `find_tool` says so honestly instead of silently returning nothing.
+  - Nothing is denied by default, so this is a no-op on a default install, and it applies only when
+    interactive approvals are enabled — the same flag that switches the gate itself.
+
 ## 0.14.0
 
 ### Added

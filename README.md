@@ -57,7 +57,9 @@ point it at a 3B model on your own GPU and the harness is what keeps it honest.
   [SECURITY.md](SECURITY.md)).
 - **Human-in-the-loop approvals** — every tool has an Allow / Ask / Deny policy; an *Ask* action
   pauses the turn and waits for your approval (inline in the dashboard trace or via Telegram buttons)
-  before it runs, so sensitive actions never happen unattended.
+  before it runs, so sensitive actions never happen unattended. *Deny* goes further: the tool is not
+  offered to the model at all, so it stops costing you its schema on every turn — and it is still
+  refused at call time if the model names it from memory anyway.
 - **Skills + deterministic execution** — markdown-defined procedural knowledge layered on top of
   tools; a skill can embed a structured `steps` block that runs deterministically through the
   routines engine instead of relying on free-form generation every time.
