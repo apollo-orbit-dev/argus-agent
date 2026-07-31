@@ -2,6 +2,35 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+- **Agent profiles.** A named, switchable **snapshot** of what Argus is for a task — persona (SOUL),
+  base system prompt, the per-tool Allow/Ask/Deny matrix, skill visibility, which standing rules
+  apply, model-role bindings and the behavioural feature flags. Create / duplicate / rename / delete
+  / activate from Settings; the active profile is shown on every page, because a user who cannot see
+  which profile is live cannot reason about what the agent may do. The binding is **per session**
+  with a global default for new ones, so Telegram and the dashboard can run different profiles at
+  once. **Memory is NOT part of a profile** — it is about the user, not the task, and stays global,
+  as do sessions, tables, connections and credentials (a profile selects a model *role binding*,
+  never an API key).
+  - **Snapshot, not patch.** A profile fully specifies every field it governs, so what you read in
+    it is what runs — no action-at-a-distance from a global edit. The cost is staleness, which is
+    handled explicitly: **a tool added after a profile was written resolves to `ask`** — never
+    `allow`, and never silently inherited from the global permission store. `ask` still advertises
+    the tool, so a new capability stays discoverable; the dashboard reports per profile how many
+    tools are "not configured — currently Ask".
+  - **Activation never blocks, so it is announced.** Switching profiles emits a trace event naming
+    the profile and every tool whose permission is *wider* than under the outgoing one (narrowing
+    needs no announcement), and the dashboard toasts the same list.
+  - **Skills are scoped, not gated.** A profile chooses which skills it can see; there is no
+    per-skill permission (a skill is prompt text, it executes nothing). A hidden skill is invisible
+    to *every* selection mode, including an explicit by-name request. A skill added after the
+    profile was written is visible.
+  - **Migration is a no-op for existing installs:** with no `profiles.json`, the current settings
+    become a profile named `Default` that is active and default, and the engine's resolved config is
+    identical to what it was before.
+
 ## 0.15.1
 
 ### Fixed

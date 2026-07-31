@@ -60,6 +60,13 @@ point it at a 3B model on your own GPU and the harness is what keeps it honest.
   before it runs, so sensitive actions never happen unattended. *Deny* goes further: the tool is not
   offered to the model at all, so it stops costing you its schema on every turn — and it is still
   refused at call time if the model names it from memory anyway.
+- **Agent profiles** — a named, switchable **snapshot** of what Argus *is* for a task: persona,
+  system prompt, per-tool permissions, which skills and standing rules apply, model-role bindings and
+  the behavioural flags. Duplicate the one that works, change two things, switch. The binding is
+  per-session (Telegram and the dashboard can run different profiles at once) with a global default
+  for new sessions; **memory stays global** — it is about you, not the task. Because a profile is a
+  snapshot it can go stale, so a tool added *after* it was written defaults to **Ask** — never
+  Allow — and the dashboard tells you how many tools are in that state.
 - **Skills + deterministic execution** — markdown-defined procedural knowledge layered on top of
   tools; a skill can embed a structured `steps` block that runs deterministically through the
   routines engine instead of relying on free-form generation every time.
