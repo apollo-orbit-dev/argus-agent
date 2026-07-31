@@ -482,7 +482,10 @@ class Engine:
         self._soul_file = root / "SOUL.md"
         self.soul = self._load_soul()
         self.skill_registry = SkillRegistry()
-        self.skill_registry.load_dir(str(Path(__file__).resolve().parent / "skills" / "library"))
+        # The SHIPPED library is CODE, not data: it resolves off the module path (never data_dir) and
+        # is tracked in git. Nothing may ever write into it — see skill_save().
+        self._shipped_skills_dir = str(Path(__file__).resolve().parent / "skills" / "library")
+        self.skill_registry.load_dir(self._shipped_skills_dir)
         # runtime-created skills persist in their own dir (loaded on startup too)
         self._created_skills_dir = str(root / "created_skills")
         self.skill_registry.load_dir(self._created_skills_dir)
@@ -2491,10 +2494,24 @@ class Engine:
         return total
 
     def skills_overview(self) -> dict:
+        """Grouped for the dashboard's Skills panel, each entry tagged with its `origin`:
+        'shipped' (the library file as it ships), 'override' (a created_skills file shadowing a
+        shipped skill of the same name) or 'runtime' (authored at runtime, no shipped counterpart).
+
+        An OVERRIDE is grouped under `builtin`, NOT `created`: it is still the built-in skill, only
+        edited — editing one must not make its row vanish from the built-in list and reappear as
+        something the user doesn't recognise. The `origin` tag is what makes "mine vs theirs"
+        legible in the editor, and what decides whether 'Reset to default' is offered.
+        """
         builtin, created = [], []
         for s in self.skill_registry.list():
-            entry = {"name": s.name, "description": s.description, "tools": s.tools}
-            (created if "created_skills" in (s.path or "") else builtin).append(entry)
+            from_created = "created_skills" in (s.path or "")
+            shipped = os.path.isfile(os.path.join(self._shipped_skills_dir, f"{s.name}.md"))
+            origin = ("override" if (from_created and shipped)
+                      else "runtime" if from_created else "shipped")
+            entry = {"name": s.name, "description": s.description, "tools": s.tools,
+                     "origin": origin}
+            (created if origin == "runtime" else builtin).append(entry)
         return {"builtin": builtin, "created": created}
 
     # ---- web artifacts (build_web_page output) ----
@@ -2704,7 +2721,239 @@ class Engine:
             os.remove(path)
         except Exception as e:
             return {"ok": True, "name": sk.name, "warning": f"unregistered but file left ({e})"}
+        # If that file was an OVERRIDE of a shipped skill, the pristine default is still on disk —
+        # put it straight back rather than leaving the built-in skill missing until a restart.
+        shipped = os.path.join(self._shipped_skills_dir, f"{sk.name}.md")
+        if os.path.isfile(shipped):
+            try:
+                self.skill_registry.load_file(shipped)
+                return {"ok": True, "name": sk.name, "restored": "shipped"}
+            except Exception as e:      # pragma: no cover - a shipped skill that no longer loads
+                log.warning("override for %s removed but the built-in failed to reload: %s",
+                            sk.name, e)
         return {"ok": True, "name": sk.name}
+
+    # ---- dashboard editor: read/write ONE skill or created tool ----
+    #
+    # One constraint sets the whole shape of this: `engine/skills/library/` is TRACKED IN GIT, and
+    # engine/updater.py refuses to update on a dirty tree. An edit written into a shipped skill would
+    # therefore jam the Update button, leaving `git` on the command line as the only way out — the
+    # exact outcome the update work exists to avoid. So a shipped skill is NEVER edited in place: a
+    # save writes an OVERRIDE into <data_dir>/created_skills/, which the registry already prefers
+    # because __init__ loads that dir SECOND. Reverting is just deleting the override file.
+
+    @staticmethod
+    def _editor_version(text: str) -> str:
+        """A short content hash the editor round-trips so a second tab's save can be spotted as a
+        conflict instead of silently clobbering. Content-addressed, not mtime: it survives a copy."""
+        import hashlib
+        return hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _editor_name_ok(name: str) -> bool:
+        """A bare identifier — the same alphabet sanitize_skill_name() produces. Names reach the
+        filesystem, so anything with a '/', a '\\' or a '..' in it is rejected outright rather than
+        silently rewritten into a different (possibly existing) skill's file."""
+        return bool(re.fullmatch(r"[a-z0-9_]+", name or ""))
+
+    def _skill_paths(self, name: str) -> tuple[str, str]:
+        """(override path under created_skills, shipped path under the library) for a skill name."""
+        return (os.path.join(self._created_skills_dir, f"{name}.md"),
+                os.path.join(self._shipped_skills_dir, f"{name}.md"))
+
+    def skill_source(self, name: str) -> dict:
+        """READ one skill for the editor: raw markdown, its origin, and a version token.
+
+        `origin` is 'shipped' (library file, no override), 'runtime' (created_skills only) or
+        'override' (created_skills file shadowing a shipped one of the same name). An override
+        also carries `shipped_source`, because the honest cost of overriding has to be VISIBLE:
+        once you override a shipped skill, a later Argus update that improves it does nothing for
+        you, silently. Showing "mine" next to "theirs" is what makes that legible — no merge is
+        attempted.
+        """
+        if not self._editor_name_ok(name):
+            return {"ok": False, "error": f"invalid skill name {name!r} (letters, digits and _ only)."}
+        override, shipped = self._skill_paths(name)
+        has_override, has_shipped = os.path.isfile(override), os.path.isfile(shipped)
+        if not has_override and not has_shipped:
+            return {"ok": False, "error": f"no skill named '{name}'."}
+        path = override if has_override else shipped
+        origin = ("override" if (has_override and has_shipped)
+                  else "runtime" if has_override else "shipped")
+        try:
+            source = open(path, encoding="utf-8").read()
+            shipped_source = open(shipped, encoding="utf-8").read() if origin == "override" else None
+        except Exception as e:
+            return {"ok": False, "error": f"could not read '{name}': {e}"}
+        return {"ok": True, "name": name, "origin": origin, "source": source,
+                "shipped_source": shipped_source, "version": self._editor_version(source)}
+
+    def skill_save(self, name: str, source: str, expected_version: str = "") -> dict:
+        """WRITE a skill edit. ALWAYS to created_skills/<name>.md — never into the shipped library.
+
+        Validated with the SAME rule the loader enforces (engine.skills.base.build_skill): if it
+        would fail to load, it is refused here with the reason rather than written and discovered
+        as a skipped skill at the next boot. On success the skill is re-registered into the LIVE
+        registry, so the edit takes effect without a restart.
+        """
+        from engine.skills.base import build_skill
+        if not self._editor_name_ok(name):
+            return {"ok": False, "error": f"invalid skill name {name!r} (letters, digits and _ only)."}
+        override, shipped = self._skill_paths(name)
+        # This is an EDITOR, deliberately: authoring a brand-new skill is the agent's job
+        # (create_skill), so a save only ever targets a skill that already exists. It also keeps
+        # the endpoint from being a write primitive with a caller-chosen filename.
+        if not (os.path.isfile(override) or os.path.isfile(shipped)
+                or self.skill_registry.get(name) is not None):
+            return {"ok": False, "error": f"no skill named '{name}' to edit."}
+        if expected_version:
+            cur = self.skill_source(name)
+            live = cur.get("version", "") if cur.get("ok") else ""
+            if live and live != expected_version:
+                return {"ok": False, "conflict": True,
+                        "error": "this skill changed since you opened it (another tab or the agent "
+                                 "edited it) — reload the editor and re-apply your change."}
+        try:
+            skill = build_skill(source, fallback_name=name)
+        except Exception as e:
+            return {"ok": False, "error": f"that would not load as a skill: {e}"}
+        if skill.name != name:
+            return {"ok": False,
+                    "error": f"frontmatter name '{skill.name}' does not match the skill being edited "
+                             f"('{name}'). The registry keys on the frontmatter name, so a mismatch "
+                             "would strand the file. Editing does not rename — keep the name."}
+        try:
+            os.makedirs(self._created_skills_dir, exist_ok=True)
+            # Write-then-rename: a second tab saving at the same moment gets last-write-wins, never
+            # a half-written file that the registry would then refuse to load.
+            tmp = override + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(source)
+            os.replace(tmp, override)
+        except Exception as e:
+            return {"ok": False, "error": f"could not save '{name}': {e}"}
+        skill.path = override
+        self.skill_registry.register(skill)
+        return {"ok": True, "name": name, "version": self._editor_version(source),
+                "origin": "override" if os.path.isfile(shipped) else "runtime"}
+
+    def skill_revert(self, name: str) -> dict:
+        """Drop a skill override and put the SHIPPED skill back — no restart. The pristine default
+        ships read-only in the package and was never touched, so reverting is a delete plus a
+        single-file reload (NOT a whole-library reload, which would clobber other overrides)."""
+        if not self._editor_name_ok(name):
+            return {"ok": False, "error": f"invalid skill name {name!r} (letters, digits and _ only)."}
+        override, shipped = self._skill_paths(name)
+        if not os.path.isfile(override):
+            return {"ok": False, "error": f"'{name}' has no override to reset."}
+        if not os.path.isfile(shipped):
+            return {"ok": False,
+                    "error": f"'{name}' is not a built-in skill — there is no default to reset to. "
+                             "Delete it instead."}
+        try:
+            os.remove(override)
+        except Exception as e:
+            return {"ok": False, "error": f"could not remove the override for '{name}': {e}"}
+        try:
+            self.skill_registry.load_file(shipped)
+        except Exception as e:
+            self.skill_registry.unregister(name)
+            return {"ok": False, "error": f"override removed but the built-in failed to reload: {e}"}
+        return {"ok": True, "name": name, "origin": "shipped"}
+
+    def tool_source(self, name: str) -> dict:
+        """READ a created tool's manifest for the editor: description, parameters, code, sandboxed.
+
+        `sandbox_fact` is the ONE shared statement of what the container actually contains
+        (tool_creation._SANDBOX_STDLIB_FACT) — served from here rather than re-worded in the
+        dashboard so the editor's `sandboxed` hint cannot drift from what create_tool tells a model.
+        """
+        import json as _json
+
+        from engine.experimental.tool_creation import _SANDBOX_STDLIB_FACT
+        if not self._editor_name_ok(name):
+            return {"ok": False, "error": f"invalid tool name {name!r} (letters, digits and _ only)."}
+        if not any(t.name == name for t in self._created_tools):
+            return {"ok": False,
+                    "error": f"'{name}' is not a created tool (built-ins aren't editable here)."}
+        path = os.path.join(self._created_tools_dir, f"{name}.json")
+        if not os.path.isfile(path):
+            return {"ok": False, "error": f"'{name}' has no saved manifest to edit."}
+        try:
+            raw = open(path, encoding="utf-8").read()
+            m = _json.loads(raw)
+        except Exception as e:
+            return {"ok": False, "error": f"could not read '{name}': {e}"}
+        return {"ok": True, "name": name, "description": m.get("description", ""),
+                "parameters": m.get("parameters", {}) or {}, "code": m.get("code", ""),
+                "sandboxed": bool(m.get("sandboxed")), "version": self._editor_version(raw),
+                "sandbox_fact": _SANDBOX_STDLIB_FACT}
+
+    async def tool_save(self, name: str, description: str, parameters: dict, code: str,
+                        test_args: Optional[dict] = None, sandboxed: Optional[bool] = None,
+                        session_id: str = "dashboard") -> dict:
+        """WRITE a created tool — through the SAME create_tool path the agent uses, with the same
+        name. Deliberately NOT a second write path: routing here inherits the AST import gate, the
+        auto test-run, the hardcode check, the approval gate and the reserved-name guard for free,
+        and a bypass would skip exactly the guards that make tool creation safe.
+
+        A failed save leaves the EXISTING tool untouched: CreateToolTool only persists and swaps the
+        live sink entry inside _register(), which every failure path returns before reaching.
+        """
+        from engine.approvals.types import TurnPaused
+        from engine.experimental.tool_creation import CreateToolTool
+        c = self._config
+        if not self._editor_name_ok(name):
+            return {"ok": False, "error": f"invalid tool name {name!r} (letters, digits and _ only)."}
+        if not c.enable_tool_creation:
+            return {"ok": False,
+                    "error": "tool creation is off — saving a tool runs create_tool's validation and "
+                             "test run, so turn ENABLE_TOOL_CREATION on to edit tools."}
+        # Same "editor, not author" rule as skill_save: only a tool that already exists is editable.
+        if not any(t.name == name for t in self._created_tools):
+            if self.registry.get(name) is not None or name in GATED_BUILTIN_NAMES:
+                return {"ok": False, "name": name,
+                        "error": f"'{name}' is a built-in tool and can't be edited here."}
+            return {"ok": False, "name": name,
+                    "error": f"'{name}' is not a created tool — this editor changes tools that "
+                             "already exist; ask the agent to create a new one."}
+        # Mirror run_task's per-run registry closely enough for composition and the built-in-name
+        # check: base registry + the created tools. A throwaway registry, so a rejected save leaves
+        # nothing registered anywhere.
+        reg = ToolRegistry()
+        for t in self.registry.list():
+            reg.register(t)
+        for t in self._created_tools:
+            reg.register(t)
+        ct = CreateToolTool(
+            reg, allow_network=c.tool_creation_allow_network,
+            persist_dir=self._created_tools_dir, timeout=c.created_tool_timeout,
+            dep_store=self.deps if c.enable_dep_approval else None,
+            session_id=session_id, secrets=self._tool_secrets(),
+            created_sink=self._created_tools,
+            trust_store=self.trust, allow_trusted=c.enable_trusted_tools,
+            reserved_names=GATED_BUILTIN_NAMES,
+            approvals=(self.approvals
+                       if (c.enable_interactive_approvals and c.enable_dep_approval) else None),
+            sandbox_runtime=self.sandbox if c.enable_sandbox else None,
+            sandbox_workspace=c.sandbox_workspace,
+            sandbox_enabled=c.enable_sandbox,
+            run_id="", origin="dashboard")
+        try:
+            message = await ct.run(ct.Params(
+                name=name, description=description, parameters=parameters or {}, code=code,
+                test_args=test_args or {}, sandboxed=sandboxed))
+        except TurnPaused:
+            return {"ok": False, "name": name,
+                    "error": "this save needs an approval that timed out — decide it in the "
+                             "Approvals panel, then save again."}
+        except Exception as e:                     # noqa: BLE001 - a save must never 500 the editor
+            log.exception("tool_save failed for %s", name)
+            return {"ok": False, "name": name, "error": f"{type(e).__name__}: {e}"}
+        rec = ct.created[-1] if ct.created else {}
+        ok = bool(rec.get("ok"))
+        return {"ok": ok, "name": name, "message": message,
+                "error": None if ok else (rec.get("error") or message)}
 
     def scheduled_jobs(self) -> list[dict]:
         from engine.scheduler import describe

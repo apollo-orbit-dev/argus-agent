@@ -498,6 +498,54 @@ def create_app(engine: Engine) -> FastAPI:
             raise HTTPException(400, "body must include 'name'")
         return engine.delete_created_skill(body["name"])
 
+    # ---- dashboard editor for skills + created tools (read-one / write-one) ----
+    # Every route here is _require_admin'd, READS included: a skill's procedure and a created tool's
+    # source are the owner's own authored content, and the write routes next to them mutate what the
+    # agent will do on the next turn. The engine does the name validation (bare identifier, matched
+    # against what is actually on disk) — a name is never interpolated into a path before that check.
+    @app.get("/library/skill/{name}")
+    async def library_skill_get(name: str, request: Request):
+        _require_admin(request)
+        r = engine.skill_source(name)
+        if not r.get("ok"):
+            raise HTTPException(404, r.get("error", "no such skill"))
+        return r
+
+    @app.post("/library/skill/save")
+    async def library_skill_save(body: dict, request: Request):
+        _require_admin(request)
+        if not body.get("name"):
+            raise HTTPException(400, "body must include 'name'")
+        # Never 500 on a bad edit: a refusal (unloadable skill, stale buffer) is the NORMAL outcome
+        # of an editor and comes back as {"ok": false, "error": ...} for the UI to show inline.
+        return engine.skill_save(body["name"], body.get("source", ""),
+                                 expected_version=body.get("expected_version", ""))
+
+    @app.post("/library/skill/revert")
+    async def library_skill_revert(body: dict, request: Request):
+        _require_admin(request)
+        if not body.get("name"):
+            raise HTTPException(400, "body must include 'name'")
+        return engine.skill_revert(body["name"])
+
+    @app.get("/library/tool/{name}")
+    async def library_tool_get(name: str, request: Request):
+        _require_admin(request)
+        r = engine.tool_source(name)
+        if not r.get("ok"):
+            raise HTTPException(404, r.get("error", "no such tool"))
+        return r
+
+    @app.post("/library/tool/save")
+    async def library_tool_save(body: dict, request: Request):
+        _require_admin(request)
+        if not body.get("name"):
+            raise HTTPException(400, "body must include 'name'")
+        return await engine.tool_save(
+            body["name"], body.get("description", ""), body.get("parameters") or {},
+            body.get("code", ""), test_args=body.get("test_args") or {},
+            sandboxed=body.get("sandboxed"))
+
     @app.get("/scheduled")
     async def scheduled():
         return engine.scheduled_jobs()

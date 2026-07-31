@@ -186,9 +186,46 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
     return meta, body
 
 
+def build_skill(text: str, path: str = "", fallback_name: str = "") -> Skill:
+    """Parse skill markdown into a Skill, applying EXACTLY the rules the loader enforces.
+
+    Raises ValueError if the text would not load as a skill (no frontmatter, no
+    description, no procedure body). Split out of `load_dir` so a would-be WRITER
+    (the dashboard skill editor) can ask "would this load?" before it writes
+    anything — a save that produces an unloadable skill is refused with the reason
+    instead of being discovered as a silent `skipping malformed skill` at next boot.
+    """
+    meta, body = parse_frontmatter(text)
+    name = meta.get("name") or fallback_name or os.path.splitext(os.path.basename(path))[0]
+    skill = Skill(
+        name=name,
+        description=meta.get("description", ""),
+        tools=meta.get("tools", []),
+        procedure=body,
+        path=path,
+        triggers=meta.get("triggers", []),
+        steps=_extract_steps(body, name),
+    )
+    if not skill.description or not skill.procedure:
+        raise ValueError("skill needs a description and a procedure body")
+    return skill
+
+
 class SkillRegistry:
     def __init__(self):
         self._skills: dict[str, Skill] = {}
+
+    def load_file(self, path: str) -> Skill:
+        """Parse ONE skill file and register it. Raises if it would not load.
+
+        The single-file counterpart to `load_dir`: reverting a skill override has to
+        put the SHIPPED file back into the live registry without re-loading the whole
+        library, which would clobber every OTHER override in the same pass.
+        """
+        skill = build_skill(open(path, encoding="utf-8").read(), path=path,
+                            fallback_name=os.path.splitext(os.path.basename(path))[0])
+        self._skills[skill.name] = skill
+        return skill
 
     def load_dir(self, path: str) -> None:
         if not os.path.isdir(path):
@@ -199,20 +236,7 @@ class SkillRegistry:
                 continue
             fpath = os.path.join(path, fname)
             try:
-                meta, body = parse_frontmatter(open(fpath, encoding="utf-8").read())
-                name = meta.get("name") or os.path.splitext(fname)[0]
-                skill = Skill(
-                    name=name,
-                    description=meta.get("description", ""),
-                    tools=meta.get("tools", []),
-                    procedure=body,
-                    path=fpath,
-                    triggers=meta.get("triggers", []),
-                    steps=_extract_steps(body, name),
-                )
-                if not skill.description or not skill.procedure:
-                    raise ValueError("skill needs a description and a procedure body")
-                self._skills[name] = skill
+                self.load_file(fpath)
             except Exception as e:  # skip malformed skill, don't crash startup
                 log.warning("skipping malformed skill %s: %s", fpath, e)
 
