@@ -17,10 +17,12 @@ log = logging.getLogger("argus.events")
 
 # StepEvent.kind vocabulary (documented, not enforced):
 #   info | model_request | model_response | tool_call | validation |
-#   tool_result | final | error | reprompt | skill | routine_result
+#   tool_result | final | error | reprompt | skill | routine_result |
+#   steer (a mid-turn steer landed on a tool result) |
+#   steer_rejected (marker-shaped text with the wrong id arrived in tool output)
 # Control-channel kinds — published on the reserved "__control__" pseudo-session, never on a real
 # session's stream (a run_id the dashboard hasn't seen registers a phantom run):
-#   session_changed | rule_saved
+#   session_changed | rule_saved | steer_late (a steer that missed its slot, re-sent as a task)
 
 
 @dataclass

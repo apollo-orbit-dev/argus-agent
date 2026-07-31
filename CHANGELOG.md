@@ -30,6 +30,29 @@ All notable changes to this project are documented here.
   - **Migration is a no-op for existing installs:** with no `profiles.json`, the current settings
     become a profile named `Default` that is active and default, and the engine's resolved config is
     identical to what it was before.
+- **Mid-turn steering (`ENABLE_STEERING`, off by default).** Send a message *while* the agent is
+  working and it changes course inside that run instead of cancelling it. The text is appended to
+  the run's next tool result inside a bounded marker — the only mid-turn slot that doesn't break
+  the message-role alternation providers validate — and the system prompt tells the model that a
+  marker bearing **this run's nonce** is the user speaking, with the same authority as the original
+  request. The nonce is random per RUN, lives only in memory and in the outbound request, and is
+  never written to a stored message, an event, the trace or a log; the conversation on disk carries
+  an opaque sentinel instead. So text arriving from a web page, a file or another tool *cannot*
+  reproduce a valid marker, and the model is never asked to judge whether a "user instruction" in
+  tool output is real. Marker-shaped text with the wrong id is reported in the trace
+  (`steer_rejected`) and flagged to the model as untrusted. On every channel: a plain message
+  during a run steers (with an immediate confirmation of which reading happened), `/task <text>`
+  queues a **new** task instead, `/steer <text>` is the explicit form, and `/stop` still kills the
+  run. A steer that arrives after the model has already written its answer is not dropped and does
+  not force an extra step — you are told it landed late and it runs as the next message.
+  Dashboard: a "send to the running task" box on the console, plus the steer inline in the trace.
+
+### Fixed
+- **Nothing can start a second, concurrent run on a session any more.** `POST /run` and Telegram's
+  `/retry` both called `run_task` again while a run was in flight, so two turns interleaved into
+  one message history and one working set. Both now either steer the live run or queue a new task
+  behind it. (The plain Telegram message path already avoided this by *cancelling* the run in
+  flight; with steering on it redirects that run instead of killing it.)
 
 ## 0.15.1
 

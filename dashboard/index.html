@@ -121,6 +121,13 @@
               <button class="btn btn-icon toolbar-newsession-btn" id="newSessionBtn" title="Reset conversation — clears the model's working context and trace, keeps the transcript" aria-label="Reset conversation">↺</button>
             </div>
             <span class="card-hint toolbar-run-status" id="runStatus">idle</span>
+            <!-- Mid-turn steering: only usable while this session has a run in flight, so it is
+                 hidden the rest of the time (shown by syncRunControls()). -->
+            <div class="toolbar-steer" id="steerBar" hidden>
+              <input id="steerInput" type="text" autocomplete="off"
+                     placeholder="Send to the running task… (changes course without stopping it)">
+              <button class="btn btn-sm" id="steerBtn">↪ Steer</button>
+            </div>
           </div>
 
           <div class="toolbar-divider" aria-hidden="true"></div>

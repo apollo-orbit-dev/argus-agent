@@ -62,7 +62,9 @@ BOT_COMMANDS = [
     ("memories", "Show everything the agent has remembered about you"),
     ("forget", "Delete a saved memory: /forget <id>"),
     ("status", "Show whether the agent is working and which step it's on"),
-    ("stop", "Interrupt whatever the agent is currently doing"),
+    ("steer", "Change course WITHOUT stopping the run: /steer <what to do differently>"),
+    ("task", "Queue a NEW task instead of steering the running one: /task <text>"),
+    ("stop", "Interrupt whatever the agent is currently doing (kills the run; /steer redirects it)"),
     ("restart", "Restart the Argus server"),
     ("update", "Check for a new release — /update confirm installs it"),
     ("verbose", "Show full tool/skill call history per turn: /verbose on|off"),
@@ -212,6 +214,34 @@ def _safe_pending_trust(engine: Any) -> list:
         return engine.pending_trust()
     except Exception:
         return []
+
+
+def _safe_steer(engine: Any, session_id: str, text: str) -> dict:
+    """Offer `text` to the run in flight on this session. Any engine that predates mid-turn
+    steering (or has it switched off) answers "not_running", which is the caller's cue to do
+    exactly what it does today — that is what keeps the no-run-in-flight path a no-op."""
+    try:
+        return engine.steer(session_id, text) or {"ok": False, "reason": "not_running"}
+    except Exception:
+        return {"ok": False, "reason": "not_running"}
+
+
+def steer_reply_text(res: dict) -> str | None:
+    """The confirmation the sender gets when their message was read as a steer (or refused as
+    one). None means "this was not a steer" — the caller runs it as a normal turn instead.
+
+    Every branch says plainly which reading happened: silently reinterpreting what someone typed
+    is worse than either behaviour on its own."""
+    if res.get("ok"):
+        return ("↪ Steering the running task — I'll fold that in at its next step.\n"
+                "(/task <text> would have queued it as a new task instead; /stop cancels the run.)")
+    if res.get("reason") == "too_long":
+        return (f"That note is {res.get('length', '?')} characters — a steer is capped at "
+                f"{res.get('limit')}. Send a shorter one, or /stop and start again.")
+    if res.get("reason") == "too_many":
+        return (f"I already have {res.get('limit')} notes waiting for my next step. "
+                "Let me catch up before sending more.")
+    return None
 
 
 def progress_line_for(tool_name: str) -> str:
@@ -922,10 +952,20 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
         last_text[chat_id] = text or "(image)"
         await _run_turn(update, chat_id, text, images)
 
-    async def _run_turn(update: Update, chat_id: int, text: str, images: list) -> None:
+    async def _run_turn(update: Update, chat_id: int, text: str, images: list,
+                        force_new: bool = False) -> None:
         """Run one agent turn for `text`/`images` and deliver the reply. Shared by on_message
         and the custom-command catch-all so both go through the exact same run/split/deliver path."""
         session_id = str(chat_id)
+        # Mid-turn steering: while the agent is working, a plain message CHANGES COURSE on that run
+        # instead of starting a second one. Off (or nothing running) => this is a no-op and the
+        # path below behaves exactly as it always has. `force_new` is the /task escape hatch; a
+        # photo has no steer representation, so it stays a normal turn too.
+        if not force_new and not images:
+            reply = steer_reply_text(_safe_steer(engine, session_id, text))
+            if reply is not None:
+                await update.effective_message.reply_text(reply)
+                return
         # Back-to-back: if the agent is already working on an earlier message from this chat,
         # preempt it (like Hermes) so the newest message takes over. Slash commands go through
         # their own handlers and never hit this path, so /verbose, /status, etc. don't interrupt.
@@ -1325,6 +1365,13 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
             await update.effective_message.reply_text("Nothing to retry yet.")
             return
         session_id = str(chat_id)
+        # Re-running while a run is in flight used to call run_task a SECOND time on the same
+        # session — two turns interleaving into one message history. Queue it instead.
+        if getattr(engine, "is_running", lambda _s: False)(session_id):
+            engine.queue_task(session_id, text, origin="telegram")
+            await update.effective_message.reply_text(
+                f"🔁 Queued a retry of: {text[:60]}… — it starts when the current run finishes.")
+            return
         status_msg = await update.effective_message.reply_text(f"🔁 Retrying: {text[:60]}…")
         progress = asyncio.create_task(
             _consume_progress(engine, session_id, status_msg, verbose=chat_id in verbose_chats))
@@ -1443,6 +1490,53 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
         await update.effective_message.reply_text(
             format_run_status(engine.run_status(str(chat_id))))
 
+    async def on_steer(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """The explicit form of what a plain message already does mid-run — kept so the mechanism
+        is discoverable in the command list, and so it can be used deliberately."""
+        chat_id = await _guard(update)
+        if chat_id is None:
+            return
+        text = " ".join(ctx.args or []).strip()
+        if not text:
+            await update.effective_message.reply_text(
+                "Usage: /steer <what to do differently> — sent to the task I'm working on right "
+                "now, without stopping it. (/stop cancels instead.)")
+            return
+        res = _safe_steer(engine, str(chat_id), text)
+        reply = steer_reply_text(res)
+        if reply is not None:
+            await update.effective_message.reply_text(reply)
+            return
+        if res.get("reason") == "disabled":
+            await update.effective_message.reply_text(
+                "Mid-turn steering is switched off (ENABLE_STEERING). Running it as a normal "
+                "message instead.")
+        else:
+            await update.effective_message.reply_text(
+                "Nothing is running right now — sending that as a normal message.")
+        last_text[chat_id] = text
+        await _run_turn(update, chat_id, text, [], force_new=True)
+
+    async def on_task(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Escape hatch: this is a NEW task, not a steer. Queued behind the running one — never
+        started alongside it, because two turns on one session interleave into one history."""
+        chat_id = await _guard(update)
+        if chat_id is None:
+            return
+        text = " ".join(ctx.args or []).strip()
+        if not text:
+            await update.effective_message.reply_text(
+                "Usage: /task <text> — runs it as a new task (after the current one, if I'm busy) "
+                "instead of steering what I'm doing.")
+            return
+        last_text[chat_id] = text
+        if getattr(engine, "is_running", lambda _s: False)(str(chat_id)):
+            engine.queue_task(str(chat_id), text, origin="telegram")
+            await update.effective_message.reply_text(
+                "🗒 Queued as a NEW task — I'll start it when the current one finishes.")
+            return
+        await _run_turn(update, chat_id, text, [], force_new=True)
+
     async def on_stop(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = await _guard(update)
         if chat_id is None:
@@ -1550,6 +1644,8 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
     app.add_handler(CommandHandler("memories", on_memories))
     app.add_handler(CommandHandler("forget", on_forget))
     app.add_handler(CommandHandler("status", on_status))
+    app.add_handler(CommandHandler("steer", on_steer))
+    app.add_handler(CommandHandler("task", on_task))
     app.add_handler(CommandHandler("stop", on_stop))
     app.add_handler(CommandHandler("restart", on_restart))
     app.add_handler(CommandHandler("update", on_update))

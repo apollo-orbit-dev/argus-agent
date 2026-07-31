@@ -265,7 +265,9 @@
     error: 'var(--danger)',
     approval_request: 'var(--amber)',
     approval_resolved: 'var(--amber)',
-    paused: 'var(--amber)'
+    paused: 'var(--amber)',
+    steer: 'var(--magenta)',            // a mid-turn steer landed on a tool result
+    steer_rejected: 'var(--danger)'     // marker-shaped text with the wrong id, seen and ignored
   };
   function kindColor(k){ return KIND_COLOR[k] || 'var(--muted)'; }
 
@@ -671,6 +673,14 @@
         }
         return;
       }
+      if (ev.kind === 'steer_late'){
+        // A steer arrived after the run had already produced its answer, so there was no slot
+        // left. The engine re-sends it as an ordinary task; say so rather than let it look
+        // like the steer vanished. Same connect-time guard as rule_saved (the ring buffer replays).
+        if (Date.now() - cesOpenedAt > 1500 && ev.data && ev.data.session_id === SESSION)
+          toast(ev.data.message || 'That arrived too late to steer — running it as a new message.', 'info');
+        return;
+      }
       if (ev.kind !== 'session_changed') return;
       // Coalesce bursts (e.g. a replayed ring of many renames on connect) into one render instead
       // of one fetch('/sessions') + innerHTML rewrite (and sidebar scroll reset) per event.
@@ -975,6 +985,9 @@
   var runnerInput = $('runnerInput');
   var runBtn = $('runBtn');
   var runStatus = $('runStatus');
+  var steerBar = $('steerBar');
+  var steerInput = $('steerInput');
+  var steerBtn = $('steerBtn');
 
   /* ---- in-flight turns are tracked PER SESSION ----
      The backend runs turns concurrently across sessions (Engine._running is a session_id -> task
@@ -992,6 +1005,8 @@
   // Re-derive every control that gates on "is a turn in flight" from the VIEWED session.
   function syncRunControls(){
     if (runBtn) runBtn.disabled = isSessionBusy(SESSION);
+    // Steering only means anything while THIS session has a run to steer.
+    if (steerBar) steerBar.hidden = !isSessionBusy(SESSION);
     if (runStatus){
       var st = runStatusBySession[SESSION];
       runStatus.textContent = st ? st.text : 'idle';   // 'idle' is the initial markup's empty state
@@ -1081,6 +1096,36 @@
     }
   }
   runBtn.addEventListener('click', runTask);
+
+  /* ---- mid-turn steering: send to the run that is ALREADY in flight ----
+     Deliberately a separate box from the prompt: it is not a new turn, it lands inside the
+     current one (as a marker block on its next tool result) and shows up in the trace as a
+     `steer` step. The engine's reply says which reading it got, and that is what we surface. */
+  async function sendSteer(){
+    if (!steerInput) return;
+    var text = steerInput.value.trim();
+    if (!text) { steerInput.focus(); return; }
+    var sid = SESSION;
+    if (steerBtn) steerBtn.disabled = true;
+    try {
+      var res = await fetch('/steer', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sid, text: text })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var r = await res.json();
+      toast(r.message || (r.steered ? 'Steer sent' : 'Not steered'), r.steered ? 'ok' : 'err');
+      if (r.steered) { steerInput.value = ''; }
+    } catch(e){
+      toast('Steer failed: ' + e.message, 'err');
+    } finally {
+      if (steerBtn) steerBtn.disabled = false;
+    }
+  }
+  if (steerBtn) steerBtn.addEventListener('click', sendSteer);
+  if (steerInput) steerInput.addEventListener('keydown', function(e){
+    if (e.key === 'Enter') { e.preventDefault(); sendSteer(); }
+  });
   runnerInput.addEventListener('keydown', function(e){
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!isSessionBusy()) runTask(); }
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); if (!isSessionBusy()) runTask(); }

@@ -338,6 +338,15 @@
     display:inline-flex; align-items:center; justify-content:center;
   }
 
+  /* mid-turn steering — appears in the toolbar only while this session has a run in flight */
+  .toolbar-steer{ display:flex; align-items:center; gap:6px; flex:1 1 260px; min-width:200px; }
+  .toolbar-steer[hidden]{ display:none; }
+  .toolbar-steer input{
+    flex:1; min-width:0; box-sizing:border-box; height:30px; padding:0 10px;
+    font-family:var(--font-body); font-size:12px;
+  }
+  .toolbar-steer .btn{ flex-shrink:0; height:30px; white-space:nowrap; }
+
   .toolbar-readouts{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 
   /* readout chips share one height/baseline so they read as a single instrument strip */
