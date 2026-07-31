@@ -1351,6 +1351,7 @@
     reflectBoolSwitch('swToolNetwork', cfg.tool_creation_allow_network);
     reflectBoolSwitch('swCodeInterp', cfg.enable_code_interpreter);
 
+    reflectBoolSwitch('swSteering', cfg.enable_steering);
     reflectBoolSwitch('swTracePersist', cfg.enable_trace_persistence);
     if ($('selTraceMode')) $('selTraceMode').value = cfg.trace_retention_mode;
     setInputVal('inTraceDays', cfg.trace_retention_days);
@@ -1450,6 +1451,7 @@
   wireBoolSwitch('swToolCreation', 'enable_tool_creation');
   wireBoolSwitch('swToolNetwork', 'tool_creation_allow_network');
   wireBoolSwitch('swCodeInterp', 'enable_code_interpreter');
+  wireBoolSwitch('swSteering', 'enable_steering');
   wireBoolSwitch('swTracePersist', 'enable_trace_persistence');
   (function(){
     var m = $('selTraceMode'); if (m) m.addEventListener('change', function(){ patchConfigKey('trace_retention_mode', m.value).catch(function(){ toast('Failed to set trace_retention_mode', 'err'); loadConfig(); }); });

@@ -254,9 +254,12 @@ class Config(BaseSettings):
     enable_interactive_approvals: bool = True  # sensitive actions block the turn for a human OK
     approval_window_seconds: int = 60          # how long a gate waits before falling back to pending
     # Mid-turn steering: a message sent WHILE a run is in flight is folded into that run (appended
-    # to its next tool result) instead of starting a second, interleaving one. OFF by default —
-    # it changes what a plain message means while the agent is working, so it is opt-in.
-    enable_steering: bool = False
+    # to its next tool result) instead of preempting it. ON by default: the behaviour it replaces
+    # CANCELS the in-flight run and discards every tool call already made, so a mid-run correction
+    # used to cost the whole turn. Forgery is structurally impossible (per-run nonce), `/stop` still
+    # stops, and `/task <text>` still queues a new task — so this is a UX default, not a safety one.
+    # Turn it off to restore preempt-and-restart.
+    enable_steering: bool = True
     # Memory scoping. Default "global": memory is about the *user*, not the interface,
     # so what you tell the dashboard is recalled in Telegram and vice-versa. Set
     # "session" to isolate memory per conversation (e.g. a multi-user Telegram bot).

@@ -30,7 +30,7 @@ All notable changes to this project are documented here.
   - **Migration is a no-op for existing installs:** with no `profiles.json`, the current settings
     become a profile named `Default` that is active and default, and the engine's resolved config is
     identical to what it was before.
-- **Mid-turn steering (`ENABLE_STEERING`, off by default).** Send a message *while* the agent is
+- **Mid-turn steering (`ENABLE_STEERING`, ON by default — this CHANGES what a plain message does while the agent is working).** Send a message *while* the agent is
   working and it changes course inside that run instead of cancelling it. The text is appended to
   the run's next tool result inside a bounded marker — the only mid-turn slot that doesn't break
   the message-role alternation providers validate — and the system prompt tells the model that a
@@ -46,6 +46,7 @@ All notable changes to this project are documented here.
   run. A steer that arrives after the model has already written its answer is not dropped and does
   not force an extra step — you are told it landed late and it runs as the next message.
   Dashboard: a "send to the running task" box on the console, plus the steer inline in the trace.
+  - **Upgrade note.** Previously a message sent mid-run CANCELLED that run and started over, discarding every tool call already made — a one-line correction cost the whole turn. It now redirects instead. If you relied on "send a message to interrupt", use `/stop` (still kills the run) or turn steering off in Settings → Mid-turn steering.
 
 ### Fixed
 - **Nothing can start a second, concurrent run on a session any more.** `POST /run` and Telegram's

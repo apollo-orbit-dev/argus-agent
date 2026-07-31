@@ -523,7 +523,7 @@ async def test_with_nothing_in_flight_a_plain_message_behaves_exactly_as_today()
     assert eng.steers == []
 
 
-async def test_steer_is_off_by_default_and_never_touches_a_run(tmp_path):
+async def test_steer_when_turned_off_is_inert_and_costs_no_tokens(tmp_path):
     e = _engine(tmp_path, enable_steering=False)
     seen = {}
 
@@ -537,6 +537,17 @@ async def test_steer_is_off_by_default_and_never_touches_a_run(tmp_path):
     assert "USER_STEER" not in seen["system"], "the note must not cost tokens when off"
     assert e._steering == {}
     assert e.steer("s", "anything") == {"ok": False, "reason": "disabled"}
+
+
+def test_steering_is_on_by_default():
+    """The DEFAULT, which the test above deliberately overrides and therefore cannot pin.
+
+    On by default is a considered choice: the behaviour it replaces CANCELS the in-flight run and
+    throws away every tool call already made, so a one-line mid-run correction used to cost the
+    whole turn. Flipping this back to False is a user-visible behaviour change and should not
+    happen by accident."""
+    from config import Config
+    assert Config().enable_steering is True
 
 
 async def test_with_steering_on_but_no_run_in_flight_steer_is_a_no_op(tmp_path):
