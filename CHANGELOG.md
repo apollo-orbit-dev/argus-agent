@@ -2,7 +2,34 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## 0.15.0
+
+### Added
+- **Edit skills and created tools from the dashboard.** A ✎ on any skill row (Developer → Library)
+  opens the raw markdown; saving writes a **copy-on-edit override** into `created_skills/` and
+  re-registers it live, so the shipped library is never modified and a bad edit is always
+  revertible. An edited built-in stays listed as a built-in with an `edited` tag — the tag is what
+  says "this one is yours now", which also means Argus updates to it won't reach you. Created tools
+  get the same ✎, and saving routes through `create_tool`, inheriting its AST import gate, auto
+  test-run, hardcode check and approval gate — so a failed edit refuses the save and leaves the
+  working tool intact. Built-in tools are not editable: they are Python in the repo, not runtime
+  content.
+- **The benchmark knows when it is lying.** A trivial, dependency-free canary probe runs before the
+  first task and every 10 thereafter; two consecutive failures **abort the run**, write the partial
+  result, and exit non-zero. Every result now carries a `validity` verdict (`ok` / `degraded` /
+  `aborted`) computed from the run's own shape, a per-decile no-tool sparkline, and a
+  `compliance_gap` column. Non-ok rows are marked in the report and excluded from the size curve.
+  This exists because a 35B arm once ran clean for 42 runs, produced no valid tool call for the
+  remaining 125, and published all of it as model capability — found by hand-auditing a transcript,
+  not by the harness.
+- **Benchmark runs survive a crash.** The result file is written after every task, marked
+  `complete: false` with `tasks_run`/`tasks_planned`, instead of only at the end. A host reboot
+  previously discarded 48 tasks of completed, already-judged work. Partial arms are excluded from
+  the size curve — the battery is ordered T1→T4, so a partial is biased easy and its rates are not
+  comparable to a full arm's.
+- **An upper anchor for the benchmark**: a full 2×2 (mode × scaffold) on a 284B model, so the
+  scaffolding claim is no longer measured only inside the small band. See "Measuring it" in the
+  README.
 
 ### Changed
 - **A tool set to Deny is no longer advertised to the model.** It used to be sent in full — name,
@@ -20,6 +47,23 @@ All notable changes to this project are documented here.
     budget. `find_tool` says so honestly instead of silently returning nothing.
   - Nothing is denied by default, so this is a no-op on a default install, and it applies only when
     interactive approvals are enabled — the same flag that switches the gate itself.
+
+### Fixed
+- **Telegram no longer silently drops long replies.** A message over Telegram's 4096-character limit
+  was rejected, the plain-text fallback re-sent the *same* over-long text, and the second failure was
+  swallowed at debug level — the user received nothing, with no error anywhere they'd see it.
+  Replies are now split on paragraph/line/word boundaries with **balanced HTML**: tags left open at a
+  cut are closed and reopened in the next part (a naive split produces markup Telegram rejects,
+  reproducing the original bug less often and more confusingly). Code blocks split on newlines and
+  are reopened as their own block. This also covered background delivery (scheduled results, watch
+  alerts, the `notify` tool), the list commands (`/skills`, `/tools`, `/memories`, …), and a
+  pre-existing flaw where the answer path split *markdown* before HTML expansion pushed it back over
+  the limit.
+- **Benchmark runs now exercise the scaffolding they measure.** Memory auto-extraction, rule
+  auto-detection and session auto-titling are dispatched as detached background tasks; the benchmark
+  removed each run's temporary `data_dir` the instant the answer was ready, so those tasks raced the
+  teardown and died mid-write. They are now drained (bounded) before teardown. Any capability they
+  contribute had been unmeasured in every scaffold-on arm.
 
 ## 0.14.0
 

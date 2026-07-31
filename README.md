@@ -258,6 +258,32 @@ tool it should. Modes and token budgets vary by run (the [report](benchmark/cap-
 `mode` and `max_tok` columns, and the judge means). Finding where *your* model's cliff sits — and
 which way it leans — is the point of the instrument.
 
+#### What the scaffolding is actually worth
+
+cap-2 has been run as a full 2×2 — tool-calling mode × scaffolding on/off — across eight models
+from 2B to 284B. Lift is measured on `answered` (the judge accepted the answer), because that axis
+is not biased by whether the model followed the rubric's prescribed tool chain:
+
+| tier | baseline | scaffolded | |
+|------|----------|-----------|---|
+| T1 — one obvious tool | 0.958 | 0.970 | **1.01×** |
+| T2 — right-tool selection | 0.976 | 0.946 | **0.97×** |
+| T3 — 2–3 step chain | 0.438 | 0.909 | **2.07×** |
+| T4 — 3+ steps with a judgment call | 0.284 | 0.718 | **2.53×** |
+
+*(mean over the 12 paired arms at 4B and above)*
+
+The effect is **not** "small models get better". It is sharply bounded to multi-step work, and it
+holds essentially unchanged from 4B to 284B (+0.268 at 4B, +0.268 at 26B, +0.250 at 35B, +0.255 at
+284B). Single-step tiers move by less than the noise floor, and by task family the split is the
+same: data-transform +0.408 and multi-tool synthesis +0.387, against compute −0.012, tool-selection
++0.036 and retrieve +0.034. Notably it does **not** help a model *pick* the right tool — it helps it
+keep going.
+
+Below 4B the multiplier survives but is multiplying almost nothing (T4 0.071 → 0.232): a 2B still
+fails three T4 tasks in four. Scaffolding amplifies capability that is nearly present; it does not
+create it.
+
 ### "Does this skill actually help?" — the skill A/B
 
 [`scripts/skill_eval.py`](scripts/skill_eval.py) runs a battery in two arms — treatment (skill
