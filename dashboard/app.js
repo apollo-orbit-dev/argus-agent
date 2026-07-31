@@ -119,7 +119,16 @@
     confirmDeleteBtn.textContent = opts.confirmLabel || (danger ? 'Delete' : 'Confirm');
     if (opts.requireText){
       confirmTextField.style.display = 'block';
-      confirmTextLabel.textContent = 'Type "' + opts.requireText + '" to confirm';
+      // The literal must render EXACTLY as it must be typed: label.field-label is
+      // text-transform:uppercase, so this displayed Type "V0.15.0" while the compare below
+      // demanded a lowercase v — the UI instructed you to type a string it then rejected.
+      // Built as DOM nodes, not innerHTML: requireText can be user data (a table/skill name).
+      confirmTextLabel.textContent = 'Type ';
+      var lit = document.createElement('span');
+      lit.className = 'confirm-literal';
+      lit.textContent = '"' + opts.requireText + '"';
+      confirmTextLabel.appendChild(lit);
+      confirmTextLabel.appendChild(document.createTextNode(' to confirm'));
       confirmTextInput.value = '';
       confirmDeleteBtn.disabled = true;
     } else {
@@ -131,8 +140,14 @@
   }
   window.confirmDelete = confirmDelete;
   confirmTextInput.addEventListener('input', function(){
-    if (confirmPending && confirmPending.requireText)
-      confirmDeleteBtn.disabled = (confirmTextInput.value !== confirmPending.requireText);
+    if (confirmPending && confirmPending.requireText){
+      // Trimmed + case-insensitive ON PURPOSE. Typing the name is a deliberateness gate, not an
+      // identity check — the target is already fixed in confirmPending, so relaxing case cannot
+      // select a different object. It also stops a future restyle from resurrecting this bug.
+      var typed = (confirmTextInput.value || '').trim().toLowerCase();
+      var want = String(confirmPending.requireText || '').trim().toLowerCase();
+      confirmDeleteBtn.disabled = (typed !== want);
+    }
   });
   function runConfirmedDelete(){
     if (confirmDeleteBtn.disabled) return;

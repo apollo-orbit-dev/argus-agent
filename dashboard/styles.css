@@ -146,6 +146,8 @@
   textarea:focus, input:focus, select:focus{ border-color:var(--cyan); }
   textarea{ resize:vertical; font-family:var(--font-body); }
   label.field-label{ display:block; font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--faint); margin-bottom:5px; font-family:var(--font-mono); }
+  /* A required-to-type literal inside an uppercase label must render exactly as it must be typed. */
+  label.field-label .confirm-literal{ text-transform:none; letter-spacing:0; color:var(--text); }
   .field{ margin-bottom:12px; }
   .field:last-child{ margin-bottom:0; }
   .row-inline{ display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
