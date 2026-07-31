@@ -2584,11 +2584,15 @@
     }).join('');
     return '<select class="perm-select" data-perm-key="' + esc(key) + '" data-prev-state="' + esc(state) + '">' + opts + '</select>';
   }
-  function libItemsHtml(arr, withTools, delKind, permMap){
+  function libItemsHtml(arr, withTools, delKind, permMap, editKind){
     if (!arr || !arr.length) return '<div class="empty">(none yet)</div>';
     var isTool = !withTools;   // convention: tool call sites pass withTools=false, skill call sites pass true
     return arr.map(function(o){
-      return '<div class="list-item"><div class="list-main"><div class="list-title">' + esc(o.name) +
+      // An overridden built-in is still listed as a built-in (see engine.skills_overview) — the tag
+      // is what says "this one is yours now", which also means Argus updates to it won't reach you.
+      var originTag = (o.origin === 'override')
+        ? ' <span class="tag tag-amber" title="Edited — your version shadows the built-in, so Argus updates to it won\'t apply">edited</span>' : '';
+      return '<div class="list-item"><div class="list-main"><div class="list-title">' + esc(o.name) + originTag +
         // Full description, not truncated: the row already wraps (white-space:normal), and a tool's
         // description IS its documentation here — clipping it at 140 chars hid the half that says
         // when to use the tool and what its arguments mean.
@@ -2596,8 +2600,9 @@
         (withTools && Array.isArray(o.tools) && o.tools.length ? '<div class="list-sub">tools: ' + esc(o.tools.join(', ')) + '</div>' : '') +
         '</div></div>' +   // close .list-title AND .list-main
         (isTool ? permSelectHtml(o.name, permMap) : '') +
+        (editKind ? '<button class="act-btn" data-lib-edit="' + editKind + '" data-lib-name="' + esc(o.name) + '" title="Edit">✎</button>' : '') +
         (delKind ? '<button class="act-btn danger" data-lib-delete="' + delKind + '" data-lib-name="' + esc(o.name) + '" title="Delete">✕</button>' : '') +
-        '</div>';          // close .list-item — the ✕/select are now siblings of .list-main, so the flex row right-aligns them inline instead of stacking below
+        '</div>';          // close .list-item — the ✕/✎/select are now siblings of .list-main, so the flex row right-aligns them inline instead of stacking below
     }).join('');
   }
   async function loadLibrary(){
@@ -2614,9 +2619,9 @@
       $('toolsConditional').innerHTML = cond.length
         ? '<div class="card-hint" style="margin-bottom:6px;">available when their feature flag is on</div>' + libItemsHtml(cond, false, null, permMap)
         : '<div class="empty">(none active)</div>';
-      $('toolsCreated').innerHTML = libItemsHtml(t.created, false, 'tool', permMap);
-      $('skillsBuiltin').innerHTML = libItemsHtml(s.builtin, true);
-      $('skillsCreated').innerHTML = libItemsHtml(s.created, true, 'skill');
+      $('toolsCreated').innerHTML = libItemsHtml(t.created, false, 'tool', permMap, 'tool');
+      $('skillsBuiltin').innerHTML = libItemsHtml(s.builtin, true, null, null, 'skill');
+      $('skillsCreated').innerHTML = libItemsHtml(s.created, true, 'skill', null, 'skill');
       $('depInstallPerm').innerHTML = permSelectHtml('dep-install', permMap);
       var totalTools = (t.builtin||[]).length + (t.created||[]).length;
       var totalSkills = (s.builtin||[]).length + (s.created||[]).length;
@@ -2645,10 +2650,156 @@
           });
         });
       });
+      document.querySelectorAll('[data-lib-edit]').forEach(function(b){
+        b.addEventListener('click', function(){
+          var kind = b.getAttribute('data-lib-edit'), name = b.getAttribute('data-lib-name');
+          (kind === 'tool' ? openToolEditor : openSkillEditor)(name);
+        });
+      });
     } catch(e){
       ['toolsBuiltin','toolsConditional','toolsCreated','skillsBuiltin','skillsCreated'].forEach(function(id){ $(id).innerHTML = '<div class="panel-error">Failed to load.</div>'; });
     }
   }
+
+  /* ---- library editor: one skill (override-on-edit) or one created tool ----
+     A skill edit NEVER writes into the shipped library — the server writes an override under
+     created_skills/, and "Reset to default" just drops it. The tool editor posts to the same
+     create_tool path the agent uses, so a rejected save leaves the working tool exactly as it is. */
+  var seName = '', seVersion = '', seOriginNow = '';
+
+  function seSetMsg(text, isErr){
+    var el = $('seMsg');
+    el.textContent = text || '';
+    el.style.color = isErr ? 'var(--danger)' : 'var(--faint)';
+  }
+  async function openSkillEditor(name){
+    seName = name; seVersion = ''; seOriginNow = '';
+    $('seTitle').textContent = name;
+    $('seSource').value = 'loading…';
+    $('seShipped').value = '';
+    $('seShippedWrap').style.display = 'none';
+    $('seResetBtn').style.display = 'none';
+    seSetMsg('');
+    openModal('skillEditorModal');
+    try {
+      var r = await fetch('/library/skill/' + encodeURIComponent(name));
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      var d = await r.json();
+      seVersion = d.version || ''; seOriginNow = d.origin || 'shipped';
+      $('seSource').value = d.source || '';
+      $('seOrigin').textContent = seOriginNow;
+      $('seOrigin').className = 'tag ' + (seOriginNow === 'override' ? 'tag-amber' : 'tag-muted');
+      if (seOriginNow === 'override'){
+        // The honest cost of an override, stated where the edit happens: no merge is attempted, so
+        // a future Argus update to this built-in silently does nothing for you until you reset.
+        $('seNote').textContent = 'This is your edited copy of a built-in skill. It shadows the version that ships, so future Argus updates to that built-in will NOT reach you until you reset. Your version and the built-in default are both shown below — nothing is merged.';
+        $('seShipped').value = d.shipped_source || '';
+        $('seShippedWrap').style.display = '';
+        $('seResetBtn').style.display = '';
+      } else if (seOriginNow === 'shipped'){
+        $('seNote').textContent = 'This is a built-in skill. Saving does not change the file that ships — it writes your version as an override, which you can undo at any time with "Reset to default".';
+      } else {
+        $('seNote').textContent = 'A skill created at runtime. Saving replaces it.';
+      }
+    } catch(e){
+      $('seSource').value = '';
+      seSetMsg('Could not load this skill: ' + e.message, true);
+    }
+  }
+  $('seSaveBtn').addEventListener('click', async function(){
+    var btn = this;
+    btn.disabled = true; seSetMsg('Saving…');
+    try {
+      var r = await fetch('/library/skill/save', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: seName, source: $('seSource').value, expected_version: seVersion })
+      });
+      var d = await r.json();
+      if (!r.ok || d.ok === false) throw new Error(d.error || d.detail || ('HTTP ' + r.status));
+      seVersion = d.version || '';
+      toast('Saved ' + seName, 'ok');
+      closeAllModals();
+      loadLibrary();
+    } catch(e){
+      seSetMsg(e.message, true);            // stay open so the edit isn't lost
+    }
+    btn.disabled = false;
+  });
+  $('seResetBtn').addEventListener('click', function(){
+    var name = seName;
+    confirmDelete({
+      title: 'Reset to default',
+      message: 'Discard your edits to "' + name + '" and go back to the built-in version? The built-in ships read-only, so this always works.',
+      confirmLabel: 'Reset',
+      onConfirm: async function(){
+        try {
+          var r = await fetch('/library/skill/revert', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name })
+          });
+          var d = await r.json();
+          if (!r.ok || d.ok === false) throw new Error(d.error || d.detail || ('HTTP ' + r.status));
+          toast('Reset ' + name + ' to the built-in version', 'ok');
+          closeAllModals();
+          loadLibrary();
+        } catch(e){ toast('Reset failed: ' + e.message, 'err'); }
+      }
+    });
+  });
+
+  var teName = '';
+  function teSetMsg(text, isErr){
+    var el = $('teMsg');
+    el.textContent = text || '';
+    el.style.color = isErr ? 'var(--danger)' : 'var(--faint)';
+  }
+  async function openToolEditor(name){
+    teName = name;
+    $('teTitle').textContent = name;
+    $('teDesc').value = ''; $('teParams').value = ''; $('teCode').value = 'loading…';
+    $('teTestArgs').value = '{}'; $('teSandboxed').checked = false; $('teSandboxFact').textContent = '';
+    teSetMsg('');
+    openModal('toolEditorModal');
+    try {
+      var r = await fetch('/library/tool/' + encodeURIComponent(name));
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      var d = await r.json();
+      $('teDesc').value = d.description || '';
+      $('teParams').value = pretty(d.parameters || {});
+      $('teCode').value = d.code || '';
+      $('teSandboxed').checked = !!d.sandboxed;
+      $('teSandboxFact').textContent = d.sandbox_fact || '';
+    } catch(e){
+      $('teCode').value = '';
+      teSetMsg('Could not load this tool: ' + e.message, true);
+    }
+  }
+  $('teSaveBtn').addEventListener('click', async function(){
+    var btn = this, params, testArgs;
+    try { params = JSON.parse($('teParams').value || '{}'); }
+    catch(e){ teSetMsg('Parameters is not valid JSON: ' + e.message, true); return; }
+    try { testArgs = JSON.parse($('teTestArgs').value || '{}'); }
+    catch(e){ teSetMsg('Test arguments is not valid JSON: ' + e.message, true); return; }
+    btn.disabled = true; teSetMsg('Saving — running the test…');
+    try {
+      var r = await fetch('/library/tool/save', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: teName, description: $('teDesc').value, parameters: params,
+                               code: $('teCode').value, test_args: testArgs,
+                               sandboxed: $('teSandboxed').checked })
+      });
+      var d = await r.json();
+      if (!r.ok || d.ok === false) throw new Error(d.error || d.detail || ('HTTP ' + r.status));
+      toast('Saved ' + teName, 'ok');
+      closeAllModals();
+      loadLibrary();
+    } catch(e){
+      // Keep the modal open with the edit intact: the previous tool is still registered and
+      // working, and the message says which check refused it.
+      teSetMsg(e.message, true);
+    }
+    btn.disabled = false;
+  });
 
   /* ---- interactive approvals: per-tool perm-select toggles + Pending approvals list ---- */
   // Delegated handler for every `.perm-select` on the page: per-tool rows rendered by

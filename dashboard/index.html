@@ -906,6 +906,67 @@
   </div>
 </div>
 
+<!-- Skill editor modal — edits are written as an OVERRIDE under created_skills/, never into the
+     shipped library (which is tracked in git; writing there would jam the Update button). -->
+<div class="modal-overlay" id="skillEditorModal">
+  <div class="modal modal-wide">
+    <div class="modal-head">
+      <span class="modal-title" id="seTitle">Skill</span>
+      <span class="tag tag-muted" id="seOrigin">shipped</span>
+      <button class="modal-close" data-close-modal>✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="tv-note" id="seNote"></p>
+      <div class="field">
+        <label class="field-label" for="seSource">Skill markdown <span class="card-hint">— frontmatter (name, description, tools, triggers) then the procedure body</span></label>
+        <textarea rows="18" id="seSource" spellcheck="false" style="font-family:var(--font-mono); font-size:11.5px;"></textarea>
+      </div>
+      <details id="seShippedWrap" style="display:none;">
+        <summary class="field-label" style="cursor:pointer;">Built-in default — what ships (read-only)</summary>
+        <textarea rows="14" id="seShipped" readonly spellcheck="false" style="font-family:var(--font-mono); font-size:11.5px; margin-top:8px;"></textarea>
+      </details>
+    </div>
+    <div class="modal-foot">
+      <span class="card-hint" id="seMsg" style="margin-right:auto; text-align:left; overflow-wrap:anywhere;"></span>
+      <button class="btn" id="seResetBtn" style="display:none;">Reset to default</button>
+      <button class="btn" data-close-modal>Cancel</button>
+      <button class="btn btn-primary" id="seSaveBtn">Save skill</button>
+    </div>
+  </div>
+</div>
+
+<!-- Created-tool editor modal — Save routes through the SAME create_tool path the agent uses, so
+     it inherits the import gate, the auto test-run and the approval gate. -->
+<div class="modal-overlay" id="toolEditorModal">
+  <div class="modal modal-wide">
+    <div class="modal-head">
+      <span class="modal-title" id="teTitle">Tool</span>
+      <button class="modal-close" data-close-modal>✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="tv-note">Saving re-creates the tool through the same checks the agent's <code>create_tool</code> runs: the import gate, a test run with the arguments below, and any dependency approval. If a check fails, nothing is written and the tool you have now keeps working.</p>
+      <div class="field"><label class="field-label" for="teDesc">Description <span class="card-hint">— when to use it; this is what the model reads</span></label><textarea rows="2" id="teDesc"></textarea></div>
+      <div class="field"><label class="field-label" for="teParams">Parameters (JSON)</label><textarea rows="4" id="teParams" spellcheck="false" style="font-family:var(--font-mono); font-size:11.5px;"></textarea></div>
+      <div class="field"><label class="field-label" for="teCode">Code <span class="card-hint">— <code>def run(args): …</code> returning a string</span></label><textarea rows="16" id="teCode" spellcheck="false" style="font-family:var(--font-mono); font-size:11.5px;"></textarea></div>
+      <div class="grid grid-2">
+        <div class="field"><label class="field-label" for="teTestArgs">Test arguments (JSON)</label><textarea rows="3" id="teTestArgs" spellcheck="false" style="font-family:var(--font-mono); font-size:11.5px;"></textarea></div>
+        <div class="field">
+          <label class="field-label">Where it runs</label>
+          <label class="switch"><input type="checkbox" id="teSandboxed"><span class="track"><span class="thumb"></span></span>container sandbox</label>
+          <!-- filled from the server's one shared statement of what the container holds, so this
+               can never drift from what create_tool tells the model -->
+          <p class="tv-note" id="teSandboxFact"></p>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span class="card-hint" id="teMsg" style="margin-right:auto; text-align:left; overflow-wrap:anywhere;"></span>
+      <button class="btn" data-close-modal>Cancel</button>
+      <button class="btn btn-primary" id="teSaveBtn">Save tool</button>
+    </div>
+  </div>
+</div>
+
 <!-- Shared destructive-action confirm dialog — routed to by every delete across the app -->
 <!-- Table viewer modal — click-to-open row browser for the Tables list -->
 <div class="modal-overlay" id="tableViewerModal">
