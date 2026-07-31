@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here.
 
+## 0.15.1
+
+### Fixed
+- **The confirm-to-type gate rejected the string it displayed.** The modal writes
+  `Type "v0.15.0" to confirm` into a label styled `text-transform:uppercase`, so it *showed*
+  `TYPE "V0.15.0" TO CONFIRM` while comparing strictly against the lowercase literal — typing
+  exactly what the UI showed left the button disabled with nothing explaining why. Worst on the
+  update path, where the required string is the target version and this is the last gate before
+  restarting a live instance. The literal now renders untransformed (so what you read is what you
+  type), and the comparison is trimmed and case-insensitive: typing the name is a deliberateness
+  gate, not an identity check, and the target is already fixed before the prompt appears.
+
 ## 0.15.0
 
 ### Added
