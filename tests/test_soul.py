@@ -18,7 +18,7 @@ class _CaptureModel:
 
 def _engine(tmp_path):
     cfg = Config(model_base_url="http://x/v1", model_name="main", telegram_bot_token="")
-    e = Engine(cfg)
+    e = Engine(cfg, data_dir=str(tmp_path))   # isolate engine state (incl. profiles.json) from the repo
     e._model_client = lambda: _CaptureModel()
     e._soul_file = tmp_path / "SOUL.md"
     e._system_prompt_file = tmp_path / "system_prompt.md"
@@ -49,7 +49,7 @@ async def test_soul_is_injected_into_system_prompt(tmp_path):
 def test_system_prompt_migrates_from_legacy_txt(tmp_path):
     (tmp_path / "system_prompt.txt").write_text("legacy prompt text")
     cfg = Config(model_base_url="http://x/v1", model_name="main", telegram_bot_token="")
-    e = Engine(cfg)
+    e = Engine(cfg, data_dir=str(tmp_path))   # isolate engine state (incl. profiles.json) from the repo
     e._system_prompt_file = tmp_path / "system_prompt.md"     # .md absent
     e._system_prompt_legacy = tmp_path / "system_prompt.txt"  # legacy present
     assert e._load_system_prompt() == "legacy prompt text"

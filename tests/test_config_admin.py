@@ -40,7 +40,8 @@ class _EchoModel:
 @pytest.fixture
 def client(tmp_path):
     cfg = Config(model_base_url="http://x/v1", model_name="main", telegram_bot_token="")
-    eng = Engine(cfg, env_path=str(tmp_path / ".env"))   # isolate .env writes from the repo
+    eng = Engine(cfg, data_dir=str(tmp_path), env_path=str(tmp_path / ".env"))   # isolate .env + all
+    # engine state (profiles.json, permissions.json, …) from the repo
     eng._model_client = lambda: _EchoModel()
     eng._system_prompt_file = tmp_path / "sp.txt"   # isolate from repo
     from engine.custom_commands import CustomCommandStore
@@ -186,7 +187,7 @@ async def test_enable_tool_creation_via_patch(client):
 async def test_admin_token_gates_sensitive_endpoints(tmp_path):
     cfg = Config(model_base_url="http://x/v1", model_name="main", telegram_bot_token="",
                  admin_token="s3cret")
-    eng = Engine(cfg, env_path=str(tmp_path / ".env"))
+    eng = Engine(cfg, data_dir=str(tmp_path), env_path=str(tmp_path / ".env"))
     eng._system_prompt_file = tmp_path / "sp.txt"
     (tmp_path / ".env").write_text("MODEL_NAME=main\n")
     app = create_app(eng)
@@ -221,7 +222,7 @@ async def test_run_endpoint_honors_admin_token(tmp_path, monkeypatch):
     # set it must be gated too; previously it was the one open door on a token-protected instance.
     cfg = Config(model_base_url="http://x/v1", model_name="main", telegram_bot_token="",
                  admin_token="s3cret")
-    eng = Engine(cfg, env_path=str(tmp_path / ".env"))
+    eng = Engine(cfg, data_dir=str(tmp_path), env_path=str(tmp_path / ".env"))
     (tmp_path / ".env").write_text("MODEL_NAME=main\n")
 
     async def _fake_run_task(*a, **k):

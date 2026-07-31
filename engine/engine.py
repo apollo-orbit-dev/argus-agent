@@ -712,6 +712,22 @@ class Engine:
             except Exception:
                 log.exception("could not prepare the sandbox egress proxy")
 
+        # ---- agent profiles (argus-cd8) ----
+        # A profile is a SNAPSHOT of what Argus is for a task: persona, system prompt, the per-tool
+        # permission matrix, skill visibility, which standing rules apply, model-role bindings and a
+        # set of feature flags. Constructed LAST, deliberately: the first-run migration snapshots
+        # the live permission state of EVERY registered tool, so it has to run after the final
+        # `self.registry.register(...)` above — a tool registered later would be missing from the
+        # Default profile's matrix and would silently fall to the `ask` staleness default on a
+        # brand-new install. Memory, sessions, tables and credentials are NOT profile fields.
+        from engine.profiles.store import ProfilePolicy, ProfileStore
+        self.profiles = ProfileStore(str(root / "profiles.json"))
+        self.profiles.ensure_default(self._default_profile_snapshot)   # first-run migration
+        # The broker resolves per-session, so a gate consults the matrix of the profile that is live
+        # for THAT session (and an "always allow" pins into it, not into the global store).
+        self.approvals.policy_resolver = lambda sid: ProfilePolicy(
+            self.profiles, self.profiles.name_for_session(sid), self.permissions)
+
     def _owner_session_id(self) -> str:
         """The owner's primary Telegram chat id — the delivery identity for scheduled routines that
         have no originating chat. '' when Telegram isn't configured (email/push still work)."""
@@ -892,6 +908,29 @@ class Engine:
             self._system_prompt_file.write_text(self.system_prompt, encoding="utf-8")
         except Exception:
             pass
+        self._write_through_default_profile(system_prompt=self.system_prompt)
+
+    def _write_through_default_profile(self, **fields) -> None:
+        """Mirror an edit made through a GLOBAL surface (the Settings page's system prompt / SOUL
+        editors, the update_soul tool) into the DEFAULT profile.
+
+        Why this exists: profiles are snapshots and the turn resolves persona + system prompt from
+        the active profile, so without this an edit in Settings would land in SOUL.md and silently
+        do nothing. Write-through keeps the one-profile case — everyone's state right after
+        migration — behaving exactly as it did before profiles existed. It deliberately touches ONLY
+        the default profile: propagating into every profile is the action-at-a-distance that
+        snapshot semantics exist to prevent. Edit a non-default profile's text in the Profiles
+        panel, which writes that profile directly."""
+        prof = getattr(self, "profiles", None)
+        prof = prof.default() if prof is not None else None
+        if prof is None:
+            return
+        for k, v in fields.items():
+            setattr(prof, k, v)
+        try:
+            self.profiles.save_profile(prof)
+        except Exception:
+            log.debug("profile write-through failed for %s", ", ".join(fields), exc_info=True)
 
     # ---- SOUL (persona / personality) ----
     def _load_soul(self) -> str:
@@ -915,6 +954,7 @@ class Engine:
             self._soul_file.write_text(self.soul, encoding="utf-8")
         except Exception:
             pass
+        self._write_through_default_profile(soul=self.soul)
 
     def revert_soul(self) -> dict:
         """Restore the previous persona from the backup (a swap — reverting again redoes)."""
@@ -928,11 +968,18 @@ class Engine:
         return {"ok": True, "soul": self.soul}
 
     # ---- standing behavioral rules ----
-    def _compose_rules_block(self) -> str:
-        """The 'Standing instructions from your owner' block, or '' if none / disabled."""
-        if not self._config.enable_rules:
+    def _compose_rules_block(self, config=None, profile=None) -> str:
+        """The 'Standing instructions from your owner' block, or '' if none / disabled.
+
+        Rules are stored ONCE, globally (their text is not profile-owned, exactly like a skill's
+        text); a profile scopes WHICH of them apply. A rule created after the profile was written
+        has no entry and DOES apply — same discoverability rule as skills."""
+        c = config if config is not None else self._config
+        if not c.enable_rules:
             return ""
         rows = self.rules.enabled_rules()
+        if profile is not None:
+            rows = [r for r in rows if profile.rule_applies(r.get("id", ""))]
         if not rows:
             return ""
         return ("## Standing instructions from your owner (always follow these):\n"
@@ -949,6 +996,28 @@ class Engine:
 
     def rules_set_enabled(self, rule_id: str, enabled: bool) -> bool:
         return self.rules.set_enabled(rule_id, enabled)
+
+    def _profile_chat_client(self, profile) -> Optional[ModelClient]:
+        """The chat client for a profile that REBINDS the `chat` role to a different connection —
+        a role binding, never an API key. Returns None (the common case) when the profile leaves the
+        role where the global config already points, so the ordinary `_model_client()` path runs
+        byte-identically, monkeypatches in tests included."""
+        if profile is None:
+            return None
+        st = self.model_presets_store
+        label = (profile.model_roles or {}).get("chat")
+        if not label or label == st.get_role("chat"):
+            return None
+        conn = st.resolve(label)
+        if conn is None:
+            log.warning("profile %r binds chat to unknown connection %r; using the global chat "
+                        "model", profile.name, label)
+            return None
+        c = self._config
+        return ModelClient(conn["base_url"], conn["model_name"], self._connection_key(conn),
+                           timeout=c.request_timeout, max_tokens=c.model_max_tokens,
+                           provider=conn.get("provider", "auto"), reasoning=c.model_reasoning,
+                           **self._conn_client_kwargs(conn, global_sampling=True))
 
     def _model_client(self) -> ModelClient:
         # Identity (URL/model/key/provider/reasoning) comes from config — the chat role is PROJECTED
@@ -1354,25 +1423,234 @@ class Engine:
     def _permission_state(self, name: str) -> str:
         """Effective Allow/Ask/Deny for a tool name — the registry's deny-filter resolver.
 
+        Resolves through the DEFAULT profile's matrix (a profile fully owns it), which is what a
+        session with no binding of its own runs under; a session bound to another profile gets its
+        own resolver on the per-run registry in run_task. Falls back to the global PermissionStore
+        when there are no profiles at all (a bare engine built before migration, or one whose
+        profiles.json was removed).
+
         Reads `self._config` live, so a config PATCH takes effect on the next turn. When interactive
         approvals are OFF nothing is gated at call time, so nothing may be hidden either: the two
         layers are switched by the same flag and can never disagree (hiding a tool that no gate
         would refuse would remove a capability with no enforcement behind it)."""
         if not self._config.enable_interactive_approvals:
             return "allow"
-        return self.permissions.get(name)
+        prof = getattr(self, "profiles", None)
+        prof = prof.default() if prof is not None else None
+        if prof is None:
+            return self.permissions.get(name)
+        return prof.permission(name)
 
-    def permissions_list(self) -> list[dict]:
-        # Full tool enumeration (Task 5): every tool a turn could see, via tools_overview()
-        # (builtin + conditional_enabled + created). states() dedups and always adds "dep-install".
-        ov = self.tools_overview()
-        keys = ([t["name"] for t in ov["builtin"]]
-                + [t["name"] for t in ov["conditional_enabled"]]
-                + [t["name"] for t in ov["created"]])
-        return self.permissions.states(keys)
+    def _permission_keys(self, probe_sandbox: bool = True) -> list[str]:
+        """Every tool a turn could see (builtin + conditional + created), deduped.
 
-    def permission_set(self, key: str, state: str) -> None:
-        self.permissions.set(key, state)   # raises ValueError -> 400 at the API layer
+        `probe_sandbox=False` skips the container-availability probe tools_overview() would
+        otherwise run — see its docstring. Used by the boot-time profile migration, which must not
+        add a subprocess probe (and a cached availability reading) to Engine construction."""
+        ov = self.tools_overview(probe_sandbox=probe_sandbox)
+        return list(dict.fromkeys([t["name"] for t in ov["builtin"]]
+                                  + [t["name"] for t in ov["conditional_enabled"]]
+                                  + [t["name"] for t in ov["created"]]))
+
+    def permissions_list(self, session_id: Optional[str] = None) -> list[dict]:
+        """The Allow/Ask/Deny matrix the dashboard edits. With `session_id` (or none, meaning the
+        default profile) this is the ACTIVE PROFILE's matrix — a profile fully owns it — with the
+        staleness rule applied: a tool the profile has never heard of reads back as `ask` and is
+        flagged `is_default`, which is what the dashboard renders as "not configured"."""
+        keys = self._permission_keys()
+        prof = self.profile_for(session_id or "")
+        if prof is None:
+            return self.permissions.states(keys)     # pre-migration/no profiles: global store
+        from engine.approvals.types import states_for
+        rows = [{"key": k, "state": prof.permission(k), "states": states_for(k),
+                 "is_default": k not in prof.tools} for k in keys]
+        # dep-install is NOT a tool and is never profile-owned — it stays on the global store.
+        rows.append({"key": "dep-install", "state": self.permissions.get("dep-install"),
+                     "states": states_for("dep-install"),
+                     "is_default": "dep-install" not in self.permissions.states_map})
+        return rows
+
+    def permission_set(self, key: str, state: str, session_id: Optional[str] = None) -> None:
+        """Set one permission. Tool permissions are written into the ACTIVE PROFILE (it owns the
+        matrix); `dep-install`, which is not a tool, stays on the global store."""
+        from engine.profiles.store import NON_TOOL_KEYS
+        prof = self.profile_for(session_id or "")
+        if prof is None or key in NON_TOOL_KEYS:
+            self.permissions.set(key, state)   # raises ValueError -> 400 at the API layer
+            return
+        from engine.profiles.store import ProfilePolicy
+        ProfilePolicy(self.profiles, prof.name, self.permissions).set(key, state)
+
+    # ---- agent profiles (argus-cd8) ----
+    def _default_profile_snapshot(self):
+        """The first-run migration snapshot: the CURRENT global settings, as a profile named
+        `Default`. Taken FROM the live config/soul/system-prompt/permission store, so the resolved
+        config after migration is identical to the one before it — nobody's setup changes."""
+        from engine.profiles.store import PROFILE_FLAG_FIELDS, Profile
+        return Profile(
+            name="Default",
+            description="Your settings as they were before profiles existed.",
+            soul=self.soul,
+            system_prompt=self.system_prompt,
+            flags={f: getattr(self._config, f) for f in PROFILE_FLAG_FIELDS},
+            # Pin every tool that exists TODAY at its current global state. Tools added LATER have
+            # no entry and fall to the `ask` default (the staleness rule) — deliberately.
+            tools={n: self.permissions.get(n)
+                   for n in self._permission_keys(probe_sandbox=False)},
+            skills={},          # no entry = visible
+            rules={},           # no entry = applies
+            model_roles={k: v for k, v in self.model_presets_store.roles().items() if v},
+        )
+
+    def profile_for(self, session_id: str = ""):
+        """The profile governing this session: its own binding if it has one, else the global
+        default. Exactly one profile is always active after migration."""
+        return self.profiles.for_session(session_id or "")
+
+    def config_for(self, session_id: str = ""):
+        """The Config a turn in this session runs under. A profile deserializes into the SAME
+        Config the engine already consumes — there is no parallel config path, and the loop never
+        learns what a profile is."""
+        prof = self.profile_for(session_id)
+        return self._config if prof is None else prof.to_config(self._config)
+
+    def _profile_permission_state(self, profile):
+        """The registry's deny-filter resolver, backed by a PROFILE's matrix.
+
+        Mirrors `_permission_state`: when interactive approvals are OFF nothing is gated at call
+        time, so nothing may be hidden either — the two layers are switched by the same flag and can
+        never disagree."""
+        def resolve(name: str) -> str:
+            if not self._config.enable_interactive_approvals:
+                return "allow"
+            return profile.permission(name)
+        return resolve
+
+    def _profile_alters_permissions(self, profile) -> bool:
+        """True when this profile resolves ANY registered tool differently from the engine-wide
+        registry (i.e. from the default profile) — the cheap check that decides whether run_task
+        must build its own registry view. Compared through the same resolver the registry would
+        use, so the approvals-off short-circuit is honoured on both sides."""
+        resolve = self._profile_permission_state(profile)
+        return any(resolve(n) != self._permission_state(n) for n in self.registry.names())
+
+    def skill_registry_for(self, profile):
+        """A SkillRegistry narrowed to the skills this profile can see.
+
+        Scoping happens HERE, at the registry the selector is handed, so a hidden skill is invisible
+        to EVERY selection mode — explicit (including an explicit by-name request), model_driven and
+        hybrid alike. Doing it inside one selector would leave the other two able to resurrect it.
+        A skill added after the profile was written has no entry and is VISIBLE."""
+        if profile is None:
+            return self.skill_registry
+        hidden = [s for s in self.skill_registry.list() if not profile.skill_visible(s.name)]
+        if not hidden:
+            return self.skill_registry          # nothing scoped out — share the live registry
+        from engine.skills.base import SkillRegistry
+        scoped = SkillRegistry()
+        for s in self.skill_registry.list():
+            if profile.skill_visible(s.name):
+                scoped.register(s)
+        return scoped
+
+    def profiles_overview(self, session_id: str = "") -> dict:
+        """Everything the dashboard's Profiles panel needs, including the STALENESS report: the
+        tools present in the registry but absent from each profile's matrix ("3 tools not
+        configured — currently Ask"). A stale profile that announces itself is fine; one that is
+        invisible is the failure mode."""
+        names = self._permission_keys()
+        rows = []
+        for p in self.profiles.list():
+            stale = p.stale_tools(names)
+            rows.append({
+                "name": p.name, "description": p.description,
+                "is_default": p.name == self.profiles.active_profile,
+                "sessions": self.profiles.sessions_using(p.name),
+                "denied": sorted(n for n, s in p.tools.items() if s == "deny"),
+                "hidden_skills": sorted(n for n, v in p.skills.items() if not v),
+                "stale_tools": stale, "stale_count": len(stale),
+                "updated_at": p.updated_at,
+            })
+        rows.sort(key=lambda r: r["name"].lower())
+        return {"profiles": rows, "active_profile": self.profiles.active_profile,
+                "session_profile": self.profiles.name_for_session(session_id or ""),
+                "session_id": session_id or ""}
+
+    def profile_detail(self, name: str) -> dict:
+        prof = self.profiles.get(name)
+        if prof is None:
+            raise KeyError(f"no profile {name!r}")
+        rec = prof.to_json()
+        rec["stale_tools"] = prof.stale_tools(self._permission_keys())
+        rec["all_tools"] = self._permission_keys()
+        rec["all_skills"] = [s.name for s in self.skill_registry.list()]
+        rec["all_rules"] = self.rules.list()
+        return rec
+
+    def profile_save(self, name: str, updates: dict) -> dict:
+        """Update one profile's stored fields. Snapshot semantics: whatever is written here is
+        exactly what that profile runs with."""
+        from engine.profiles.store import Profile
+        prof = self.profiles.get(name)
+        if prof is None:
+            raise KeyError(f"no profile {name!r}")
+        rec = prof.to_json()
+        for k in ("description", "soul", "system_prompt", "flags", "tools", "skills", "rules",
+                  "model_roles"):
+            if k in updates:
+                rec[k] = updates[k]
+        merged = Profile.from_json(rec, name=name)
+        merged.created_at = prof.created_at
+        self.profiles.save_profile(merged)
+        return merged.to_json()
+
+    def profile_create(self, name: str, source: str = "", description: str = "") -> dict:
+        """Create a profile — as a DUPLICATE of `source` when given (the primary authoring path
+        under snapshot semantics), else as a snapshot of the current global settings."""
+        if source:
+            return self.profiles.duplicate(source, name, description).to_json()
+        prof = self._default_profile_snapshot()
+        prof.name = name
+        prof.description = description
+        return self.profiles.create(prof).to_json()
+
+    def profile_rename(self, old: str, new: str) -> dict:
+        return self.profiles.rename(old, new).to_json()
+
+    def profile_delete(self, name: str) -> dict:
+        self.profiles.delete(name)      # refuses the active profile and the last one
+        return {"deleted": name}
+
+    async def activate_profile(self, name: str, session_id: str = "") -> dict:
+        """Activate a profile — for ONE session when `session_id` is given, else as the global
+        default for every unbound session.
+
+        Activation does NOT block and does not ask for confirmation: the maintainer chose full
+        profile ownership of permissions over a confirmation gate. The compromise is that it must be
+        LEGIBLE, so this emits an event naming the profile and every tool whose permission is WIDER
+        than under the outgoing profile. Narrowing needs no announcement.
+        """
+        from engine.profiles.store import widened_tools
+        prof = self.profiles.get(name)
+        if prof is None:
+            raise KeyError(f"no profile {name!r}")
+        prev = self.profile_for(session_id)
+        if session_id:
+            self.profiles.bind(session_id, name)
+        else:
+            self.profiles.set_default(name)
+        widened = widened_tools(prev, prof, self.registry.names())
+        data = {"profile": name, "previous": prev.name if prev else None,
+                "scope": "session" if session_id else "default", "widened": widened}
+        await self.emit(new_run_id(), session_id or "dashboard", 0, "profile", data)
+        if widened:
+            log.info("profile '%s' activated (was '%s'); WIDENED: %s", name,
+                     prev.name if prev else "—",
+                     ", ".join(f"{w['tool']} {w['from']}->{w['to']}" for w in widened))
+        else:
+            log.info("profile '%s' activated (was '%s'); nothing widened", name,
+                     prev.name if prev else "—")
+        return {"ok": True, **data}
 
     def approvals_decide(self, req_id: str, action: str, actor: str = "owner") -> str:
         return self.approvals.resolve(req_id, action, actor)
@@ -1501,7 +1779,12 @@ class Engine:
         # Stashed here too so tests/callers can observe which channel drove this turn.
         self._last_run_origin = origin
         self._pending_images.pop(session_id, None)   # fresh per turn; drained by the Telegram layer
-        c = self._config
+        # The active profile is resolved PER TURN (per-session binding, global default otherwise),
+        # so a swap takes effect on the next turn without touching session history. It deserializes
+        # into the same Config the rest of this function already consumes — nothing below this line
+        # knows what a profile is, it just reads `c`.
+        profile = self.profile_for(session_id)
+        c = self.config_for(session_id)
 
         # Auto-compact BEFORE building this turn's context: if the last turn's prompt already passed
         # the threshold, summarize the older history first so this (and every later) turn re-sends a
@@ -1515,8 +1798,12 @@ class Engine:
             except Exception:
                 log.debug("auto-compact failed", exc_info=True)
 
-        # Skill selection (A/B: explicit | model_driven), behind one interface.
-        selector = get_selector(c.skill_selection_mode, self.skill_registry)
+        # Skill selection (A/B: explicit | model_driven), behind one interface. The registry handed
+        # to the selector is SCOPED to the profile, which is what makes a hidden skill invisible to
+        # every selection mode — including an explicit by-name request, which would otherwise
+        # resurrect it.
+        skill_registry = self.skill_registry_for(profile)
+        selector = get_selector(c.skill_selection_mode, skill_registry)
         ctx = selector.prepare(session_id, text, requested_skill)
 
         # Deterministic skill execution: if the activated skill carries structured `steps`, the
@@ -1524,12 +1811,16 @@ class Engine:
         # routine executor, instead of injecting prose for the model to hand-dispatch. Skip on the
         # ephemeral routine/model-step session so a model step can't recurse back into this path.
         if ctx.active_skill and not session_id.startswith("__routine__:"):
-            _sk = self.skill_registry.get(ctx.active_skill)
+            _sk = skill_registry.get(ctx.active_skill)
             if _sk is not None and getattr(_sk, "steps", None):
                 return await self._run_deterministic_skill(session_id, run_id, _sk, text)
 
-        # Effective prompt = SOUL (persona) + operational system prompt + additions.
-        system_prompt = (self.soul + "\n\n" + self.system_prompt) if self.soul else self.system_prompt
+        # Effective prompt = SOUL (persona) + operational system prompt + additions. BOTH come from
+        # the active profile — this is the whole point of profiles: one global persona cannot be
+        # both a terse coding agent and a warm daily-briefing agent.
+        _soul = profile.soul if profile is not None else self.soul
+        _sysprompt = (profile.system_prompt if profile is not None else "") or self.system_prompt
+        system_prompt = (_soul + "\n\n" + _sysprompt) if _soul else _sysprompt
         if ctx.system_additions:
             system_prompt = system_prompt + "\n\n" + ctx.system_additions
 
@@ -1544,7 +1835,7 @@ class Engine:
                 system_prompt = system_prompt + "\n\n## What you remember about this user:\n" + \
                     "\n".join(f"- {m['text']}" for m in mems)
 
-        _rules_block = self._compose_rules_block()
+        _rules_block = self._compose_rules_block(config=c, profile=profile)
         if _rules_block:
             system_prompt = system_prompt + "\n\n" + _rules_block
 
@@ -1555,6 +1846,12 @@ class Engine:
         skill_creation_on = c.enable_skill_creation and _native_args
         scheduler_on = c.enable_scheduler
         watch_on = c.enable_watch
+
+        # The active profile OWNS the per-tool permission matrix, so this turn's catalog is filtered
+        # through the PROFILE's states, not the global store's. It is only a different resolver on
+        # the per-run registry — the deny filter itself (argus-52n) and the gate are untouched.
+        _profile_perms = (self._profile_permission_state(profile) if profile is not None
+                          else self.registry.permissions)
 
         # Build the per-run tool registry. Clone when we must add per-run tools (skill
         # tools, create_tool/create_skill, and/or the session-bound scheduler/watch tools) so
@@ -1567,8 +1864,12 @@ class Engine:
                 # act on a clone: the view shares `_tools` by reference, so wrapping the engine-wide
                 # base registry would leak find_tool (and any mid-turn create_tool) into every
                 # later run and into tools_overview().
-                or c.tool_disclosure_mode != "off"):
-            run_registry = ToolRegistry(permissions=self.registry.permissions)
+                or c.tool_disclosure_mode != "off"
+                # ...and whenever the profile's matrix resolves ANY tool differently from the global
+                # store: the profile's resolver may only be attached to a clone, never to the shared
+                # engine-wide registry (that would leak one session's profile into every other one).
+                or (profile is not None and self._profile_alters_permissions(profile))):
+            run_registry = ToolRegistry(permissions=_profile_perms)
             for t in self.registry.list():
                 run_registry.register(t)
             for t in ctx.extra_tools:
@@ -1655,9 +1956,14 @@ class Engine:
             if skill_creation_on:
                 from engine.experimental.skill_creation import (
                     CreateSkillTool, DeleteSkillTool, InspectSkillTool)
+                # create_skill and delete_skill act on the GLOBAL registry — a skill is installed
+                # (and uninstalled) once, for everyone; a profile only scopes visibility, and a
+                # delete that dropped the skill from a per-turn COPY would leave the live one
+                # running until the next restart. inspect_skill reads the SCOPED registry, so a
+                # skill this profile hides cannot be read back through it.
                 run_registry.register(CreateSkillTool(
                     self.skill_registry, run_registry, self._created_skills_dir))
-                run_registry.register(InspectSkillTool(self.skill_registry))
+                run_registry.register(InspectSkillTool(skill_registry))
                 run_registry.register(DeleteSkillTool(
                     self.skill_registry, self._created_skills_dir))
             if tool_creation_on:
@@ -1681,7 +1987,7 @@ class Engine:
             core_names = [n.strip() for n in c.tool_disclosure_core.split(",") if n.strip()]
             skill_tools: set[str] = set()
             if ctx.active_skill:
-                _active = self.skill_registry.get(ctx.active_skill)
+                _active = skill_registry.get(ctx.active_skill)
                 if _active is not None:
                     skill_tools = set(_active.tools or ())
             # find_tool is force-pinned regardless of the configured core: it is the escape hatch,
@@ -1742,7 +2048,7 @@ class Engine:
         deps = LoopDeps(
             mode=get_mode(c.tool_calling_mode, run_registry),
             registry=run_registry,
-            model_client=self._model_client(),
+            model_client=(self._profile_chat_client(profile) or self._model_client()),
             store=self.store,
             events=self.events,
             max_steps=effective_max_steps,
@@ -1755,7 +2061,7 @@ class Engine:
             run_id=run_id, origin=origin,
             friction=self.friction, model_name=c.model_name,
         )
-        if self._adaptive_reasoning_active():            # route this turn to a reasoning LEVEL
+        if self._adaptive_reasoning_active(c):           # route this turn to a reasoning LEVEL
             deps.reasoning = await self._route_reasoning(text)
             log.info("adaptive_thinking: reasoning=%s for %r", deps.reasoning, text[:60])
         # Route any attached images per the `vision` role (inline / caption / none).
@@ -1918,11 +2224,14 @@ class Engine:
         "- high: hard reasoning — math/logic, planning, tricky trade-offs, careful correctness\n"
         "Answer with only the single word.")
 
-    def _adaptive_reasoning_active(self) -> bool:
+    def _adaptive_reasoning_active(self, config=None) -> bool:
         """Whether the adaptive router decides this turn's reasoning level. It runs ONLY when the
         user left reasoning on 'auto'; an explicitly pinned level (off/low/medium/high) is a
-        deliberate choice that must win every turn and is never overridden by the router."""
-        c = self._config
+        deliberate choice that must win every turn and is never overridden by the router.
+
+        Takes the TURN's config (the active profile's, when called from run_task) because
+        adaptive_thinking is a profile-governed flag."""
+        c = config if config is not None else self._config
         return bool(c.adaptive_thinking) and (c.model_reasoning or "auto").strip().lower() == "auto"
 
     async def _route_reasoning(self, text: str) -> str:
@@ -2394,7 +2703,7 @@ class Engine:
         ov = self.tools_overview()
         return [t["name"] for t in ov["builtin"]] + [t["name"] for t in ov["conditional_enabled"]]
 
-    def tools_overview(self) -> dict:
+    def tools_overview(self, probe_sandbox: bool = True) -> dict:
         """Enumerate every tool a turn could see: `builtin` (the base registry, fixed at Engine
         construction), `created` (persisted create_tool output), and `conditional_enabled` — every
         tool `run_task`'s per-run registry block (engine.py, the `run_registry = ToolRegistry()`
@@ -2468,7 +2777,13 @@ class Engine:
             ("run_routine", "Run a saved routine."),
             ("list_routines", "List saved routines."),
         )
-        if c.enable_code_interpreter and self._exec_python_ok():
+        # `probe_sandbox=False` skips _exec_python_ok(), which shells out to the container runtime
+        # to ask whether it is up. Callers that only need the NAMES (the profile migration snapshot)
+        # pass False: probing there would add a subprocess to Engine.__init__ and cache an
+        # availability reading that later turns would inherit. Listing exec_python in that case is
+        # the safe direction — a name too many in a permission matrix is inert; a missing one would
+        # silently fall to the `ask` staleness default.
+        if c.enable_code_interpreter and (self._exec_python_ok() if probe_sandbox else True):
             # Same description the tool itself would advertise this turn (exec_python_description()
             # keyed on the same `enable_sandbox` flag ExecPythonTool.__init__ uses) — kept as one
             # function so this dashboard-facing list and the live tool schema can't drift apart.
