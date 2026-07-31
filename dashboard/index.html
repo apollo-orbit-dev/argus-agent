@@ -78,6 +78,9 @@
     </div>
 
     <div class="mode-chips">
+      <!-- The active profile is shown on EVERY page, not only in Settings: a user who cannot see
+           which profile is live cannot reason about what the agent may do. -->
+      <span class="chip" id="chipProfileWrap" title="Active agent profile for this session"><span class="led led-ok"></span><span class="chip-label" id="chipProfile">–</span></span>
       <span class="chip"><span class="led led-cyan"></span><span class="chip-label" id="chipTcm">–</span></span>
       <span class="chip"><span class="led led-amber"></span><span class="chip-label" id="chipSsm">–</span></span>
     </div>
@@ -487,6 +490,19 @@
         <div class="page-head">
           <span class="page-title">Settings</span>
           <span class="page-sub">Model, connections, prompts, delivery and raw config.</span>
+        </div>
+
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-head">
+            <span class="card-title">Agent profiles<span class="count-badge" id="profilesCount"></span></span>
+            <span class="card-hint" style="text-transform:none; letter-spacing:normal;">a profile is a snapshot — persona, prompt, tool permissions, skills, flags</span>
+          </div>
+          <div class="row-inline" style="margin-bottom:12px;">
+            <input type="text" id="profileNewName" placeholder="New profile name (e.g. Research)" style="flex:1;">
+            <select id="profileNewSource" title="Duplicate is the primary authoring path"></select>
+            <button class="btn btn-sm" id="profileCreateBtn">+ Duplicate</button>
+          </div>
+          <div id="profilesList"><div class="empty">loading…</div></div>
         </div>
 
         <div class="grid grid-2" style="margin-bottom:16px;">

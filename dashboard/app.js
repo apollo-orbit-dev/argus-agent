@@ -3624,6 +3624,156 @@
   $('relRefresh').addEventListener('click', loadReliability);
   $('relRange').addEventListener('change', loadReliability);
 
+  /* ================= SETTINGS: agent profiles ================= */
+  // A profile is a SNAPSHOT: persona, system prompt, per-tool permissions, skill visibility and a
+  // set of feature flags, all stored explicitly. Activation never blocks — it is made VISIBLE
+  // instead, by the header chip (every page) and by the "widened" toast below.
+  var profileNames = [];
+
+  function profileRowHtml(p, sessionProfile){
+    var tags = '';
+    if (p.name === sessionProfile) tags += '<span class="tag tag-ok">active here</span> ';
+    if (p.is_default) tags += '<span class="tag tag-muted">default</span> ';
+    var notes = [];
+    if (p.stale_count) notes.push(p.stale_count + ' tool' + (p.stale_count === 1 ? '' : 's') + ' not configured — currently Ask');
+    if ((p.denied || []).length) notes.push((p.denied || []).length + ' denied (not offered to the model)');
+    if ((p.hidden_skills || []).length) notes.push((p.hidden_skills || []).length + ' skill(s) hidden');
+    if ((p.sessions || []).length) notes.push((p.sessions || []).length + ' bound session(s)');
+    return '<div class="list-item" data-profile-row="' + esc(p.name) + '">' +
+      '<div class="list-main"><div class="list-title">' + esc(p.name) + ' ' + tags + '</div>' +
+      '<div class="list-sub">' + esc(p.description || '—') +
+      (notes.length ? ' · ' + esc(notes.join(' · ')) : '') + '</div></div>' +
+      '<button class="btn btn-sm" data-profile-activate="' + esc(p.name) + '">Use here</button>' +
+      '<button class="act-btn" data-profile-default="' + esc(p.name) + '" title="Make this the default for new sessions">Default</button>' +
+      '<button class="act-btn" data-profile-edit="' + esc(p.name) + '" title="Edit persona / system prompt">Edit</button>' +
+      '<button class="act-btn" data-profile-rename="' + esc(p.name) + '" title="Rename">Rename</button>' +
+      '<button class="act-btn danger" data-profile-delete="' + esc(p.name) + '" title="Delete">✕</button>' +
+      '</div><div class="profile-editor" id="profileEd-' + esc(p.name) + '" hidden></div>';
+  }
+
+  async function loadProfiles(){
+    var el = $('profilesList');
+    try {
+      var d = await (await fetch('/profiles?session_id=' + encodeURIComponent(SESSION))).json();
+      var rows = d.profiles || [];
+      profileNames = rows.map(function(r){ return r.name; });
+      $('chipProfile').textContent = d.session_profile || '–';
+      var wrap = $('chipProfileWrap');
+      if (wrap) wrap.title = 'Active agent profile for this session: ' + (d.session_profile || '—') +
+        ' (default for new sessions: ' + (d.active_profile || '—') + ')';
+      if (!el) return;
+      $('profilesCount').textContent = rows.length ? (' ' + rows.length) : '';
+      $('profileNewSource').innerHTML = rows.map(function(r){
+        return '<option value="' + esc(r.name) + '"' + (r.name === d.session_profile ? ' selected' : '') + '>copy of ' + esc(r.name) + '</option>';
+      }).join('');
+      el.innerHTML = rows.length ? rows.map(function(r){ return profileRowHtml(r, d.session_profile); }).join('')
+        : '<div class="empty">No profiles yet.</div>';
+    } catch(e){ if (el) el.innerHTML = '<div class="panel-error">Failed to load profiles.</div>'; }
+  }
+
+  async function openProfileEditor(name){
+    var box = $('profileEd-' + name);
+    if (!box) return;
+    if (!box.hidden){ box.hidden = true; return; }
+    box.hidden = false;
+    box.innerHTML = '<div class="empty">loading…</div>';
+    try {
+      var p = await (await fetch('/profiles/' + encodeURIComponent(name))).json();
+      box.innerHTML =
+        '<div class="field"><label class="field-label">description</label>' +
+        '<input type="text" data-pf="description" value="' + esc(p.description || '') + '"></div>' +
+        '<div class="field"><label class="field-label">persona (SOUL)</label>' +
+        '<textarea data-pf="soul" rows="5">' + esc(p.soul || '') + '</textarea></div>' +
+        '<div class="field"><label class="field-label">system prompt</label>' +
+        '<textarea data-pf="system_prompt" rows="6">' + esc(p.system_prompt || '') + '</textarea></div>' +
+        '<div class="card-hint" style="text-transform:none; letter-spacing:normal;">' +
+        'Tool permissions for this profile are edited on the Developer page while it is active here. ' +
+        ((p.stale_tools || []).length ? esc((p.stale_tools || []).length + ' tool(s) not in this profile: ' + (p.stale_tools || []).join(', ') + ' — they run as Ask.') : 'Every registered tool is configured.') +
+        '</div>' +
+        '<div class="small-btn-row"><button class="btn btn-sm" data-profile-save="' + esc(name) + '">Save profile</button></div>';
+    } catch(e){ box.innerHTML = '<div class="panel-error">Failed to load this profile.</div>'; }
+  }
+
+  async function saveProfile(name){
+    var box = $('profileEd-' + name);
+    if (!box) return;
+    var body = {};
+    box.querySelectorAll('[data-pf]').forEach(function(f){ body[f.getAttribute('data-pf')] = f.value; });
+    try {
+      var r = await fetch('/profiles/' + encodeURIComponent(name), {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error((await r.json().catch(function(){ return {}; })).detail || ('HTTP ' + r.status));
+      toast('Profile saved', 'ok');
+      loadProfiles();
+    } catch(e){ toast(e.message || 'Save failed', 'err'); }
+  }
+
+  async function profileAction(url, body, okMsg){
+    try {
+      var r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                 body: JSON.stringify(body || {}) });
+      var d = await r.json().catch(function(){ return {}; });
+      if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+      toast(okMsg, 'ok');
+      // Activation is not gated — it is ANNOUNCED. Surface any tool whose permission widened.
+      if (d.widened && d.widened.length){
+        toast('Wider permissions: ' + d.widened.map(function(w){ return w.tool + ' ' + w.from + '→' + w.to; }).join(', '), 'info');
+      }
+      await loadProfiles();
+      return d;
+    } catch(e){ toast(e.message || 'Failed', 'err'); }
+  }
+
+  $('profilesList').addEventListener('click', function(e){
+    var b = e.target.closest('[data-profile-activate],[data-profile-default],[data-profile-edit],' +
+                             '[data-profile-rename],[data-profile-delete],[data-profile-save]');
+    if (!b) return;
+    var name;
+    if ((name = b.getAttribute('data-profile-activate'))){
+      profileAction('/profiles/' + encodeURIComponent(name) + '/activate', { session_id: SESSION },
+                    'This session now runs under "' + name + '"');
+    } else if ((name = b.getAttribute('data-profile-default'))){
+      profileAction('/profiles/' + encodeURIComponent(name) + '/activate', {},
+                    '"' + name + '" is now the default profile');
+    } else if ((name = b.getAttribute('data-profile-edit'))){
+      openProfileEditor(name);
+    } else if ((name = b.getAttribute('data-profile-save'))){
+      saveProfile(name);
+    } else if ((name = b.getAttribute('data-profile-rename'))){
+      var next = window.prompt('Rename profile "' + name + '" to:', name);
+      if (next && next !== name) profileAction('/profiles/' + encodeURIComponent(name) + '/rename',
+                                               { name: next }, 'Renamed to "' + next + '"');
+    } else if ((name = b.getAttribute('data-profile-delete'))){
+      confirmDelete({
+        title: 'Delete profile', message: 'Delete profile "' + name + '"? This can\'t be undone.',
+        onConfirm: async function(){
+          try {
+            var r = await fetch('/profiles/' + encodeURIComponent(name), { method: 'DELETE' });
+            var d = await r.json().catch(function(){ return {}; });
+            // The active profile and the last remaining profile are refused server-side (409).
+            if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+            toast('Profile deleted', 'ok');
+          } catch(err){ toast(err.message || 'Delete failed', 'err'); }
+          loadProfiles();
+        }
+      });
+    }
+  });
+
+  $('profileCreateBtn').addEventListener('click', async function(){
+    var name = $('profileNewName').value.trim();
+    if (!name){ toast('Name the new profile', 'info'); return; }
+    try {
+      var r = await fetch('/profiles', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, source: $('profileNewSource').value || '' }) });
+      var d = await r.json().catch(function(){ return {}; });
+      if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+      $('profileNewName').value = '';
+      toast('Profile "' + name + '" created', 'ok');
+      loadProfiles();
+    } catch(e){ toast(e.message || 'Create failed', 'err'); }
+  });
+
   /* ================= WIRE-UP: page-first-open loaders + initial calls ================= */
   pageLoaders.automation = function(){ loadRoutines(); loadScheduled(); loadWatches(); };
   pageLoaders.data = function(){ loadFiles(); loadKnowledge(); loadArtifacts(); loadTables(); };
@@ -3632,6 +3782,7 @@
   pageLoaders.developer = function(){ loadLibrary(); loadDeps(); loadTrust(); loadPendingApprovals(); };
   pageLoaders.reliability = function(){ loadReliability(); };
   pageLoaders.settings = function(){
+    loadProfiles();
     loadRoles(); loadCommands(); loadNotify();
     loadSystemPrompt(); loadSoul(); loadEnv();
     loadSandboxStatus(); loadServiceStatus();
@@ -3648,6 +3799,7 @@
   loadTranscript(SESSION);   // restore the persisted transcript for whichever session was active on last visit
   renderSessionList();
   loadConfig();
+  loadProfiles();   // the header chip must show the active profile on EVERY page, not just Settings
   loadSkills();
   loadLibrary();   // also populates the Disclosure K "of N tools" hint — no new polling, one-time load
   loadUsage();

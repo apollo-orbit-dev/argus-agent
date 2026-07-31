@@ -871,17 +871,91 @@ def create_app(engine: Engine) -> FastAPI:
         return {"approvals": engine.approvals_list()}
 
     @app.get("/permissions")
-    async def permissions_list():
-        return {"permissions": engine.permissions_list()}
+    async def permissions_list(session_id: str = ""):
+        # The matrix of the profile governing `session_id` (the default profile when omitted) — a
+        # profile fully owns it. Rows with is_default=true are the ones the profile has never heard
+        # of, running on the `ask` staleness default.
+        return {"permissions": engine.permissions_list(session_id)}
 
     @app.post("/permissions/set")
     async def permissions_set(body: dict, request: Request):
         _require_admin(request)
         try:
-            engine.permission_set(body.get("key", ""), body.get("state", ""))
+            engine.permission_set(body.get("key", ""), body.get("state", ""),
+                                  body.get("session_id", ""))
         except (ValueError, KeyError):
             raise HTTPException(400, "invalid key/state")
         return {"ok": True}
+
+    # ---- agent profiles (mutations admin-gated like /rules) ----
+    @app.get("/profiles")
+    async def profiles_list(session_id: str = ""):
+        return engine.profiles_overview(session_id)
+
+    @app.get("/profiles/{name}")
+    async def profile_get(name: str, request: Request):
+        # Admin-gated like the skill/tool editors: a profile carries the SOUL and the operational
+        # system prompt, which are the same class of content those routes protect.
+        _require_admin(request)
+        try:
+            return engine.profile_detail(name)
+        except KeyError:
+            raise HTTPException(404, f"no profile '{name}'")
+
+    @app.post("/profiles")
+    async def profile_create(body: dict, request: Request):
+        _require_admin(request)
+        name = (body.get("name") or "").strip()
+        if not name:
+            raise HTTPException(400, "body must include 'name'")
+        try:
+            return engine.profile_create(name, (body.get("source") or "").strip(),
+                                         body.get("description") or "")
+        except KeyError:
+            raise HTTPException(404, f"no profile '{body.get('source')}'")
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.put("/profiles/{name}")
+    async def profile_save(name: str, body: dict, request: Request):
+        _require_admin(request)
+        try:
+            return engine.profile_save(name, body or {})
+        except KeyError:
+            raise HTTPException(404, f"no profile '{name}'")
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/profiles/{name}/rename")
+    async def profile_rename(name: str, body: dict, request: Request):
+        _require_admin(request)
+        try:
+            return engine.profile_rename(name, (body.get("name") or "").strip())
+        except KeyError:
+            raise HTTPException(404, f"no profile '{name}'")
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/profiles/{name}/activate")
+    async def profile_activate(name: str, body: dict, request: Request):
+        """Activate a profile for ONE session, or as the global default when no session is given.
+        Never blocks: the event this emits (and the persistent badge in the dashboard) is what makes
+        a widened permission visible instead."""
+        _require_admin(request)
+        try:
+            return await engine.activate_profile(name, (body or {}).get("session_id", "") or "")
+        except KeyError:
+            raise HTTPException(404, f"no profile '{name}'")
+
+    @app.delete("/profiles/{name}")
+    async def profile_delete(name: str, request: Request):
+        _require_admin(request)
+        try:
+            return engine.profile_delete(name)
+        except KeyError:
+            raise HTTPException(404, f"no profile '{name}'")
+        except ValueError as e:
+            raise HTTPException(409, str(e))     # active profile / last profile / in use
 
     @app.post("/approvals/decide")
     async def approvals_decide(body: dict, request: Request):
