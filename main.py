@@ -141,7 +141,7 @@ async def main() -> None:
         engine.approvals._telegram = _telegram_approval
 
         # Deliver scheduled-task results back to Telegram chats (session id == chat id).
-        from backend.telegram_bot import to_telegram_html
+        from backend.telegram_bot import send_html_message
 
         async def _deliver(session_id: str, text: str) -> None:
             try:
@@ -150,11 +150,9 @@ async def main() -> None:
                 return  # non-telegram session (e.g. dashboard) — result is in the event log
             if chat_id not in config.allowed_chat_ids:
                 return
-            try:
-                await tg_app.bot.send_message(chat_id, to_telegram_html(text),
-                                              parse_mode="HTML", disable_web_page_preview=True)
-            except Exception:
-                await tg_app.bot.send_message(chat_id, text)
+            # send_html_message renders, splits on a safe boundary and retries in plain text: a
+            # long scheduled result must not be refused by the API and vanish.
+            await send_html_message(tg_app.bot, chat_id, text)
 
         engine.notifier.telegram_deliver = _deliver      # the notify tool's telegram channel
 

@@ -286,46 +286,201 @@ def strip_markdown(md: str) -> str:
     return t
 
 
-async def deliver(msg, text: str) -> None:
-    """Edit `msg` with the agent's answer, rendered as Telegram HTML; on a parse
-    error, fall back to clean plain text so delivery never fails."""
-    try:
-        await msg.edit_text(to_telegram_html(text), parse_mode=ParseMode.HTML,
-                            disable_web_page_preview=True)
-    except Exception:
+# --------------------------------------------------------------------------
+# Markup-aware splitting
+# --------------------------------------------------------------------------
+# Telegram rejects a message over TELEGRAM_MAX_CHARS *and* a message whose HTML is malformed, so
+# slicing a long reply at a fixed offset trades one rejection for the other: the cut lands inside
+# an open <b>/<code>/<pre> and the chunk is refused for bad markup instead of for length. These
+# helpers split only between tokens (never inside a tag or an entity) and re-balance the markup.
+
+_TG_VOID_TAGS = {"br", "hr", "img"}                  # never pushed onto the open-tag stack
+_TG_PREFORMATTED = {"pre", "code"}                   # cutting mid-line in these is destructive
+_HARD_CUT_MARK = "…"                                 # marks a cut made mid-token (nothing is lost)
+
+# One token = a tag | an entity | a whitespace run | a word | a stray angle/ampersand. Splitting
+# only at token boundaries is what keeps every emitted chunk parseable.
+_TG_TOKEN_RE = re.compile(r"<[^<>]*>|&[#A-Za-z0-9]{1,12};|\s+|[^\s<>&]+|[<>&]")
+_TG_TAG_RE = re.compile(r"<\s*(/?)\s*([A-Za-z][A-Za-z0-9-]*)")
+
+
+def _tg_apply_tag(stack: list, tok: str) -> None:
+    """Update the open-tag `stack` for one token (a no-op for anything that is not a tag)."""
+    m = _TG_TAG_RE.match(tok)
+    if not m:
+        return
+    name = m.group(2).lower()
+    if name in _TG_VOID_TAGS:
+        return
+    if m.group(1):                                   # closing tag
+        for k in range(len(stack) - 1, -1, -1):
+            if stack[k][0] == name:
+                del stack[k:]                        # also drops anything left open inside it
+                return
+        return                                       # stray close tag: ignore
+    stack.append((name, tok))                        # keep the FULL tag: <a href="…"> must reopen
+
+
+def _tg_closers(stack) -> str:
+    return "".join(f"</{name}>" for name, _ in reversed(stack))
+
+
+def _tg_openers(stack) -> str:
+    return "".join(tag for _, tag in stack)
+
+
+def html_to_plain(html: str) -> str:
+    """Telegram HTML -> clean plain text, for the fallback send.
+
+    Strips every tag this module can emit — <pre> included: /update wraps the changelog and the
+    pip tail in one, and a leftover "<pre>" in the plain-text fallback is exactly what the
+    fallback exists to avoid.
+    """
+    return _html.unescape(re.sub(r"<[^<>]*>", "", html or ""))
+
+
+def split_html_for_telegram(text: str, limit: int = TELEGRAM_MAX_CHARS) -> list[str]:
+    """Split Telegram-HTML into chunks that are each within `limit` AND valid on their own.
+
+    Cuts are made at a paragraph break, else a line break, else a word break, and never inside a
+    tag or an entity. Whatever is still open at the cut is closed at the end of the chunk and
+    reopened at the start of the next one, so <b>/<code>/<pre>/<a href> survive the split. Inside
+    <pre>/<code> a word boundary is not used — code is cut at a newline or not at all. A single
+    token longer than a whole message is sliced (nothing is dropped) and the cut is marked.
+    """
+    text = text or ""
+    if len(text) <= limit:
+        return [text]
+    toks = _TG_TOKEN_RE.findall(text)
+    chunks: list[str] = []
+    carry: list = []                                 # tags open at the last cut -> reopened here
+    i = 0
+    while i < len(toks):
+        if len(_tg_openers(carry)) > limit // 2:     # absurd nesting: keep making progress
+            log.warning("telegram split: markup too deeply nested to carry over; dropping it")
+            carry = []
+        parts = [_tg_openers(carry)]
+        cur_len = len(parts[0])
+        stack = list(carry)
+        best: dict = {}                              # tier -> (token idx, stack, len(parts), length)
+        j, overflowed, has_content = i, False, False
+        while j < len(toks):
+            tok = toks[j]
+            if tok.isspace() and cur_len > len(parts[0]):
+                tier = 3 if "\n\n" in tok else (2 if "\n" in tok else 1)
+                in_pre = any(n in _TG_PREFORMATTED for n, _ in stack)
+                if not (tier == 1 and in_pre) and cur_len + len(_tg_closers(stack)) <= limit:
+                    best[tier] = (j, list(stack), len(parts), cur_len)
+            nstack = list(stack)
+            _tg_apply_tag(nstack, tok)
+            if cur_len + len(tok) + len(_tg_closers(nstack)) > limit:
+                overflowed = True
+                break
+            parts.append(tok)
+            cur_len += len(tok)
+            has_content = has_content or not (tok.isspace() or _TG_TAG_RE.match(tok))
+            stack = nstack
+            j += 1
+        if not overflowed:                           # the tail fits
+            chunks.append("".join(parts) + _tg_closers(stack))
+            break
+        min_fill = len(parts[0]) + max(1, int((limit - len(parts[0])) * 0.3))
+        pick = next((best[t] for t in (3, 2, 1) if t in best and best[t][3] >= min_fill), None)
+        if pick is None and best:                    # nothing roomy: take the longest we saw
+            pick = max(best.values(), key=lambda c: c[3])
+        if pick is not None:
+            j_cut, cut_stack, n_parts, _ = pick
+            chunks.append("".join(parts[:n_parts]) + _tg_closers(cut_stack))
+            carry, i = cut_stack, j_cut + 1          # the boundary whitespace IS the break
+            continue
+        if j > i and has_content:                    # no boundary, but at least a token edge
+            chunks.append("".join(parts) + _tg_closers(stack))
+            carry, i = list(stack), j
+            continue
+        # One token is longer than a whole message (a URL, a base64 blob) — everything consumed so
+        # far is markup only, so cutting at the token edge would emit an empty chunk. Slice the
+        # token instead of dropping it, and mark the cut so the reader knows the word continues.
+        tok = toks[j]
+        room = limit - cur_len - len(_tg_closers(stack)) - len(_HARD_CUT_MARK)
+        if _TG_TAG_RE.match(tok) or room <= 0:       # unsplittable and unfittable: skip it loudly
+            log.error("telegram split: cannot fit %r within %d chars; dropping it", tok[:40], limit)
+            i = j + 1
+            continue
+        chunks.append("".join(parts) + tok[:room] + _HARD_CUT_MARK + _tg_closers(stack))
+        toks[j] = tok[room:]                         # the remainder opens the next chunk
+        carry, i = list(stack), j
+    return chunks or [text[:limit]]
+
+
+async def _send_chunks(send, chunks: list) -> None:
+    """Send pre-split chunks, HTML first and plain text as the retry.
+
+    The retry sends the SPLIT text: re-sending the same over-long string that Telegram just
+    refused only fails again. A send that cannot be completed at all is logged at ERROR and
+    reported in the chat — a swallowed debug line is invisible to the person waiting for a reply.
+    """
+    failed = 0
+    for ch in chunks:
         try:
-            await msg.edit_text(strip_markdown(text))
+            await send(ch, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+            continue
         except Exception:
-            log.debug("could not edit message with answer", exc_info=True)
+            log.info("telegram rejected an HTML message; retrying as plain text", exc_info=True)
+        for plain in split_for_telegram(html_to_plain(ch), limit=TELEGRAM_MAX_CHARS):
+            try:
+                await send(plain)
+            except Exception:
+                failed += 1
+                log.error("telegram: could not deliver a %d-char message", len(plain), exc_info=True)
+    if failed:
+        try:
+            await send(f"⚠️ {failed} part(s) of that reply could not be delivered to Telegram. "
+                       "The full text is in the dashboard.")
+        except Exception:
+            log.error("telegram: could not even report the delivery failure", exc_info=True)
+
+
+async def deliver(msg, text: str) -> None:
+    """Edit `msg` with the agent's answer, rendered as Telegram HTML; on a parse error, fall back
+    to clean plain text so delivery never fails. A long answer becomes SEVERAL messages: the first
+    replaces `msg`, the rest follow it."""
+    chunks = split_html_for_telegram(to_telegram_html(text))
+    await _send_chunks(msg.edit_text, chunks[:1])
+    if len(chunks) > 1:
+        await _send_chunks(msg.reply_text, chunks[1:])
 
 
 async def deliver_new(reply_to, text: str) -> None:
     """Send the agent's answer as a NEW message (verbose mode: keeps the stacked tool-call
     history message from being overwritten). Same HTML render + plain-text fallback as deliver."""
-    try:
-        await reply_to.reply_text(to_telegram_html(text), parse_mode=ParseMode.HTML,
-                                  disable_web_page_preview=True)
-    except Exception:
-        try:
-            await reply_to.reply_text(strip_markdown(text))
-        except Exception:
-            log.debug("could not send answer message", exc_info=True)
+    await _send_chunks(reply_to.reply_text, split_html_for_telegram(to_telegram_html(text)))
 
 
 async def reply_html(msg, text: str) -> None:
-    """Reply with Telegram-HTML (command replies are otherwise plain text); on a parse error,
-    strip the tags and unescape entities so the reply still lands as clean plain text."""
-    try:
-        await msg.reply_text(text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
-    except Exception:
+    """Reply with Telegram-HTML (command replies are otherwise plain text). Over-long replies are
+    split on a safe boundary — /update's pip tail plus a stash paragraph plus the recovery commands
+    can exceed the limit, and an unsplit reply is refused, leaving the user with nothing."""
+    await _send_chunks(msg.reply_text, split_html_for_telegram(text))
+
+
+async def reply_plain(msg, text: str) -> None:
+    """Reply with plain text, split if it is over the limit. For the list-shaped commands
+    (/skills, /tools, /cron, /memories, …) whose length grows with the install."""
+    for chunk in split_for_telegram(text or "", limit=TELEGRAM_MAX_CHARS):
         try:
-            # Every tag this module emits — <pre> included: /update wraps the changelog and the pip
-            # tail in one, and a leftover "<pre>" in the plain-text fallback is exactly what the
-            # fallback exists to avoid.
-            stripped = re.sub(r"</?(code|b|i|u|s|pre|blockquote)>", "", text)
-            await msg.reply_text(_html.unescape(stripped))
+            await msg.reply_text(chunk)
         except Exception:
-            log.debug("could not send reply_html fallback", exc_info=True)
+            log.error("telegram: could not deliver a %d-char plain message", len(chunk),
+                      exc_info=True)
+
+
+async def send_html_message(bot, chat_id, text: str) -> None:
+    """Out-of-band delivery (scheduled results, watch alerts, the notify tool) for `chat_id`.
+    Renders markdown -> Telegram HTML and splits it, so a long scheduled result is not silently
+    refused by the API."""
+    async def _send(t, **kw):
+        await bot.send_message(chat_id=chat_id, text=t, **kw)
+    await _send_chunks(_send, split_html_for_telegram(to_telegram_html(text)))
 
 
 def split_for_telegram(text: str, limit: int = 3900) -> list[str]:
@@ -802,7 +957,9 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
                 except (asyncio.CancelledError, Exception):
                     pass
 
-        chunks = split_for_telegram(answer or "(no answer)")   # long answers → several messages
+        answer = answer or "(no answer)"     # deliver()/deliver_new() split long answers themselves,
+                                             # AFTER the markdown->HTML render, so the split cannot
+                                             # land inside a tag or cut a code block mid-line.
         # Authoritative: did any tool run THIS turn? Read it from the event log (filled synchronously
         # as the loop runs), NOT from the live consumer's had_tools flag — the finally-cancel above can
         # race the consumer and leave that flag False even when tools ran, which then OVERWRITES the
@@ -818,14 +975,10 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
                     await status_msg.edit_text(hist)
                 except Exception:
                     pass
-            for ch in chunks:
-                await deliver_new(update.effective_message, ch)
+            await deliver_new(update.effective_message, answer)
         else:
-            # normal mode (or verbose with no tools) — replace the spinner with the first part,
-            # then send any remaining parts as their own messages
-            await deliver(status_msg, chunks[0])
-            for ch in chunks[1:]:
-                await deliver_new(update.effective_message, ch)
+            # normal mode (or verbose with no tools) — replace the spinner with the answer
+            await deliver(status_msg, answer)
 
         # If the agent made any chart images this turn, send them as photos (Telegram can't
         # render the SVG, so make_chart's PNG is what goes here).
@@ -1112,7 +1265,7 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
         chat_id = await _guard(update)
         if chat_id is None:
             return
-        await update.effective_message.reply_text(models_text(engine))
+        await reply_plain(update.effective_message, models_text(engine))
 
     async def on_reasoning(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = await _guard(update)
@@ -1125,7 +1278,7 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
         chat_id = await _guard(update)
         if chat_id is None:
             return
-        await update.effective_message.reply_text(roles_text(engine))
+        await reply_plain(update.effective_message, roles_text(engine))
 
     async def on_role(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = await _guard(update)
@@ -1149,19 +1302,19 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
         chat_id = await _guard(update)
         if chat_id is None:
             return
-        await update.effective_message.reply_text(skills_text(engine.skills()))
+        await reply_plain(update.effective_message, skills_text(engine.skills()))
 
     async def on_tools(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = await _guard(update)
         if chat_id is None:
             return
-        await update.effective_message.reply_text(tools_text(engine.tools_overview()))
+        await reply_plain(update.effective_message, tools_text(engine.tools_overview()))
 
     async def on_cron(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = await _guard(update)
         if chat_id is None:
             return
-        await update.effective_message.reply_text(cron_text(engine.scheduled_jobs()))
+        await reply_plain(update.effective_message, cron_text(engine.scheduled_jobs()))
 
     async def on_retry(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = await _guard(update)
@@ -1189,10 +1342,7 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
                     await t
                 except (asyncio.CancelledError, Exception):
                     pass
-        _rchunks = split_for_telegram(answer or "(no answer)")
-        await deliver(status_msg, _rchunks[0])
-        for _ch in _rchunks[1:]:
-            await deliver_new(update.effective_message, _ch)
+        await deliver(status_msg, answer or "(no answer)")
 
     async def on_usage(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = await _guard(update)
@@ -1218,7 +1368,7 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
         chat_id = await _guard(update)
         if chat_id is None:
             return
-        await update.effective_message.reply_text(help_text())
+        await reply_plain(update.effective_message, help_text())
 
     async def on_pending(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = await _guard(update)
@@ -1265,8 +1415,8 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
                 "🧠 I haven't saved any memories about you yet.")
             return
         lines = "\n".join(f"{f['id']}. {f['text']}" for f in facts)
-        await update.effective_message.reply_text(
-            f"🧠 What I remember about you:\n{lines}\n\nUse /forget <id> to remove any.")
+        await reply_plain(update.effective_message,
+                          f"🧠 What I remember about you:\n{lines}\n\nUse /forget <id> to remove any.")
 
     async def on_forget(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = await _guard(update)
