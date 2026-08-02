@@ -1183,7 +1183,21 @@ class Engine:
 
     def set_role(self, capability: str, label, persist: bool = True) -> dict:
         """Assign a capability (chat/embedding/…) to a connection (or None to clear it), project it
-        into the live config, and persist. Returns the role + resolved connection."""
+        into the live config, and persist. Returns the role + resolved connection.
+
+        CONNECTIONS ARE GLOBAL, ROLE BINDINGS FOLLOW THE PROFILE (argus-m9n). This writes the
+        GLOBAL binding — and mirrors it into the DEFAULT profile, exactly as the Settings SOUL and
+        system-prompt editors do (`_write_through_default_profile`). Without that mirror the write
+        silently does nothing on a stock install: the migration snapshot pinned `chat` to whatever
+        connection was live at the time, and a profile's own binding wins at turn time
+        (_profile_chat_client), so changing the model here would move the global role and the config
+        while every turn kept running the old connection.
+
+        Only the default profile is written through — propagating into every profile is the
+        action-at-a-distance snapshot semantics exist to prevent. A non-default profile that pins a
+        role of its own keeps it, and the dashboard's Models page names that profile and the role it
+        pins rather than letting the difference pass in silence.
+        """
         cap = (capability or "").strip().lower()
         conn = self.model_presets_store.resolve(label) if label else None
         if label and conn is None:
@@ -1191,6 +1205,15 @@ class Engine:
         self.model_presets_store.set_role(cap, conn["label"] if conn else None)
         if conn:
             self._project_role(cap, conn)
+        default = getattr(self, "profiles", None)
+        default = default.default() if default is not None else None
+        if default is not None:
+            roles = dict(default.model_roles)
+            if conn:
+                roles[cap] = conn["label"]
+            else:
+                roles.pop(cap, None)
+            self._write_through_default_profile(model_roles=roles)
         if persist:
             self.save_config_to_env()
         return {"role": cap, "connection": conn}
@@ -1558,6 +1581,7 @@ class Engine:
         tools present in the registry but absent from each profile's matrix ("3 tools not
         configured — currently Ask"). A stale profile that announces itself is fine; one that is
         invisible is the failure mode."""
+        from engine.profiles.store import PROFILE_BOUND_ROLES
         names = self._permission_keys()
         rows = []
         for p in self.profiles.list():
@@ -1568,13 +1592,24 @@ class Engine:
                 "sessions": self.profiles.sessions_using(p.name),
                 "denied": sorted(n for n, s in p.tools.items() if s == "deny"),
                 "hidden_skills": sorted(n for n, v in p.skills.items() if not v),
+                # The profile's ROLE BINDINGS (capability -> connection label), never a key. The
+                # Models page reads these to say which roles the live profile pins and therefore
+                # will NOT take from a global role change — see PROFILE_BOUND_ROLES.
+                "model_roles": dict(p.model_roles),
                 "stale_tools": stale, "stale_count": len(stale),
                 "updated_at": p.updated_at,
             })
         rows.sort(key=lambda r: r["name"].lower())
         return {"profiles": rows, "active_profile": self.profiles.active_profile,
                 "session_profile": self.profiles.name_for_session(session_id or ""),
-                "session_id": session_id or ""}
+                "session_id": session_id or "",
+                # Which capabilities a profile binding actually overrides today. `chat` is the only
+                # one the turn resolves through the profile (_profile_chat_client); `utility` and
+                # `embedding` are read straight off the global store, and embedding MUST stay global
+                # because memory/knowledge vectors are shared across every profile — a per-profile
+                # embedding model would write mismatched vectors into one store.
+                "profile_bound_roles": list(PROFILE_BOUND_ROLES),
+                "global_roles": self.model_presets_store.roles()}
 
     def profile_detail(self, name: str) -> dict:
         prof = self.profiles.get(name)

@@ -68,6 +68,18 @@ PROFILE_FLAG_FIELDS = (
     "tool_disclosure_mode",
 )
 
+# The capability ROLES a profile binding actually overrides today. A profile stores a binding for
+# any capability (the migration snapshot copies every global role), but only `chat` is resolved
+# through the profile at turn time — see Engine._profile_chat_client. Two of the rest are
+# deliberately global rather than merely unimplemented:
+#   * embedding — memory and knowledge vectors are GLOBAL and shared across profiles (decision 1
+#     above), so a per-profile embedding model would write mismatched vectors into one store;
+#   * utility   — background work (compaction, autoextract, titling) is not scoped to a session, so
+#     it has no profile to resolve through.
+# The dashboard reads this to keep the Models page honest about which role changes a live profile
+# will override, instead of offering per-profile bindings that silently do nothing.
+PROFILE_BOUND_ROLES = ("chat",)
+
 # allow > ask > deny. Used to decide whether an activation WIDENS a tool's permission.
 _RANK = {"deny": 0, "ask": 1, "allow": 2}
 
