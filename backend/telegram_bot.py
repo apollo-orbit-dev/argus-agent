@@ -54,6 +54,8 @@ BOT_COMMANDS = [
     ("reasoning", "Set reasoning level: /reasoning auto|off|low|medium|high"),
     ("roles", "Show capability→model roles (chat, embedding, …)"),
     ("role", "Assign a role: /role <capability> <connection>"),
+    ("profiles", "List agent profiles and which one this chat runs under"),
+    ("profile", "Show or switch this chat's profile: /profile <name>"),
     ("reembed", "Rebuild memory/knowledge vectors after changing the embedding model"),
     ("skills", "List the skills currently loaded"),
     ("tools", "List the tools currently available"),
@@ -628,6 +630,147 @@ def role_command(engine, args: list) -> str:
     warn = "\n⚠ changing the embedding model needs a re-embed of stored vectors." if cap == "embedding" else ""
     c = res["connection"]
     return f"✓ {cap} → {c['label']} ({c['model_name']}){warn}"
+
+
+# --------------------------------------------------------------------------
+# Agent profiles (argus-3gf) — READ and SWITCH only.
+#
+# Creating, duplicating, renaming, deleting and editing a permission matrix stay in the dashboard:
+# authoring a matrix over chat would be miserable, and this surface exists so the phone can REACH
+# the profiles that already exist. The binding is PER SESSION and Telegram's session id is the chat
+# id, so `/profile <name>` binds THIS chat and never touches `active_profile`, the global default
+# for new sessions — changing that from one chat would silently reshape every future session.
+#
+# Every reply here is PLAIN TEXT: profile names are user-chosen and routinely contain underscores,
+# which Markdown would eat (same reason as dep_request_text), and `_` is not escapable in a name we
+# echo back verbatim.
+# --------------------------------------------------------------------------
+def _profile_row(overview: dict, name: str) -> dict:
+    """The `profiles_overview()` row for `name`, or {} when there is none."""
+    for r in overview.get("profiles") or []:
+        if r.get("name") == name:
+            return r
+    return {}
+
+
+def profile_shape_line(row: dict, total_tools: int = 0) -> str:
+    """One terse line describing what a profile IS: usable tools, what it hides, and — the part
+    cd8's staleness rule exists to surface — how many registered tools it has never heard of and is
+    therefore running at Ask. Zero-valued segments are dropped so a plain profile stays one short
+    line on a phone."""
+    parts = []
+    denied = len(row.get("denied") or [])
+    if total_tools:
+        parts.append(f"{max(0, total_tools - denied)} tools")
+    if denied:
+        parts.append(f"{denied} denied")
+    hidden = len(row.get("hidden_skills") or [])
+    if hidden:
+        parts.append(f"{hidden} skill{'' if hidden == 1 else 's'} hidden")
+    stale = int(row.get("stale_count") or 0)
+    if stale:
+        parts.append(f"{stale} not configured (Ask)")
+    return " · ".join(parts)
+
+
+def profiles_text(overview: dict) -> str:
+    """Render ``engine.profiles_overview(session_id)`` for /profiles: one line per profile, marking
+    the one active in THIS chat and the one that is the global default for new sessions."""
+    rows = overview.get("profiles") or []
+    if not rows:
+        return "No profiles yet. Create one in the dashboard's Profiles panel."
+    here = overview.get("session_profile") or ""
+    lines = [f"Profiles ({len(rows)}):"]
+    for r in rows:
+        name = r.get("name", "?")
+        marks = ""
+        if name == here:
+            marks += "  ← active in this chat"
+        if r.get("is_default"):
+            marks += "  (default for new sessions)"
+        line = f"• {name}{marks}"
+        desc = (r.get("description") or "").strip()
+        if desc:
+            line += f" — {desc}"
+        stale = int(r.get("stale_count") or 0)
+        if stale:
+            line += f"\n    {stale} tool{'' if stale == 1 else 's'} not configured — currently Ask"
+        lines.append(line)
+    lines.append("\nSwitch this chat: /profile <name>   ·   Details: /profile")
+    lines.append("Profiles are created and edited in the dashboard.")
+    return "\n".join(lines)
+
+
+def profile_status_text(overview: dict, total_tools: int = 0) -> str:
+    """Render bare /profile: which profile is active in this chat, and WHY — its own binding, or
+    the global default it falls back to. Reads only; changes nothing."""
+    name = overview.get("session_profile") or ""
+    if not name:
+        return "No profile is active. Create one in the dashboard's Profiles panel."
+    row = _profile_row(overview, name)
+    lines = [f"Active in this chat: {name}"]
+    desc = (row.get("description") or "").strip()
+    if desc:
+        lines.append(desc)
+    shape = profile_shape_line(row, total_tools)
+    if shape:
+        lines.append(shape)
+    sid = overview.get("session_id") or ""
+    if sid and sid in (row.get("sessions") or []):
+        lines.append("Bound to this chat only — the global default is unaffected.")
+    else:
+        lines.append(f"This chat has no profile of its own, so it follows the global default "
+                     f"({overview.get('active_profile') or name}).")
+    lines.append("\nList: /profiles   ·   Switch: /profile <name>")
+    return "\n".join(lines)
+
+
+def unknown_profile_text(name: str, names: list) -> str:
+    """Refuse an unknown name and list the valid ones. Deliberately NO fuzzy match: activating the
+    wrong profile silently changes what the agent is allowed to do, so a near-miss must fail loudly
+    rather than guess."""
+    valid = ", ".join(names) if names else "(none)"
+    return (f"No profile named: {name}\n"
+            "I won't guess — the wrong profile silently changes what I'm allowed to do.\n"
+            f"Valid names: {valid}\n"
+            "Switch with the exact name: /profile <name>")
+
+
+def widened_text(widened: list, previous: str) -> str:
+    """The ANNOUNCEMENT. cd8 chose full profile ownership of permissions over a confirmation gate,
+    so activation never blocks — the compromise is that it must be VISIBLE. Names every tool whose
+    permission is WIDER under the incoming profile (narrowing needs no announcement), and says so
+    EXPLICITLY when nothing widened: silence would read as "not checked", and on Telegram there is
+    no persistent indicator to fall back on."""
+    if not widened:
+        if previous:
+            return f'Nothing widened — no tool has more permission than under "{previous}".'
+        return "Nothing widened — no tool gained permission."
+    items = ", ".join(f"{w.get('tool','?')} ({w.get('from','?')} → {w.get('to','?')})"
+                      for w in widened)
+    head = f'Wider than "{previous}": ' if previous else "Wider now: "
+    return head + items
+
+
+def profile_switch_text(res: dict, row: dict, total_tools: int = 0, running: bool = False) -> str:
+    """The reply to /profile <name>: what is now active here, what WIDENED, the new profile's
+    shape, and — when a run is in flight — that the switch lands on the next turn. A slash command
+    bypasses the steering/preempt path entirely, so the running task keeps the profile it started
+    under; saying so is a wording requirement, not a mechanism."""
+    name = res.get("profile", "?")
+    previous = res.get("previous") or ""
+    head = (f"✓ This chat is now on: {name}" if previous == name
+            else f"✓ Switched this chat to: {name}")
+    lines = [head, widened_text(res.get("widened") or [], previous)]
+    shape = profile_shape_line(row, total_tools)
+    if shape:
+        lines.append(shape)
+    if running:
+        lines.append("⏳ I'm mid-task: this takes effect on your next message. The running task "
+                     "keeps the profile it started under.")
+    lines.append("This chat only — the global default for new sessions is unchanged "
+                 "(change that in the dashboard).")
+    return "\n".join(lines)
 
 
 def skills_text(skills: list[dict]) -> str:
@@ -1286,6 +1429,52 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
             return
         await update.effective_message.reply_text(role_command(engine, ctx.args))
 
+    def _profile_tool_total(name: str) -> int:
+        """How many tools the staleness rule considers for this profile (the same list the
+        dashboard counts against). Best-effort: a failure just drops the "N tools" segment."""
+        try:
+            return len(engine.profile_detail(name).get("all_tools") or [])
+        except Exception:
+            log.debug("could not read the tool universe for profile %r", name, exc_info=True)
+            return 0
+
+    async def on_profiles(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        chat_id = await _guard(update)
+        if chat_id is None:
+            return
+        overview = engine.profiles_overview(str(chat_id))
+        await reply_plain(update.effective_message, profiles_text(overview))
+
+    async def on_profile(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """/profile — report this chat's profile. /profile <name> — bind THIS chat's session to it.
+
+        Never touches `active_profile` (the global default) and never fuzzy-matches a name."""
+        chat_id = await _guard(update)
+        if chat_id is None:
+            return
+        session_id = str(chat_id)
+        msg = update.effective_message
+        name = " ".join(ctx.args or []).strip()
+        overview = engine.profiles_overview(session_id)
+        if not name:
+            active = overview.get("session_profile") or ""
+            await reply_plain(msg, profile_status_text(overview, _profile_tool_total(active)))
+            return
+        names = [r.get("name", "") for r in overview.get("profiles") or []]
+        if name not in names:                    # exact match only — see unknown_profile_text
+            await reply_plain(msg, unknown_profile_text(name, names))
+            return
+        # Read the run state BEFORE activating so the reply describes the moment the command
+        # arrived. Activation is a rebinding: it neither cancels nor rebinds the in-flight task,
+        # which finishes under the profile it started with.
+        try:
+            running = bool((engine.run_status(session_id) or {}).get("running"))
+        except Exception:
+            running = False
+        res = await engine.activate_profile(name, session_id)
+        row = _profile_row(engine.profiles_overview(session_id), name)
+        await reply_plain(msg, profile_switch_text(res, row, _profile_tool_total(name), running))
+
     async def on_reembed(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = await _guard(update)
         if chat_id is None:
@@ -1542,6 +1731,8 @@ def build_telegram_app(engine: Any, config: Any) -> Application:
     app.add_handler(CommandHandler("reasoning", on_reasoning))
     app.add_handler(CommandHandler("roles", on_roles))
     app.add_handler(CommandHandler("role", on_role))
+    app.add_handler(CommandHandler("profiles", on_profiles))
+    app.add_handler(CommandHandler("profile", on_profile))
     app.add_handler(CommandHandler("reembed", on_reembed))
     app.add_handler(CommandHandler("skills", on_skills))
     app.add_handler(CommandHandler("tools", on_tools))
