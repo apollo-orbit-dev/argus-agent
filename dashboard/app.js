@@ -908,6 +908,10 @@
     // an idle one even while another session's turn is in flight, disabled again on switching back
     // to a session that is still running.
     syncRunControls();
+    // The profile binding is PER SESSION, so the chip (and everything keyed off it — the Developer
+    // page's "editing permissions for", the Models page's role note) has to follow the switch.
+    loadProfiles();
+    if (currentPage === 'developer') loadLibrary();
   }
 
   async function renameSession(id){
@@ -2620,14 +2624,32 @@
         '</div>';          // close .list-item — the ✕/✎/select are now siblings of .list-main, so the flex row right-aligns them inline instead of stacking below
     }).join('');
   }
+  // A profile OWNS its permission matrix, so this page is always editing ONE profile: the one this
+  // session runs under. Say which, right next to the controls — with three profiles it is the
+  // difference between configuring the one you meant and re-permissioning the one you are in.
+  function renderPermProfileNote(){
+    var el = $('permProfileNote'); if (!el) return;
+    var d = profilesData;
+    var name = d.session_profile || d.active_profile || '';
+    if (!name){ el.hidden = true; el.textContent = ''; return; }
+    el.hidden = false;
+    el.innerHTML = 'Editing permissions for: <strong>' + esc(name) + '</strong> — the profile this ' +
+      'session runs under' +
+      (name === d.active_profile ? ' (also the default for new sessions).' : '.') +
+      ' Other profiles keep their own Allow/Ask/Deny matrix; switch with the profile chip in the header.';
+  }
+
   async function loadLibrary(){
     try {
       var lib = await (await fetch('/library')).json();
       var permMap = {};
       try {
-        var pd = await (await fetch('/permissions')).json();
+        // Scoped to THIS session's profile — the same matrix a turn in this session resolves
+        // through, and the one /permissions/set below writes to.
+        var pd = await (await fetch('/permissions?session_id=' + encodeURIComponent(SESSION))).json();
         (pd.permissions || []).forEach(function(p){ permMap[p.key] = p; });
       } catch(e){ /* leave permMap empty; per-tool selects fall back to allow/ask/deny defaults */ }
+      renderPermProfileNote();
       var t = lib.tools || {}, s = lib.skills || {};
       var cond = t.conditional_enabled || [];
       $('toolsBuiltin').innerHTML = libItemsHtml(t.builtin, false, null, permMap);
@@ -2827,7 +2849,9 @@
     var prev = sel.getAttribute('data-prev-state') || state;
     sel.disabled = true;
     try {
-      var r = await fetch('/permissions/set', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key, state: state }) });
+      // session_id, so the write lands in the profile this session runs under — the one
+      // #permProfileNote names — rather than always in the global default profile.
+      var r = await fetch('/permissions/set', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key, state: state, session_id: SESSION }) });
       if (!r.ok) { var eb = await r.json().catch(function(){ return {}; }); throw new Error(eb.detail || ('HTTP ' + r.status)); }
       sel.setAttribute('data-prev-state', state);
       toast('Policy updated', 'ok');
@@ -2841,7 +2865,7 @@
   async function loadPendingApprovals(){
     var el = $('pendingApprovals');
     try {
-      var pr = await (await fetch('/permissions')).json();   // gate labels + valid states, for the standing-policy select
+      var pr = await (await fetch('/permissions?session_id=' + encodeURIComponent(SESSION))).json();   // gate labels + valid states, for the standing-policy select
       var gates = {};
       (pr.permissions || []).forEach(function(p){ gates[p.key] = p; });
       var d = await (await fetch('/approvals')).json();
@@ -2982,7 +3006,38 @@
 
   async function loadRoles(){
     try { rolesCache = await (await fetch('/model/roles')).json(); } catch(e){ return; }
-    renderCapsChecks(); renderRoles(); renderConnList();
+    renderCapsChecks(); renderRoles(); renderConnList(); renderRolesProfileNote();
+  }
+  // THE GLOBAL/PROFILE SPLIT, said out loud. These selects edit the GLOBAL role bindings; a profile
+  // that pins a role of its own overrides them, so a change here would not reach it. Returns the
+  // roles the live profile pins to a DIFFERENT connection than the global one — a profile whose
+  // binding matches the global (every profile right after migration) overrides nothing.
+  function profilePinnedRoles(){
+    var d = profilesData;
+    var live = d.session_profile || d.active_profile || '';
+    var prof = (d.profiles || []).filter(function(r){ return r.name === live; })[0];
+    if (!prof) return { live: live, pinned: [] };
+    var globals = Object.keys(rolesCache.roles || {}).length ? rolesCache.roles : (d.global_roles || {});
+    var pinned = (d.profile_bound_roles || ['chat']).map(function(cap){
+      var to = (prof.model_roles || {})[cap] || '';
+      return (to && to !== (globals[cap] || '')) ? { cap: cap, to: to } : null;
+    }).filter(function(x){ return !!x; });
+    return { live: live, pinned: pinned, count: (d.profiles || []).length };
+  }
+  function renderRolesProfileNote(){
+    var el = $('rolesProfileNote'); if (!el) return;
+    var s = profilePinnedRoles();
+    // With a single profile and nothing pinned this is noise — the case part 4 of the spec calls out.
+    if (!s.live || (!s.pinned.length && (s.count || 0) < 2)){ el.hidden = true; el.textContent = ''; return; }
+    el.hidden = false;
+    el.innerHTML = s.pinned.length
+      ? 'Live profile <strong>' + esc(s.live) + '</strong> pins ' +
+        s.pinned.map(function(x){ return esc(x.cap) + ' → ' + esc(x.to); }).join(', ') +
+        '. These selects set the <strong>global</strong> binding, which that profile will not use — ' +
+        'change it in Agent profiles above. Connections stay global.'
+      : 'Live profile <strong>' + esc(s.live) + '</strong> inherits every role below, so a change ' +
+        'here applies to it (and to every other profile that pins none). Per-profile bindings are ' +
+        'set in Agent profiles above; connections stay global.';
   }
   // A capability→connection dropdown, shared by the active strip and the reserved grid.
   function roleSelect(cap){
@@ -3001,10 +3056,20 @@
     var strip = $('rolesActive');
     if (strip){
       strip.innerHTML = '';
+      var pins = profilePinnedRoles();
       active.forEach(function(cap){
         var item = document.createElement('div'); item.className = 'role-item';
         var lab = document.createElement('span'); lab.className = 'role-name'; lab.textContent = cap;
-        item.appendChild(lab); item.appendChild(roleSelect(cap));
+        var sel = roleSelect(cap);
+        var pin = (pins.pinned || []).filter(function(x){ return x.cap === cap; })[0];
+        if (pin) sel.title = 'The live profile "' + pins.live + '" pins ' + cap + ' to ' + pin.to +
+          ' — this global binding does not apply to it.';
+        item.appendChild(lab); item.appendChild(sel);
+        if (pin){
+          var ov = document.createElement('span'); ov.className = 'pf-role-global';
+          ov.textContent = '→ ' + pin.to + ' (profile)';
+          item.appendChild(ov);
+        }
         strip.appendChild(item);
       });
     }
@@ -3191,11 +3256,16 @@
     });
   }
   async function setRole(cap, conn){
+    var s = profilePinnedRoles();
+    var pinned = (s.pinned || []).filter(function(x){ return x.cap === cap; })[0];
     try {
       var r = await fetch('/model/roles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: cap, connection: conn }) });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       await loadConfig(); await loadRoles();
-      toast(cap + (conn ? ' → ' + conn : ' unset'), 'ok');
+      toast(cap + (conn ? ' → ' + conn : ' unset') + ' (global)', 'ok');
+      // Never let a global role change land silently while the live profile overrides it.
+      if (pinned) toast('"' + s.live + '" pins ' + cap + ' → ' + pinned.to + ', so this session keeps ' +
+                        'using that. Change it in Settings › Agent profiles.', 'info');
     } catch(e){ toast('Failed to set ' + cap, 'err'); loadRoles(); }
   }
   $('reembedBtn').addEventListener('click', async function(){
@@ -3629,6 +3699,10 @@
   // set of feature flags, all stored explicitly. Activation never blocks — it is made VISIBLE
   // instead, by the header chip (every page) and by the "widened" toast below.
   var profileNames = [];
+  // Last /profiles payload, shared by the header chip menu, the Models page role note and the
+  // Developer page permission note — all three have to name the SAME live profile.
+  var profilesData = { profiles: [], active_profile: '', session_profile: '',
+                       profile_bound_roles: ['chat'], global_roles: {} };
 
   function profileRowHtml(p, sessionProfile){
     var tags = '';
@@ -3656,11 +3730,9 @@
     try {
       var d = await (await fetch('/profiles?session_id=' + encodeURIComponent(SESSION))).json();
       var rows = d.profiles || [];
+      profilesData = d;
       profileNames = rows.map(function(r){ return r.name; });
-      $('chipProfile').textContent = d.session_profile || '–';
-      var wrap = $('chipProfileWrap');
-      if (wrap) wrap.title = 'Active agent profile for this session: ' + (d.session_profile || '—') +
-        ' (default for new sessions: ' + (d.active_profile || '—') + ')';
+      renderProfileChip();
       if (!el) return;
       $('profilesCount').textContent = rows.length ? (' ' + rows.length) : '';
       $('profileNewSource').innerHTML = rows.map(function(r){
@@ -3671,6 +3743,138 @@
     } catch(e){ if (el) el.innerHTML = '<div class="panel-error">Failed to load profiles.</div>'; }
   }
 
+  /* ---- the header chip: a SWITCHER on every page ---- */
+  // Switching from here binds THIS SESSION only — it never touches `active_profile`, the default
+  // for new sessions, because reshaping every future session from a console chip would be silent.
+  // It routes through the same profileAction() the Settings "Use here" button uses, so the
+  // widened-permission announcement is identical; a quieter second path to activation would defeat
+  // the whole reason activation is allowed not to block.
+  function renderProfileChip(){
+    var d = profilesData;
+    var lab = $('chipProfile'); if (lab) lab.textContent = d.session_profile || '–';
+    var btn = $('chipProfileBtn');
+    if (btn) btn.title = 'Agent profile for this session: ' + (d.session_profile || '—') +
+      ' (default for new sessions: ' + (d.active_profile || '—') + ') — click to switch';
+    renderProfileMenu();
+    renderPermProfileNote();
+    renderRolesProfileNote();
+  }
+
+  function renderProfileMenu(){
+    var menu = $('chipProfileMenu'); if (!menu) return;
+    var d = profilesData, rows = d.profiles || [];
+    if (!rows.length){ menu.innerHTML = '<div class="chip-menu-head">no profiles</div>'; return; }
+    menu.innerHTML = '<div class="chip-menu-head">run this session under</div>' +
+      rows.map(function(p){
+        var here = p.name === d.session_profile;
+        var bits = [];
+        if (here) bits.push('running here');
+        if (p.is_default) bits.push('default for new sessions');
+        if (p.stale_count) bits.push(p.stale_count + ' tool' + (p.stale_count === 1 ? '' : 's') + ' on Ask');
+        if ((p.denied || []).length) bits.push((p.denied || []).length + ' denied');
+        if ((p.hidden_skills || []).length) bits.push((p.hidden_skills || []).length + ' skill(s) hidden');
+        return '<button type="button" role="menuitemradio" aria-checked="' + (here ? 'true' : 'false') +
+          '" data-chip-profile="' + esc(p.name) + '">' + (here ? '✓ ' : '') + esc(p.name) +
+          (bits.length ? '<span class="cm-sub">' + esc(bits.join(' · ')) + '</span>' : '') + '</button>';
+      }).join('') +
+      '<div class="chip-menu-head">binds this session only — the default for new sessions is set in Settings</div>';
+  }
+
+  function closeProfileMenu(){
+    var menu = $('chipProfileMenu'); if (!menu || menu.hidden) return;
+    menu.hidden = true;
+    var btn = $('chipProfileBtn'); if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+
+  $('chipProfileBtn').addEventListener('click', function(e){
+    e.stopPropagation();
+    var menu = $('chipProfileMenu');
+    var opening = menu.hidden;
+    menu.hidden = !opening;
+    this.setAttribute('aria-expanded', String(opening));
+    if (opening) loadProfiles();          // list fresh: another surface may have rebound this session
+  });
+  $('chipProfileMenu').addEventListener('click', function(e){
+    var b = e.target.closest('[data-chip-profile]');
+    if (!b) return;
+    var name = b.getAttribute('data-chip-profile');
+    closeProfileMenu();
+    if (name === profilesData.session_profile){
+      toast('This session already runs under "' + name + '"', 'info');
+      return;
+    }
+    activateProfileHere(name);
+  });
+  document.addEventListener('click', function(e){
+    if (!e.target.closest('#chipProfileWrap')) closeProfileMenu();
+  });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeProfileMenu(); });
+
+  function activateProfileHere(name){
+    return profileAction('/profiles/' + encodeURIComponent(name) + '/activate', { session_id: SESSION },
+                         'This session now runs under "' + name + '"');
+  }
+
+  // Skill visibility lives HERE, not on the Developer page: the editor works on any profile without
+  // activating it first, and "configure the profile I am about to switch to" is the common case.
+  // Only the HIDDEN skills are stored (see saveProfile) — an absent entry means visible, so a skill
+  // installed after this profile was written can never be silently invisible.
+  function profileSkillsHtml(p){
+    var all = p.all_skills || [];
+    var hidden = {};
+    Object.keys(p.skills || {}).forEach(function(k){ if (!p.skills[k]) hidden[k] = true; });
+    var orphans = Object.keys(hidden).filter(function(k){ return all.indexOf(k) === -1; }).sort();
+    var visible = all.filter(function(s){ return !hidden[s]; }).length;
+    var body = all.length
+      ? '<div class="pf-skills">' + all.map(function(s){
+          return '<label class="' + (hidden[s] ? 'hidden-skill' : '') + '">' +
+            '<input type="checkbox" data-pf-skill="' + esc(s) + '"' + (hidden[s] ? '' : ' checked') + '>' +
+            '<span>' + esc(s) + '</span></label>';
+        }).join('') + '</div>'
+      : '<div class="empty">No skills installed.</div>';
+    return '<div class="pf-sub">skills visible to this profile' +
+      '<span class="pf-skill-count">' + esc(visible + ' of ' + all.length + ' visible') + '</span></div>' + body +
+      '<div class="pf-note">Unticked = hidden from every selection mode for a session on this profile. ' +
+      'A skill installed later is visible until you hide it here.' +
+      (orphans.length ? ' Also hidden but not currently installed: ' + esc(orphans.join(', ')) + '.' : '') +
+      '</div>';
+  }
+
+  // CONNECTIONS are global (a connection carries a credential); a role BINDING follows the profile.
+  // Only the capabilities the engine actually resolves through a profile get a select — the rest
+  // are shown read-only as the global value rather than offered as bindings that do nothing.
+  function profileRolesHtml(p){
+    var bound = profilesData.profile_bound_roles || ['chat'];
+    var conns = rolesCache.connections || [];
+    var globals = Object.keys(rolesCache.roles || {}).length ? rolesCache.roles
+                                                             : (profilesData.global_roles || {});
+    var caps = (rolesCache.capabilities || []).length ? rolesCache.capabilities
+                                                      : ['chat', 'utility', 'embedding'];
+    var wired = ['chat', 'utility', 'embedding'].filter(function(c){ return caps.indexOf(c) > -1; });
+    var rows = wired.map(function(cap){
+      var g = globals[cap] || '';
+      if (bound.indexOf(cap) === -1){
+        return '<div class="pf-role-row"><span class="pf-role-name">' + esc(cap) + '</span>' +
+          '<span class="pf-role-global">global — ' + esc(g || 'unset') + '</span></div>';
+      }
+      var sel = (p.model_roles || {})[cap] || '';
+      var known = conns.some(function(c){ return c.label === sel; });
+      var opts = '<option value=""' + (sel ? '' : ' selected') + '>inherit global (' + esc(g || 'unset') + ')</option>';
+      if (sel && !known) opts += '<option value="' + esc(sel) + '" selected>' + esc(sel) + ' — missing connection</option>';
+      opts += conns.map(function(c){
+        return '<option value="' + esc(c.label) + '"' + (c.label === sel ? ' selected' : '') + '>' + esc(c.label) + '</option>';
+      }).join('');
+      return '<div class="pf-role-row"><span class="pf-role-name">' + esc(cap) + '</span>' +
+        '<select data-pf-role="' + esc(cap) + '">' + opts + '</select></div>';
+    }).join('');
+    return '<div class="pf-sub">model roles</div><div class="pf-roles">' + rows + '</div>' +
+      '<div class="pf-note">Connections (URL, key, model) stay global and are edited under ' +
+      'Model / LLM — a profile picks which connection fills a role, never a key. ' +
+      'utility and embedding are global on purpose: background work is not session-scoped, and ' +
+      'memory/knowledge vectors are shared across every profile, so one embedding model has to ' +
+      'write them all.</div>';
+  }
+
   async function openProfileEditor(name){
     var box = $('profileEd-' + name);
     if (!box) return;
@@ -3679,6 +3883,9 @@
     box.innerHTML = '<div class="empty">loading…</div>';
     try {
       var p = await (await fetch('/profiles/' + encodeURIComponent(name))).json();
+      // The role selects need the global connection list; the Settings page normally has it already.
+      if (!(rolesCache.connections || []).length){ try { await loadRoles(); } catch(e){} }
+      box._profile = p;      // the stored maps, so a save preserves everything this form doesn't edit
       box.innerHTML =
         '<div class="field"><label class="field-label">description</label>' +
         '<input type="text" data-pf="description" value="' + esc(p.description || '') + '"></div>' +
@@ -3686,7 +3893,9 @@
         '<textarea data-pf="soul" rows="5">' + esc(p.soul || '') + '</textarea></div>' +
         '<div class="field"><label class="field-label">system prompt</label>' +
         '<textarea data-pf="system_prompt" rows="6">' + esc(p.system_prompt || '') + '</textarea></div>' +
-        '<div class="card-hint" style="text-transform:none; letter-spacing:normal;">' +
+        profileSkillsHtml(p) +
+        profileRolesHtml(p) +
+        '<div class="pf-note">' +
         'Tool permissions for this profile are edited on the Developer page while it is active here. ' +
         ((p.stale_tools || []).length ? esc((p.stale_tools || []).length + ' tool(s) not in this profile: ' + (p.stale_tools || []).join(', ') + ' — they run as Ask.') : 'Every registered tool is configured.') +
         '</div>' +
@@ -3694,11 +3903,53 @@
     } catch(e){ box.innerHTML = '<div class="panel-error">Failed to load this profile.</div>'; }
   }
 
+  // Live count + strike-through as skills are ticked, so the editor says what it will save.
+  $('profilesList').addEventListener('change', function(e){
+    var cb = e.target.closest('[data-pf-skill]');
+    if (!cb) return;
+    var box = cb.closest('.profile-editor'); if (!box) return;
+    var lab = cb.closest('label'); if (lab) lab.classList.toggle('hidden-skill', !cb.checked);
+    var all = box.querySelectorAll('[data-pf-skill]');
+    var vis = box.querySelectorAll('[data-pf-skill]:checked').length;
+    var out = box.querySelector('.pf-skill-count');
+    if (out) out.textContent = vis + ' of ' + all.length + ' visible';
+  });
+
   async function saveProfile(name){
     var box = $('profileEd-' + name);
     if (!box) return;
+    var p = box._profile || {};
     var body = {};
     box.querySelectorAll('[data-pf]').forEach(function(f){ body[f.getAttribute('data-pf')] = f.value; });
+
+    // Skills: write ONLY the hidden ones. Absent = visible, so a skill registered after this save
+    // stays visible — the unknown-skill rule, preserved by what we choose not to write. Entries for
+    // skills that are hidden but not currently installed are carried over rather than dropped,
+    // otherwise saving from a box that can't show them would silently un-hide them.
+    var skillBoxes = box.querySelectorAll('[data-pf-skill]');
+    if (skillBoxes.length || (p.all_skills || []).length){
+      var skills = {}, known = {};
+      (p.all_skills || []).forEach(function(s){ known[s] = true; });
+      Object.keys(p.skills || {}).forEach(function(k){ if (!p.skills[k] && !known[k]) skills[k] = false; });
+      Array.prototype.forEach.call(skillBoxes, function(cb){
+        if (!cb.checked) skills[cb.getAttribute('data-pf-skill')] = false;
+      });
+      body.skills = skills;
+    }
+
+    // Model roles: only the profile-bound capabilities have a control; every other binding the
+    // profile already stored is carried through untouched. Empty select = "inherit global", which
+    // is expressed by REMOVING the key (the engine falls back to the global role when absent).
+    var roleSels = box.querySelectorAll('[data-pf-role]');
+    if (roleSels.length){
+      var roles = {};
+      Object.keys(p.model_roles || {}).forEach(function(k){ roles[k] = p.model_roles[k]; });
+      Array.prototype.forEach.call(roleSels, function(s){
+        var cap = s.getAttribute('data-pf-role');
+        if (s.value) roles[cap] = s.value; else delete roles[cap];
+      });
+      body.model_roles = roles;
+    }
     try {
       var r = await fetch('/profiles/' + encodeURIComponent(name), {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -3715,11 +3966,19 @@
       var d = await r.json().catch(function(){ return {}; });
       if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
       toast(okMsg, 'ok');
-      // Activation is not gated — it is ANNOUNCED. Surface any tool whose permission widened.
-      if (d.widened && d.widened.length){
-        toast('Wider permissions: ' + d.widened.map(function(w){ return w.tool + ' ' + w.from + '→' + w.to; }).join(', '), 'info');
+      // Activation is not gated — it is ANNOUNCED. Every tool whose permission widened is named,
+      // and "nothing widened" is said OUT LOUD rather than inferred from an absent toast: silence
+      // is indistinguishable from a broken announcement. Presence of the `widened` array (not its
+      // length) is what marks an activation response — rename/create responses have no such field.
+      if (Array.isArray(d.widened)){
+        toast(d.widened.length
+          ? 'Wider permissions: ' + d.widened.map(function(w){ return w.tool + ' ' + w.from + '→' + w.to; }).join(', ')
+          : 'Nothing widened — no tool is more permissive under "' + (d.profile || '') + '"', 'info');
       }
       await loadProfiles();
+      // The Developer page's Allow/Ask/Deny controls edit the profile this session runs under, so
+      // a switch makes them stale — reload them if that page is the one being looked at.
+      if (currentPage === 'developer') loadLibrary();
       return d;
     } catch(e){ toast(e.message || 'Failed', 'err'); }
   }
@@ -3730,8 +3989,7 @@
     if (!b) return;
     var name;
     if ((name = b.getAttribute('data-profile-activate'))){
-      profileAction('/profiles/' + encodeURIComponent(name) + '/activate', { session_id: SESSION },
-                    'This session now runs under "' + name + '"');
+      activateProfileHere(name);          // the SAME path the header chip takes
     } else if ((name = b.getAttribute('data-profile-default'))){
       profileAction('/profiles/' + encodeURIComponent(name) + '/activate', {},
                     '"' + name + '" is now the default profile');

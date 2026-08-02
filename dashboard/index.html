@@ -79,8 +79,16 @@
 
     <div class="mode-chips">
       <!-- The active profile is shown on EVERY page, not only in Settings: a user who cannot see
-           which profile is live cannot reason about what the agent may do. -->
-      <span class="chip" id="chipProfileWrap" title="Active agent profile for this session"><span class="led led-ok"></span><span class="chip-label" id="chipProfile">–</span></span>
+           which profile is live cannot reason about what the agent may do. It is also a SWITCHER —
+           binding this session only, and announcing every widened permission exactly as the
+           Settings activation does (both go through profileAction()). -->
+      <span class="chip-switch" id="chipProfileWrap">
+        <button type="button" class="chip chip-btn" id="chipProfileBtn" aria-haspopup="menu" aria-expanded="false"
+                title="Active agent profile for this session — click to switch">
+          <span class="led led-ok"></span><span class="chip-label" id="chipProfile">–</span><span class="chip-caret" aria-hidden="true">▾</span>
+        </button>
+        <div class="chip-menu" id="chipProfileMenu" role="menu" hidden></div>
+      </span>
       <span class="chip"><span class="led led-cyan"></span><span class="chip-label" id="chipTcm">–</span></span>
       <span class="chip"><span class="led led-amber"></span><span class="chip-label" id="chipSsm">–</span></span>
     </div>
@@ -420,6 +428,11 @@
         <div class="grid grid-2">
           <div class="card">
             <div class="card-head"><span class="card-title">Tools</span><span class="card-hint" id="toolsCountBadge"></span></div>
+            <!-- A profile OWNS its permission matrix, so these Allow/Ask/Deny controls always write
+                 into one particular profile — the one this session runs under. With three profiles
+                 that is the difference between configuring the one you meant and quietly
+                 re-permissioning the one you are sitting in, so it is named here. -->
+            <div class="perm-profile-note" id="permProfileNote"></div>
             <div class="row-inline" style="margin-bottom:10px; align-items:center; gap:8px;">
               <span class="card-hint" style="text-transform:none; letter-spacing:normal;">New dependency installs:</span>
               <span id="depInstallPerm"></span>
@@ -521,6 +534,10 @@
             </div>
             <div style="border-top:1px solid var(--border); margin-top:10px; padding-top:10px;">
               <div class="card-hint" style="margin-bottom:8px;">roles <span class="card-subhint">— which connection does each job</span></div>
+              <!-- CONNECTIONS are global (they carry a credential); a role BINDING follows the
+                   profile. These selects edit the GLOBAL bindings, so this note names the live
+                   profile and any role it pins — which a global change here would NOT reach. -->
+              <div id="rolesProfileNote" class="roles-profile-note" hidden></div>
               <div id="rolesActive" class="roles-strip"></div>
               <button type="button" class="reserved-toggle" id="rolesReservedToggle" aria-expanded="false">
                 <span class="chev">›</span> reserved <span class="rr-count" id="rolesReservedCount"></span>
