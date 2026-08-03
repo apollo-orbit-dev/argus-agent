@@ -601,3 +601,64 @@ def test_post_run_with_nothing_running_is_unchanged():
     r = _client(eng).post("/run", json={"session_id": "dashboard", "text": "hello"})
     assert r.json()["answer"] == "ran"
     assert eng.ran == [("dashboard", "hello")]
+
+
+# ---- /stop means stop, including queued steers (maintainer decision, 2026-08-03) ----
+
+async def test_stop_discards_a_queued_steer_instead_of_delivering_it_late(tmp_path):
+    """A steer that outlived the run it was aimed at would come back as a fresh task — the
+    opposite of what /stop asked for."""
+    import asyncio
+    e = _engine(tmp_path, enable_steering=True)
+    late = []
+    e._deliver_late_steer = lambda sid, texts, origin: late.append((sid, texts))
+
+    started = asyncio.Event()
+
+    class _Model:
+        async def chat(self, messages, **kw):
+            started.set()
+            await asyncio.sleep(30)                    # hold the run open
+            return ModelResponse(content="never", finish_reason="stop")
+
+    e._model_client = lambda: _Model()
+    task = asyncio.create_task(e.run_task("s", "do the thing"))
+    await asyncio.wait_for(started.wait(), timeout=5)
+
+    assert e.steer("s", "actually use Lora Point")["ok"] is True
+    assert e._steering["s"].pending == ["actually use Lora Point"]
+
+    assert e.stop("s") is True
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    assert late == [], "a steer must not survive /stop and return as a new task"
+
+
+async def test_preempt_also_discards_a_queued_steer(tmp_path):
+    """Same reasoning: the message that replaced the run supersedes guidance aimed at it."""
+    import asyncio
+    e = _engine(tmp_path, enable_steering=True)
+    late = []
+    e._deliver_late_steer = lambda sid, texts, origin: late.append((sid, texts))
+    started = asyncio.Event()
+
+    class _Model:
+        async def chat(self, messages, **kw):
+            started.set()
+            await asyncio.sleep(30)
+            return ModelResponse(content="never", finish_reason="stop")
+
+    e._model_client = lambda: _Model()
+    task = asyncio.create_task(e.run_task("s", "do the thing"))
+    await asyncio.wait_for(started.wait(), timeout=5)
+    e.steer("s", "guidance for the old run")
+    assert await e.interrupt("s") is True
+    assert late == []
+    task.cancel()
+
+
+def test_abandon_is_safe_when_nothing_is_queued(tmp_path):
+    e = _engine(tmp_path, enable_steering=True)
+    assert e._abandon_steers("nope") == 0        # no channel at all

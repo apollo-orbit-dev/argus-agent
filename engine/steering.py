@@ -112,6 +112,16 @@ class SteerChannel:
         self.pending.append(text)
         return {"ok": True, "pending": len(self.pending)}
 
+    def abandon(self) -> int:
+        """Discard anything still queued, because the run is being ABANDONED (/stop, or preempted
+        by a new message). Returns how many were dropped.
+
+        /stop means stop: a steer that outlived the run it was meant to steer and came back as a
+        fresh task would be the opposite of what the user asked for. Same for a preempt — the
+        message that replaced the run supersedes the guidance aimed at it."""
+        n, self.pending = len(self.pending), []
+        return n
+
     def drain(self) -> list[str]:
         """Take every queued steer that never found a slot (called when the run ends)."""
         left, self.pending = list(self.pending), []

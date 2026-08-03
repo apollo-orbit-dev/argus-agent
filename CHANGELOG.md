@@ -46,6 +46,9 @@ All notable changes to this project are documented here.
   run. A steer that arrives after the model has already written its answer is not dropped and does
   not force an extra step — you are told it landed late and it runs as the next message.
   Dashboard: a "send to the running task" box on the console, plus the steer inline in the trace.
+  - **`/stop` means stop.** Anything queued to steer is discarded when the run is stopped or
+    preempted, rather than resurfacing as a fresh task — a steer must not outlive the run it
+    was aimed at.
   - **Upgrade note.** Previously a message sent mid-run CANCELLED that run and started over, discarding every tool call already made — a one-line correction cost the whole turn. It now redirects instead. If you relied on "send a message to interrupt", use `/stop` (still kills the run) or turn steering off in Settings → Mid-turn steering.
 
 ### Fixed

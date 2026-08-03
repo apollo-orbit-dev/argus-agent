@@ -2298,6 +2298,7 @@ class Engine:
         already executing in a worker thread can't be killed but its result is discarded."""
         t = self._running.get(session_id)
         if t is not None and not t.done():
+            self._abandon_steers(session_id)   # /stop means stop, including anything queued to steer
             t.cancel()
             return True
         return False
@@ -2309,12 +2310,20 @@ class Engine:
         t = self._running.get(session_id)
         if t is None or t.done():
             return False
+        self._abandon_steers(session_id)       # the new message supersedes guidance aimed at the old run
         t.cancel()
         try:
             await t
         except (asyncio.CancelledError, Exception):
             pass
         return True
+
+    def _abandon_steers(self, session_id: str) -> int:
+        """Drop anything queued on this session's steer channel. Called before cancelling a run so
+        run_task's `finally` finds nothing to deliver late — a steer must not outlive the run it was
+        aimed at. Safe when steering is off or nothing is queued."""
+        ch = self._steering.get(session_id)
+        return ch.abandon() if ch is not None else 0
 
     # ---- mid-turn steering ----
     def is_running(self, session_id: str) -> bool:
