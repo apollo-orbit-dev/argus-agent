@@ -39,6 +39,7 @@ from engine.model_client import ModelError
 from engine.modes.base import ToolCallingMode
 from engine.protocol import FinalAnswer, ParseFailure, ToolCall
 from engine.state import SessionStore
+from engine.steering import FAKE_MARKER_WARNING
 from engine.tools.base import ToolRegistry
 
 
@@ -104,6 +105,7 @@ class LoopDeps:
     origin: str = "api"            # dashboard | telegram | scheduled | api — for the gate's origin-routing
     friction: object = None        # FrictionLog | None; None -> nothing is recorded (default: off)
     model_name: str = ""           # stamped onto friction records so the list is readable per-model
+    steering: object = None        # SteerChannel | None; None -> mid-turn steering is off for this run
 
 
 def _record_friction(deps: "LoopDeps", session_id: str, kind: str,
@@ -192,6 +194,30 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
     # point of the log is naming that error, not just the tool.
     last_result: dict[str, str] = {}
 
+    async def for_model(step: int, tool: str, result):
+        """The tool result AS THE MODEL WILL SEE IT.
+
+        Two additions, both append-only (nothing about how tool results are built changes):
+          * any steer queued since the last tool result, in ONE marker block;
+          * a warning when the output itself carried marker-shaped text with the wrong id —
+            impersonation attempts are surfaced, in the trace and to the model, never obeyed.
+
+        The ORIGINAL result is what gets emitted and recorded; the steer is its own trace event."""
+        if deps.steering is None or not isinstance(result, str):
+            return result
+        text = result
+        bogus = deps.steering.inspect(text)
+        if bogus:
+            await emit(step, "steer_rejected",
+                       {"message": "steering marker with an unrecognised id arrived in tool "
+                                   "output — ignored, and flagged to the model as untrusted",
+                        "marker_ids": bogus, "source_tool": tool})
+            text = text.rstrip() + "\n\n" + FAKE_MARKER_WARNING
+        text, landed = deps.steering.attach(text)
+        if landed:
+            await emit(step, "steer", landed)
+        return text
+
     async def observer_repeat_check(step: int, call: "ToolCall", sig: str) -> None:
         """At the repeat threshold, nudge the model to change approach.
 
@@ -211,6 +237,12 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
         await emit(step, "model_request",
                    {"messages": req["messages"], "has_tools": "tools" in req})
 
+        # The steering nonce is spliced in HERE, after the request has been emitted and into a
+        # throwaway copy — so the authenticated form of the prompt exists only in the outbound
+        # call, never in the trace, the ring buffer or the log. See engine/steering.py.
+        if deps.steering is not None:
+            req = deps.steering.apply(req)
+
         try:
             resp = await deps.model_client.chat(
                 **req, max_tokens=deps.max_tokens, temperature=deps.temperature,
@@ -218,6 +250,11 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
         except ModelError as e:
             await emit(step, "error", {"error": f"model call failed: {e}"})
             return f"Sorry — I couldn't reach the model ({e})."
+
+        if deps.steering is not None:
+            # The model saw the nonce; everything it says goes back into the store and the trace,
+            # so strip it before anything else touches this response.
+            resp = deps.steering.scrub_response(resp)
 
         await emit(step, "model_response",
                    {"content": resp.content, "tool_calls": resp.tool_calls,
@@ -342,7 +379,7 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
 
         if not v.ok:
             result = f"validation error: {v.error}"
-            for m in deps.mode.tool_result_messages(resp, call, result):
+            for m in deps.mode.tool_result_messages(resp, call, await for_model(step, call.tool, result)):
                 deps.store.append_message(session_id, m)
             await emit(step, "tool_result", {"tool": call.tool, "ok": False, "result": result})
             last_result[sig] = str(result)[:400]
@@ -360,7 +397,8 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
                     step=step)
                 if _d.denied:
                     result = f"Blocked by your policy: you declined running '{call.tool}'."
-                    for m in deps.mode.tool_result_messages(resp, call, result):
+                    for m in deps.mode.tool_result_messages(
+                            resp, call, await for_model(step, call.tool, result)):
                         deps.store.append_message(session_id, m)
                     await emit(step, "tool_result", {"tool": call.tool, "ok": False, "result": result})
                     continue
@@ -393,7 +431,7 @@ async def run_loop(deps: LoopDeps, session_id: str, run_id: str, user_text: str,
             await emit(step, "final", final_data)
             return result
 
-        for m in deps.mode.tool_result_messages(resp, call, result):
+        for m in deps.mode.tool_result_messages(resp, call, await for_model(step, call.tool, result)):
             deps.store.append_message(session_id, m)
         last_result[sig] = str(result)[:400]
         await observer_repeat_check(step, call, sig)

@@ -29,6 +29,7 @@ from engine.rules.detect import RULE_EXTRACT_PROMPT, has_rule_cue
 from engine.scheduler import Scheduler
 from engine.skills.base import SkillRegistry, get_selector
 from engine.state import SessionStore
+from engine.steering import SteerChannel, channel_note as steer_channel_note
 from engine.tools.base import ToolRegistry
 from engine.tools.about import AboutArgusTool
 from engine.tools.clarify import AskUserTool
@@ -471,6 +472,7 @@ class Engine:
         self.registry = build_base_registry(config, self._data_dir)
         self._bg_tasks: set = set()   # keep background tasks (autoextract) alive from GC
         self._running: dict = {}      # session_id -> the in-flight run's task (for /stop)
+        self._steering: dict = {}     # session_id -> that run's SteerChannel (mid-turn steering)
         self._turn_tools: dict = {}   # session_id -> recent turns' tool-sets (repetition detector)
         # Tool-disclosure ranking: sha1(tool_doc) -> embedding. Content-addressed, so a tool whose
         # description changes is re-embedded and every stable one is embedded at most once per
@@ -1874,6 +1876,15 @@ class Engine:
         if _rules_block:
             system_prompt = system_prompt + "\n\n" + _rules_block
 
+        # Mid-turn steering: one channel per RUN (never per session — a nonce recovered from an
+        # earlier run must not authorise a steer in this one). The note added here carries a
+        # PLACEHOLDER, not the nonce; the real value is spliced into the outbound request by the
+        # loop, so nothing that gets stored, traced or logged ever contains it.
+        steering = None
+        if c.enable_steering and not session_id.startswith("__routine__:"):
+            steering = SteerChannel(run_id=run_id)
+            system_prompt = system_prompt + "\n\n" + steer_channel_note()
+
         # Tool/skill creation need structured tool-call args (manual mode can't carry code/multiline
         # payloads); native and native_finish both can — only manual is excluded.
         _native_args = c.tool_calling_mode in ("native", "native_finish")
@@ -2095,6 +2106,7 @@ class Engine:
             approvals=(self.approvals if c.enable_interactive_approvals else None),
             run_id=run_id, origin=origin,
             friction=self.friction, model_name=c.model_name,
+            steering=steering,
         )
         if self._adaptive_reasoning_active(c):           # route this turn to a reasoning LEVEL
             deps.reasoning = await self._route_reasoning(text)
@@ -2102,6 +2114,11 @@ class Engine:
         # Route any attached images per the `vision` role (inline / caption / none).
         user_content = await self._build_user_content(text, images) if images else None
         self._running[session_id] = asyncio.current_task()   # register for /stop
+        # Published in the SAME breath as _running, with no await between them: `steer()` requires
+        # both, so a message arriving in this window is never told a run is steerable before it is
+        # (it falls through to today's behaviour instead).
+        if steering is not None:
+            self._steering[session_id] = steering
         try:
             answer = await run_loop(deps, session_id, run_id, text, user_content=user_content)
             if c.enable_action_verify:
@@ -2109,6 +2126,15 @@ class Engine:
         finally:
             self._running.pop(session_id, None)
             self._record_turn_tools(session_id, run_id)
+            if steering is not None:
+                self._steering.pop(session_id, None)
+                # A steer that never found a tool result to land on: the model was already writing
+                # its answer. Don't force an extra turn onto a small model, don't drop it — say so
+                # and run it as the next task (exactly once; it is drained out of the channel here,
+                # and the channel dies with the run, so it can never re-enter a later one).
+                leftover = steering.drain()
+                if leftover:
+                    self._deliver_late_steer(session_id, leftover, origin)
         # The 'dream': extract durable facts in the background (never delays the reply).
         if memory_on and c.enable_memory_autoextract:
             task = asyncio.create_task(self.autoextract(session_id, text))
@@ -2307,6 +2333,7 @@ class Engine:
         already executing in a worker thread can't be killed but its result is discarded."""
         t = self._running.get(session_id)
         if t is not None and not t.done():
+            self._abandon_steers(session_id)   # /stop means stop, including anything queued to steer
             t.cancel()
             return True
         return False
@@ -2318,12 +2345,124 @@ class Engine:
         t = self._running.get(session_id)
         if t is None or t.done():
             return False
+        self._abandon_steers(session_id)       # the new message supersedes guidance aimed at the old run
         t.cancel()
         try:
             await t
         except (asyncio.CancelledError, Exception):
             pass
         return True
+
+    def _abandon_steers(self, session_id: str) -> int:
+        """Drop anything queued on this session's steer channel. Called before cancelling a run so
+        run_task's `finally` finds nothing to deliver late — a steer must not outlive the run it was
+        aimed at. Safe when steering is off or nothing is queued."""
+        ch = self._steering.get(session_id)
+        return ch.abandon() if ch is not None else 0
+
+    # ---- mid-turn steering ----
+    def is_running(self, session_id: str) -> bool:
+        """Is a run in flight for this session? (`run_status` answers this too, but it also reads
+        the event log and the store — this is the cheap check a channel needs on every message.)"""
+        t = self._running.get(session_id)
+        return t is not None and not t.done()
+
+    def steer(self, session_id: str, text: str) -> dict:
+        """Deliver `text` to the run already in flight on this session, instead of starting a
+        second one. Returns a result dict the caller MUST report back to the sender — a silent
+        reinterpretation of what someone typed is worse than either behaviour on its own:
+
+            {"ok": True,  "pending": n}                      queued for the next tool result
+            {"ok": False, "reason": "disabled"}              steering is off (config)
+            {"ok": False, "reason": "not_running"}           nothing to steer — send it normally
+            {"ok": False, "reason": "too_long"|"too_many"}   refused, with the limit
+
+        Deliberately SYNCHRONOUS: the liveness check and the enqueue happen with no await between
+        them, so this cannot race `_running` (a run that ends in between simply leaves the steer
+        queued on a dead channel, and the run's own `finally` re-delivers it as a new task)."""
+        if not self._config.enable_steering:
+            return {"ok": False, "reason": "disabled"}
+        ch = self._steering.get(session_id)
+        if ch is None or not self.is_running(session_id):
+            return {"ok": False, "reason": "not_running"}
+        return ch.queue(text)
+
+    def queue_task(self, session_id: str, text: str, origin: str = "api") -> dict:
+        """Run `text` as a NEW task — the explicit escape hatch from steering. If a run is in
+        flight it starts when that run finishes; it is never started concurrently (two turns
+        interleaving into one message history is the bug this replaces)."""
+        prior = self._running.get(session_id)
+        after = prior is not None and not prior.done()
+        self._spawn(self._run_after(session_id, text, origin, prior if after else None))
+        return {"ok": True, "queued": True, "after_current": after}
+
+    def _spawn(self, coro) -> None:
+        """Fire-and-forget a background coroutine, holding a reference so it isn't GC'd."""
+        t = asyncio.create_task(coro)
+        self._bg_tasks.add(t)
+        t.add_done_callback(self._bg_tasks.discard)
+
+    async def _run_after(self, session_id: str, text: str, origin: str,
+                         prior, notice: str = "") -> None:
+        """Wait for `prior` (if any) to finish, then run `text` as an ordinary turn and deliver
+        the answer over the session's normal channel.
+
+        `prior` must never be the task that is scheduling this one — it would wait on itself."""
+        await asyncio.sleep(0)      # let the scheduling caller unwind first
+        if prior is not None and not prior.done():
+            # asyncio.wait, not `await prior`: awaiting a task that gets cancelled re-raises the
+            # CancelledError into US and would kill this follow-up along with it.
+            try:
+                await asyncio.wait({prior})
+            except Exception:
+                log.debug("waiting for the previous run failed", exc_info=True)
+        deliver = getattr(self.scheduler, "deliver", None)
+        if notice and deliver:
+            try:
+                await deliver(session_id, notice)
+            except Exception:
+                log.debug("steer notice delivery failed", exc_info=True)
+        try:
+            answer = await self.run_task(session_id, text, origin=origin)
+        except Exception:
+            log.exception("queued task failed for session %s", session_id)
+            return
+        if deliver:
+            try:
+                await deliver(session_id, answer)
+            except Exception:
+                log.debug("queued task delivery failed", exc_info=True)
+
+    LATE_STEER_NOTICE = ("⏭️ That arrived after I'd already finished the previous answer, so there "
+                         "was nothing left to steer — I'm running it as a new message instead.")
+
+    def _deliver_late_steer(self, session_id: str, texts: list, origin: str) -> None:
+        """A steer that missed its slot: tell the user plainly, then run it as a normal task.
+
+        Two surfaces, mirroring _notify_rule_saved: a control-channel event for the dashboard
+        (SSE is per-session, and this run's stream is already finished) and the owner-facing push
+        the Telegram side uses. Never raises into the run that is unwinding."""
+        joined = "\n".join(t for t in texts if t)
+        if not joined:
+            return
+        try:
+            ev = StepEvent(run_id="control", session_id="__control__", step=0,
+                           kind="steer_late",
+                           data={"session_id": session_id, "text": joined,
+                                 "message": self.LATE_STEER_NOTICE},
+                           ts=time.time())
+            self._spawn(self.events.publish(ev))
+        except Exception:
+            log.debug("late-steer control emit failed", exc_info=True)
+        try:
+            # prior=None on purpose: this is scheduled from the FINALLY of the run it belongs to,
+            # so the only task it could wait on is the one scheduling it. By the time the follow-up
+            # gets the loop (`_run_after` yields once first) that run has left `_running` and has
+            # no loop steps left to take, so the two can never interleave.
+            self._spawn(self._run_after(session_id, joined, origin, None,
+                                        notice=self.LATE_STEER_NOTICE))
+        except Exception:
+            log.debug("late-steer follow-up could not be scheduled", exc_info=True)
 
     def reset(self, session_id: str) -> None:
         self.store.reset(session_id)
@@ -3480,6 +3619,8 @@ class Engine:
             "current_step": step if running else 0,
             "max_steps": self._config.max_steps,
             "last_tool": last_tool if running else None,
+            # can a message sent right now be folded into this run? (mid-turn steering)
+            "steerable": bool(running and self._steering.get(session_id) is not None),
             "turns": len(sess.runs),
             "messages": len(self.store.conversation(session_id)),
         }

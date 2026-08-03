@@ -37,6 +37,36 @@ class RunRequest(BaseModel):
     text: str
     skill: Optional[str] = None
     images: Optional[list] = None   # data: URLs or http(s) URLs, routed via the vision role
+    # Escape hatch from mid-turn steering: force this text to be a NEW task even if a run is in
+    # flight (it is queued behind that run, never started concurrently). `/task …` / `/new …` in
+    # the text does the same thing, so the affordance exists for a plain chat box too.
+    new_task: bool = False
+
+
+class SteerRequest(BaseModel):
+    session_id: str = "dashboard"
+    text: str
+
+
+# `/task <text>` and `/new <text>` typed into any plain message box mean "not a steer — a new task".
+_NEW_TASK_PREFIX = re.compile(r"^/(?:task|new)\s+", re.I)
+
+
+def _steer_reply(res: dict, text: str) -> Optional[dict]:
+    """Turn a `engine.steer()` result into the JSON body for a call that has been interpreted as a
+    steer (or refused as one). None means "not a steer — run it normally"."""
+    if res.get("ok"):
+        return {"answer": "", "steered": True, "pending": res.get("pending", 1),
+                "message": "↪ Steering the running task — it lands at the next step."}
+    if res.get("reason") == "too_long":
+        return {"answer": "", "steered": False, "refused": "too_long",
+                "message": f"That's {res.get('length', len(text))} characters — a steer is capped "
+                           f"at {res.get('limit')}. Send a shorter note, or /stop and start over."}
+    if res.get("reason") == "too_many":
+        return {"answer": "", "steered": False, "refused": "too_many",
+                "message": f"There are already {res.get('limit')} notes waiting for the agent's "
+                           "next step. Let it catch up before sending more."}
+    return None
 
 
 def _sse(ev) -> str:
@@ -74,9 +104,43 @@ def create_app(engine: Engine) -> FastAPI:
         # shim already injects X-Admin-Token, so this is transparent to the UI; the Telegram bot calls
         # engine.run_task directly and never touches this route.
         _require_admin(request)
-        answer = await engine.run_task(req.session_id, req.text, requested_skill=req.skill,
+        text, force_new = req.text, req.new_task
+        if _NEW_TASK_PREFIX.match(text or ""):
+            text, force_new = _NEW_TASK_PREFIX.sub("", text, count=1), True
+        if force_new:
+            # Never concurrent: if a run is in flight this waits for it, so one session never has
+            # two turns interleaving into one message history.
+            if getattr(engine, "is_running", lambda _s: False)(req.session_id):
+                engine.queue_task(req.session_id, text, origin="dashboard")
+                return {"answer": "", "session_id": req.session_id, "queued": True,
+                        "message": "Queued as a new task — it starts when the current one finishes."}
+        elif not req.images:
+            # A plain message sent while a run is in flight is a STEER, not a second run.
+            # Returns not_running/disabled (and falls through to a normal turn) unless the engine
+            # really has a steerable run right now.
+            reply = _steer_reply(engine.steer(req.session_id, text), text) \
+                if hasattr(engine, "steer") else None
+            if reply is not None:
+                return {**reply, "session_id": req.session_id}
+        answer = await engine.run_task(req.session_id, text, requested_skill=req.skill,
                                        images=req.images, origin="dashboard")
         return {"answer": answer, "session_id": req.session_id}
+
+    @app.post("/steer")
+    async def steer(req: SteerRequest, request: Request):
+        """Send a message to the run already in flight on this session (the API mirror of the
+        dashboard's 'send to the running task' box). Never starts a run: with nothing in flight it
+        answers not_running and the caller decides what to do."""
+        _require_admin(request)
+        res = engine.steer(req.session_id, req.text)
+        reply = _steer_reply(res, req.text)
+        if reply is not None:
+            return {**reply, "session_id": req.session_id}
+        return {"answer": "", "steered": False, "reason": res.get("reason", "not_running"),
+                "session_id": req.session_id,
+                "message": ("Mid-turn steering is switched off (ENABLE_STEERING)."
+                            if res.get("reason") == "disabled"
+                            else "Nothing is running on this session right now.")}
 
     @app.get("/version")
     async def version():

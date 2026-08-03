@@ -129,6 +129,13 @@
               <button class="btn btn-icon toolbar-newsession-btn" id="newSessionBtn" title="Reset conversation — clears the model's working context and trace, keeps the transcript" aria-label="Reset conversation">↺</button>
             </div>
             <span class="card-hint toolbar-run-status" id="runStatus">idle</span>
+            <!-- Mid-turn steering: only usable while this session has a run in flight, so it is
+                 hidden the rest of the time (shown by syncRunControls()). -->
+            <div class="toolbar-steer" id="steerBar" hidden>
+              <input id="steerInput" type="text" autocomplete="off"
+                     placeholder="Send to the running task… (changes course without stopping it)">
+              <button class="btn btn-sm" id="steerBtn">↪ Steer</button>
+            </div>
           </div>
 
           <div class="toolbar-divider" aria-hidden="true"></div>
@@ -656,6 +663,18 @@
             <button class="btn btn-sm" id="updateRevertBtn" style="display:none;">Revert</button>
           </div>
           <pre class="sandbox-output" id="updateOutput" style="display:none;"></pre>
+        </div>
+
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-head"><span class="card-title">Mid-turn steering</span></div>
+          <div class="field row-inline" style="justify-content:space-between;">
+            <label class="switch"><input type="checkbox" id="swSteering"><span class="track"><span class="thumb"></span></span>Steer a running task</label>
+            <span class="field-note">applies immediately</span>
+          </div>
+          <div class="field-note">On: a message sent while the agent is working is folded into that run
+            at its next step, so the work already done is kept. Off: the new message <strong>cancels</strong>
+            the run and starts over, discarding every tool call so far. Either way <code>/stop</code> stops
+            the run and <code>/task &lt;text&gt;</code> queues a new one.</div>
         </div>
 
         <div class="card" style="margin-bottom:16px;">

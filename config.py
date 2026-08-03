@@ -253,6 +253,13 @@ class Config(BaseSettings):
     # Interactive approvals: sensitive actions block the turn for a human OK
     enable_interactive_approvals: bool = True  # sensitive actions block the turn for a human OK
     approval_window_seconds: int = 60          # how long a gate waits before falling back to pending
+    # Mid-turn steering: a message sent WHILE a run is in flight is folded into that run (appended
+    # to its next tool result) instead of preempting it. ON by default: the behaviour it replaces
+    # CANCELS the in-flight run and discards every tool call already made, so a mid-run correction
+    # used to cost the whole turn. Forgery is structurally impossible (per-run nonce), `/stop` still
+    # stops, and `/task <text>` still queues a new task — so this is a UX default, not a safety one.
+    # Turn it off to restore preempt-and-restart.
+    enable_steering: bool = True
     # Memory scoping. Default "global": memory is about the *user*, not the interface,
     # so what you tell the dashboard is recalled in Telegram and vice-versa. Set
     # "session" to isolate memory per conversation (e.g. a multi-user Telegram bot).
@@ -336,7 +343,7 @@ class Config(BaseSettings):
         "smtp_user", "smtp_password", "ntfy_topic", "ntfy_server", "notify_fanout",
         "enable_scheduler", "enable_clarify", "enable_observer", "observer_repeat_threshold",
         "enable_memory", "semantic_recall", "embedding_base_url", "embedding_model", "embedding_api_key",
-        "enable_memory_autoextract", "enable_auto_title_session", "enable_rules", "enable_rules_autodetect", "enable_interactive_approvals", "approval_window_seconds", "memory_scope", "memory_user_id",
+        "enable_memory_autoextract", "enable_auto_title_session", "enable_rules", "enable_rules_autodetect", "enable_interactive_approvals", "approval_window_seconds", "enable_steering", "memory_scope", "memory_user_id",
         "host", "port", "log_file", "ssl_certfile", "ssl_keyfile",
         "telegram_bot_token", "allowed_chat_ids", "admin_token",
     )
