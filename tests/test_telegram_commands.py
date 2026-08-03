@@ -652,3 +652,211 @@ async def test_no_ack_when_nothing_is_pending(monkeypatch):
         sent.append(text)
     await deliver_pending_update_notice(NS(bot=NS(send_message=send_message)))
     assert sent == []
+
+
+# --------------------------------------------------------------------------
+# /profiles, /profile (argus-3gf) — READ and SWITCH from the phone.
+#
+# Driven against a REAL Engine (same as tests/test_profiles.py) rather than a stub, because the
+# load-bearing claims are about the STORE: that `/profile <name>` binds one session and leaves both
+# the other session's binding and the global default alone. A fake engine could not fail those.
+# --------------------------------------------------------------------------
+class _PCfg:
+    telegram_bot_token = "123:abc"
+    allowed_chat_ids = [1, 2]
+
+
+def _profile_engine(tmp_path):
+    """An engine with three profiles: the migration's `Default`, a narrow `Assistant` and a wider
+    `Homelab admin` that widens exactly two tools over it."""
+    from config import Config
+    from engine.engine import Engine
+    from engine.profiles.store import Profile
+
+    e = Engine(Config(model_base_url="http://x/v1", model_name="m", telegram_bot_token=""),
+               data_dir=str(tmp_path))
+    all_tools = e.profile_detail("Default")["all_tools"]
+    assert "calculator" in all_tools and "get_current_time" in all_tools
+    narrow = Profile(name="Assistant", description="Personal assistant",
+                     tools={n: "ask" for n in all_tools})
+    narrow.tools["calculator"] = "deny"
+    wide = Profile(name="Homelab admin", description="Runs the homelab",
+                   tools={n: "ask" for n in all_tools})
+    wide.tools["calculator"] = "allow"            # deny -> allow : WIDER
+    wide.tools["get_current_time"] = "allow"      # ask  -> allow : WIDER
+    e.profiles.create(narrow)
+    e.profiles.create(wide)
+    return e
+
+
+async def _profile_cmd(engine, cmd, args, chat_id=1):
+    from types import SimpleNamespace as NS
+    app = build_telegram_app(engine=engine, config=_PCfg())
+    handlers = {c: h.callback for h in app.handlers[0] for c in (getattr(h, "commands", None) or [])}
+    msg = _Msg()
+    await handlers[cmd](NS(effective_chat=NS(id=chat_id), effective_message=msg), NS(args=args))
+    return "\n".join(msg.sent)
+
+
+# 1. /profiles lists every profile and marks the one bound to this chat.
+async def test_profiles_lists_all_and_marks_the_one_bound_to_this_chat(tmp_path):
+    e = _profile_engine(tmp_path)
+    e.profiles.bind("1", "Homelab admin")
+    out = await _profile_cmd(e, "profiles", [])
+    for name in ("Default", "Assistant", "Homelab admin"):
+        assert name in out, f"{name} missing from /profiles"
+    assert out.count("← active in this chat") == 1
+    marked = next(ln for ln in out.splitlines() if "← active in this chat" in ln)
+    assert "Homelab admin" in marked
+    assert "(default for new sessions)" in out          # the GLOBAL default is marked separately
+
+
+# 2. /profile <name> rebinds THIS chat only — the other chat and the global default are untouched.
+async def test_profile_switch_binds_this_session_only(tmp_path):
+    e = _profile_engine(tmp_path)
+    e.profiles.bind("2", "Assistant")                   # a second chat, bound elsewhere
+    default_before = e.profiles.active_profile
+    await _profile_cmd(e, "profile", ["Homelab", "admin"], chat_id=1)
+    assert e.profiles.name_for_session("1") == "Homelab admin"
+    assert e.profiles.name_for_session("2") == "Assistant"
+    assert e.profiles.active_profile == default_before, "the GLOBAL default must not move"
+
+
+# 3. The switch reply names every tool that WIDENED, and says so explicitly when none did.
+async def test_switch_reply_announces_widened_tools(tmp_path):
+    e = _profile_engine(tmp_path)
+    e.profiles.bind("1", "Assistant")
+    out = await _profile_cmd(e, "profile", ["Homelab", "admin"])
+    assert "Homelab admin" in out
+    assert "calculator (deny → allow)" in out
+    assert "get_current_time (ask → allow)" in out
+    assert 'Wider than "Assistant"' in out
+
+
+async def test_switch_reply_says_so_when_nothing_widened(tmp_path):
+    # Silence would read as "not checked" — the no-widening case must be stated.
+    e = _profile_engine(tmp_path)
+    e.profiles.bind("1", "Homelab admin")
+    out = await _profile_cmd(e, "profile", ["Assistant"])     # strictly narrower
+    assert "Nothing widened" in out
+    assert "→ allow" not in out
+
+
+# 4. An unknown name is refused, the valid names are listed, and nothing is rebound.
+async def test_unknown_profile_is_refused_without_fuzzy_matching(tmp_path):
+    e = _profile_engine(tmp_path)
+    e.profiles.bind("1", "Assistant")
+    out = await _profile_cmd(e, "profile", ["Homelab"])       # a prefix of a real profile
+    assert "No profile named: Homelab" in out
+    for name in ("Default", "Assistant", "Homelab admin"):
+        assert name in out
+    assert e.profiles.name_for_session("1") == "Assistant", "a near-miss must not switch anything"
+    assert "✓" not in out
+
+
+# 5. Bare /profile reports the active profile for this chat and changes nothing.
+async def test_bare_profile_reports_without_changing_anything(tmp_path):
+    e = _profile_engine(tmp_path)
+    before = dict(e.profiles.sessions)
+    default_before = e.profiles.active_profile
+    out = await _profile_cmd(e, "profile", [])
+    assert f"Active in this chat: {default_before}" in out
+    assert e.profiles.sessions == before, "a read must not create a binding"
+    assert e.profiles.active_profile == default_before
+
+    e.profiles.bind("1", "Homelab admin")
+    out = await _profile_cmd(e, "profile", [])
+    assert "Active in this chat: Homelab admin" in out
+    assert e.profiles.sessions == {"1": "Homelab admin"}
+
+
+# 6. With a run in flight the reply says it applies next turn, and the run is left alone.
+async def test_switch_during_a_run_applies_next_turn_and_leaves_the_run_alone(tmp_path):
+    import asyncio
+
+    e = _profile_engine(tmp_path)
+    e.profiles.bind("1", "Assistant")
+    interrupts = []
+
+    async def _never_finishes():
+        await asyncio.sleep(30)
+
+    async def _interrupt(session_id):
+        interrupts.append(session_id)
+        return False
+    e.interrupt = _interrupt
+    task = asyncio.create_task(_never_finishes())
+    e._running["1"] = task
+    try:
+        await asyncio.sleep(0)
+        out = await _profile_cmd(e, "profile", ["Homelab", "admin"])
+        assert "next message" in out
+        assert "keeps the profile it started under" in out
+        assert not task.done() and not task.cancelled(), "the in-flight run must not be cancelled"
+        assert interrupts == [], "a slash command must not preempt the running turn"
+        assert e.profiles.name_for_session("1") == "Homelab admin"
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+async def test_switch_with_no_run_in_flight_omits_the_next_turn_wording(tmp_path):
+    e = _profile_engine(tmp_path)
+    e.profiles.bind("1", "Assistant")
+    out = await _profile_cmd(e, "profile", ["Homelab", "admin"])
+    assert "next message" not in out
+
+
+# 7. Both commands reach /help, which is generated from BOT_COMMANDS.
+def test_profile_commands_are_advertised_in_help():
+    from backend.telegram_bot import help_text
+    cmds = dict(BOT_COMMANDS)
+    assert "profile" in cmds and "profiles" in cmds
+    text = help_text()
+    assert "/profiles —" in text and "/profile —" in text
+
+
+def test_profile_names_are_not_shadowable_by_a_custom_alias():
+    from engine.custom_commands import RESERVED_COMMANDS
+    assert {"profile", "profiles"} <= RESERVED_COMMANDS
+
+
+# --- the pure renderers (a long list must not be refused by Telegram) ---
+def test_profiles_text_splits_rather_than_being_refused():
+    from backend.telegram_bot import (
+        TELEGRAM_MAX_CHARS,
+        profiles_text,
+        split_for_telegram,
+    )
+    rows = [{"name": f"profile_{i}", "description": "d" * 120, "is_default": i == 0,
+             "sessions": [], "denied": [], "hidden_skills": [], "stale_tools": [], "stale_count": 0}
+            for i in range(60)]
+    text = profiles_text({"profiles": rows, "session_profile": "profile_3", "session_id": "1",
+                          "active_profile": "profile_0"})
+    assert len(text) > TELEGRAM_MAX_CHARS                     # the case the splitter exists for
+    chunks = split_for_telegram(text, limit=TELEGRAM_MAX_CHARS)
+    assert len(chunks) > 1
+    assert all(len(c) <= TELEGRAM_MAX_CHARS for c in chunks)
+
+
+def test_widened_text_lists_every_widened_tool():
+    from backend.telegram_bot import widened_text
+    w = [{"tool": "exec_python", "from": "ask", "to": "allow"},
+         {"tool": "delete_row", "from": "deny", "to": "ask"}]
+    out = widened_text(w, "Assistant")
+    assert "exec_python (ask → allow)" in out
+    assert "delete_row (deny → ask)" in out
+    assert "Assistant" in out
+
+
+def test_profile_shape_line_reports_the_staleness_count():
+    from backend.telegram_bot import profile_shape_line
+    line = profile_shape_line({"denied": ["a", "b"], "hidden_skills": ["s"], "stale_count": 4},
+                              total_tools=14)
+    assert "12 tools" in line and "2 denied" in line
+    assert "1 skill hidden" in line
+    assert "4 not configured (Ask)" in line
+    assert profile_shape_line({}, total_tools=0) == ""

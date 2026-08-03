@@ -16,7 +16,8 @@ import yaml
 # Built-in Telegram commands a custom alias must not shadow (built-ins are handled first anyway).
 RESERVED_COMMANDS = {
     "start", "help", "new", "reset", "usage", "compact", "mode", "model", "models", "reasoning",
-    "roles", "role", "reembed", "skills", "tools", "cron", "retry", "memories", "forget", "status",
+    "roles", "role", "profiles", "profile", "reembed", "skills", "tools", "cron", "retry",
+    "memories", "forget", "status",
     "stop", "restart", "verbose", "pending", "approve", "deny",
 }
 

@@ -30,6 +30,12 @@ All notable changes to this project are documented here.
   - **Migration is a no-op for existing installs:** with no `profiles.json`, the current settings
     become a profile named `Default` that is active and default, and the engine's resolved config is
     identical to what it was before.
+  - **Reachable from Telegram:** `/profiles` lists them, marking the one active in *this* chat and
+    the global default; `/profile` reports which one this chat runs under and why; `/profile <name>`
+    binds **this chat only** (never the global default) and replies with the same widened-tools
+    announcement the dashboard toasts — stated explicitly when nothing widened, because silence
+    would read as "not checked". An unknown name is refused with the valid names and no fuzzy
+    matching. Creating, renaming, deleting and editing a matrix stay in the dashboard.
 
 ## 0.15.1
 
