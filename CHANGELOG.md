@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## 0.16.0
 
 ### Added
 - **Agent profiles.** A named, switchable **snapshot** of what Argus is for a task — persona (SOUL),
@@ -36,6 +36,14 @@ All notable changes to this project are documented here.
     announcement the dashboard toasts — stated explicitly when nothing widened, because silence
     would read as "not checked". An unknown name is refused with the valid names and no fuzzy
     matching. Creating, renaming, deleting and editing a matrix stay in the dashboard.
+  - **Editing a profile.** The active profile is shown as a chip in the header on every page and is
+    itself the switcher — picking one rebinds this session (never the global default) and announces
+    any tool whose permission got *wider*, the same as activating from Settings. Skill visibility and
+    the `chat` model binding are edited in the profile's own editor; connections (URL, key, model
+    name) stay global, because a connection carries a credential and a binding does not. The
+    Developer page names the profile whose permissions it is editing, so re-permissioning the wrong
+    profile is not something you can do by accident.
+
 - **Mid-turn steering (`ENABLE_STEERING`, ON by default — this CHANGES what a plain message does while the agent is working).** Send a message *while* the agent is
   working and it changes course inside that run instead of cancelling it. The text is appended to
   the run's next tool result inside a bounded marker — the only mid-turn slot that doesn't break

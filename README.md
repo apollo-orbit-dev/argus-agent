@@ -22,7 +22,7 @@ tool contracts, deterministic execution paths where it matters, and a verifier w
 over-claiming — to be dependable. Point it at a frontier model over an API and it works great too;
 point it at a 3B model on your own GPU and the harness is what keeps it honest.
 
-![The Argus dashboard — the live trace after a calculator tool call](docs/screenshot.png)
+![The Argus dashboard — the live trace of a two-tool run: the model's reasoning, the tool call with its arguments, the contract validation, and the result](docs/screenshot.png)
 
 ## What makes it different
 
